@@ -12,6 +12,7 @@ mod discovery;
 mod environment;
 mod error;
 mod forward;
+mod helm;
 mod keyboard;
 mod list;
 mod logs;
@@ -45,6 +46,11 @@ pub use error::{ErrorCode, ErrorKind, IpcError, ServerCause, ServerStatus};
 pub use forward::{
     BusyWhy, Forward, ForwardEvent, ForwardId, ForwardPort, ForwardPorts, ForwardStarted,
     ForwardState, ForwardTarget, ResumeForward, StartForward,
+};
+pub use helm::{
+    CompareRevisions, ComparedPart, ComparedRevisions, HelmPart, ManifestSecret, OpenRelease,
+    ReleaseBatch, ReleaseListQuery, ReleaseManifest, ReleaseParts, ReleaseRef, ReleaseValues,
+    RevisionLine, Scrubbed, SetReleaseView, UnreadDocument, ValueStep,
 };
 pub use keyboard::{KeyMapping, KeyboardLayout};
 pub use list::{

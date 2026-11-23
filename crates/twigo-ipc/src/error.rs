@@ -305,6 +305,19 @@ error_codes! {
     SecretNotASecret = "secret.not-a-secret", InvalidInput;
     SecretNoKey = "secret.no-key", NotFound;
 
+    // A release Secret that does not hold a release Twigo can read.
+    /// Not base64, not gzip or JSON, not a release, or labels that its
+    /// payload does not match.
+    HelmNotARelease = "helm.not-a-release", InvalidInput;
+    /// Its gzip stream or JSON ends early.
+    HelmTruncated = "helm.truncated", InvalidInput;
+    /// It inflates past the bound Twigo reads a release to.
+    HelmTooLarge = "helm.too-large", InvalidInput;
+    /// A revision asked for that Helm no longer keeps.
+    HelmRevisionGone = "helm.revision-gone", NotFound;
+    /// A Reveal's place that the revision does not hold.
+    HelmNoValue = "helm.no-value", NotFound;
+
     ProxyActorRefused = "proxy.actor-refused", InvalidInput;
     ProxyUnbound = "proxy.unbound", Internal;
     LinkRefused = "link.refused", InvalidInput;

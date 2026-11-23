@@ -16,7 +16,7 @@ use twigo_cache::batcher::FLUSH;
 use twigo_cache::hub::{Delta, Hub, Query, Resource, RowFormat, Subscription};
 use twigo_cache::metrics::{Kind, Opening, Reader, Sample, Scope, Update};
 use twigo_cache::object::Object;
-use twigo_cache::request::field_value;
+use twigo_cache::request::{Selectors, field_value};
 use twigo_cache::table::{Cell, Column, ColumnKind, Row};
 use twigo_describe::{Fact, Found, Input, Need, Owned, Printed};
 use twigo_ipc::{
@@ -127,9 +127,13 @@ impl Reading {
     }
 }
 
-/// A ConfigMap's text values; any other kind's refused, a Secret's above all.
+/// A ConfigMap's text values; any other kind's refused, a Secret's above all,
+/// and a ConfigMap's that holds a Helm release.
 fn values_of(object: &Value, keys: &[String]) -> Result<Vec<Option<String>>, IpcError> {
-    if object["apiVersion"] != "v1" || object["kind"] != "ConfigMap" {
+    if object["apiVersion"] != "v1"
+        || object["kind"] != "ConfigMap"
+        || twigo_policy::redact::holds_helm_release(object)
+    {
         return Err(IpcError::new(
             ErrorCode::ObjectValuesWithheld,
             "only a ConfigMap's values are sent".to_owned(),
@@ -977,7 +981,7 @@ async fn owned_of(hub: &Hub, target: &Target, object: &Value) -> Vec<(Owned, Sub
             },
             format: RowFormat::Metadata,
             namespaces: vec![namespace.clone()],
-            field_selector: None,
+            selectors: Selectors::default(),
         };
         if let Ok(subscription) = hub.rows(query).await {
             held.push((*owned, subscription));
@@ -1207,6 +1211,54 @@ mod tests {
             values_of(&config, &keys).unwrap(),
             [None, Some("fast".to_owned()), None]
         );
+    }
+
+    #[test]
+    fn a_config_map_that_holds_a_helm_release_shows_its_size_and_withholds_it() {
+        let release = json!({
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": {
+                "name": "sh.helm.release.v1.gamma.v1",
+                "namespace": "fmt-c",
+                "labels": { "owner": "helm", "name": "gamma", "version": "1" },
+                "annotations": {
+                    "kubectl.kubernetes.io/last-applied-configuration":
+                        "{\"data\":{\"release\":\"H4sIAAAAAAAC/5RU227bOBD9\"}}",
+                },
+            },
+            "data": { "release": "H4sIAAAAAAAC/5RU227bOBD9" },
+        });
+        let related = Related::default();
+        let batch = Shown {
+            parts: ObjectParts {
+                overview: true,
+                manifest: true,
+                events: false,
+                related: false,
+                usage: false,
+            },
+            dirty: &Dirty::all(),
+            object: Some(&release),
+            printed: &[],
+            events: &EventList::default(),
+            related: &related,
+            facts: &[],
+            usage: None,
+        }
+        .batch(1, ViewState::Ready);
+        let manifest = batch.manifest.unwrap();
+        assert!(
+            manifest.contains("\"release\":\"<24 bytes>\""),
+            "{manifest}"
+        );
+        let sent = serde_json::to_string(&batch.overview).unwrap();
+        assert!(
+            !sent.contains("H4sI") && !manifest.contains("H4sI"),
+            "{sent}"
+        );
+        let refused = values_of(&release, &["release".to_owned()]).unwrap_err();
+        assert_eq!(refused.code, ErrorCode::ObjectValuesWithheld);
     }
 
     #[tokio::test]

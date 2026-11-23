@@ -5,11 +5,14 @@
 //!
 //! The configuration holds a Secret's real values, since Twigo may own keys
 //! it applied before, so nothing built from it leaves Rust unmasked: both
-//! sides of the diff go through [`for_view`], warnings and error text are
-//! scrubbed of every value it knows, what the dry-run's answer adds
-//! included, whole tokens only, a plan names no value, and a Secret's
-//! `kubectl` line carries no body, so it stops being runnable at `-f -`,
-//! where the configuration would go on stdin.
+//! sides of the diff go through [`for_view_as`], a ConfigMap's `release`
+//! masked on both where the object opened, the edit, the live object or
+//! the answer holds a Helm release, warnings and error text are scrubbed of
+//! every value it knows, what the dry-run's answer adds included, whole
+//! tokens only and none shorter than four characters, a plan names no value, and the `kubectl` line of a Secret,
+//! or of a ConfigMap that holds a Helm release, carries no body, so it
+//! stops being runnable at `-f -`, where the configuration would go on
+//! stdin.
 //!
 //! A merge patch cannot address a list element, so a removal inside a list
 //! sends the outermost list on its path whole, as it stands after the
@@ -34,12 +37,9 @@
 //! Deployment controller's revision annotation, and it rebuilds from what
 //! the server holds now.
 
-use std::collections::BTreeSet;
 use std::sync::Weak;
 use std::time::Duration;
 
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD;
 use http::Method;
 use http::header::WARNING;
 use http_body_util::BodyExt;
@@ -62,18 +62,17 @@ use twigo_kube::discovery::Discovery;
 use twigo_kube::errors;
 use twigo_kube::openapi::Document;
 use twigo_policy::friction::Risk;
-use twigo_policy::redact::{for_view, is_mask, whole_tokens_replaced};
+use twigo_policy::redact::{
+    Field, entries, for_view_as, holds_helm_release, is_mask, scrub, scrubbed, secret_values,
+};
 use twigo_policy::{Actor, Attributes};
 
 use super::dependents::{Deleted, dependents};
 use super::{
-    ATTEMPTS, Target, attributes, clients_for, get, kind_words, kubectl, lost, sentence, write,
+    ATTEMPTS, Target, attributes, clients_for, get, kind_words, lost, sentence, shell_line, write,
 };
 use crate::Core;
 use crate::bus::{self, Finished, Planned, Previewed, Progress};
-
-/// What takes the place of a value in a message.
-const HIDDEN: &str = "<hidden>";
 
 /// What a preview prepared, sent by the plan of its id.
 pub(crate) struct Prepared {
@@ -238,98 +237,6 @@ fn invalid_body(message: &str) -> bool {
         || message.starts_with("failed to convert new object")
 }
 
-/// Takes every value in `secrets` out of `text`, where it stands as a whole
-/// token, so that a short value does not garble the words around it. For a
-/// Secret the patched object a refusal quotes goes whole, as no token matches
-/// what the server wrote of its values: JSON, HTML characters escaped, quoted
-/// again as a string ([`applyPatchToCurrentObject`]'s `field.Invalid`).
-///
-/// [`applyPatchToCurrentObject`]: https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/patch.go#L356-L358
-fn scrub(text: &str, secrets: &[String]) -> String {
-    let text = if secrets.is_empty() {
-        text.to_owned()
-    } else {
-        without_quoted_object(text)
-    };
-    whole_tokens_replaced(&text, secrets, |_| HIDDEN.to_owned())
-}
-
-/// `text` with the object of a `patch: Invalid value: "…"` left out.
-fn without_quoted_object(text: &str) -> String {
-    const OPENING: &str = "patch: Invalid value: \"";
-    let Some(start) = text.find(OPENING).map(|at| at + OPENING.len()) else {
-        return text.to_owned();
-    };
-    let mut escaped = false;
-    for (index, c) in text[start..].char_indices() {
-        match c {
-            _ if escaped => escaped = false,
-            '\\' => escaped = true,
-            '"' => {
-                return format!(
-                    "{}{HIDDEN}{}",
-                    &text[..start - 1],
-                    &text[start + index + 1..]
-                );
-            }
-            _ => {}
-        }
-    }
-    text.to_owned()
-}
-
-/// `error` with its message scrubbed of `secrets`; for a Secret the causes
-/// keep only their reason and field, as each cause's message quotes the
-/// patched object in a spelling no value matches: the object's JSON, HTML
-/// characters escaped, quoted again as a string ([`NewInvalid`] writes a
-/// cause's `ErrorBody()` and the message's `Error()`, which `scrub` cuts
-/// only at `patch: Invalid value: "`).
-///
-/// [`NewInvalid`]: https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/apimachinery/pkg/api/errors/errors.go#L284-L312
-fn scrubbed(mut error: IpcError, secrets: &[String]) -> IpcError {
-    error.message = scrub(&error.message, secrets);
-    if !secrets.is_empty() {
-        for cause in error
-            .server
-            .iter_mut()
-            .flat_map(|server| &mut server.causes)
-        {
-            cause.message.clear();
-        }
-    }
-    error
-}
-
-/// Every value of a Secret's `data` and `stringData` in `objects`, encoded
-/// and decoded, the longest first, so that what a refusal echoes is covered
-/// before any answer shows how the server stored it; empty for any other
-/// kind.
-fn secret_values(objects: &[&Value]) -> Vec<String> {
-    let mut values = BTreeSet::new();
-    for object in objects {
-        for (field, encoded) in [("data", true), ("stringData", false)] {
-            let items = object[field].as_object();
-            for value in items.into_iter().flat_map(|items| items.values()) {
-                let Some(text) = value.as_str().filter(|text| !text.is_empty()) else {
-                    continue;
-                };
-                values.insert(text.to_owned());
-                if !encoded {
-                    values.insert(STANDARD.encode(text));
-                } else if let Ok(bytes) = STANDARD.decode(text) {
-                    values.insert(String::from_utf8_lossy(&bytes).into_owned());
-                }
-            }
-        }
-    }
-    let mut values: Vec<String> = values
-        .into_iter()
-        .filter(|value| !value.is_empty())
-        .collect();
-    values.sort_by_key(|value| std::cmp::Reverse(value.len()));
-    values
-}
-
 /// Adds what a dry-run's answer holds, known only after it: a warning may
 /// echo a value the edit never named, as `stringData`'s in `data`.
 fn add_answered(secrets: &mut Vec<String>, answer: &Value) {
@@ -342,21 +249,27 @@ fn add_answered(secrets: &mut Vec<String>, answer: &Value) {
     secrets.sort_by_key(|value| std::cmp::Reverse(value.len()));
 }
 
-/// Refuses a value of a Secret that still reads as a mask but is not the
-/// one it was opened with, as `<12 bytes>` would be written.
-fn refuse_masks(base: Option<&Value>, edited: &Value) -> Result<(), IpcError> {
-    for field in ["data", "stringData"] {
-        let items = edited[field].as_object();
-        for (key, value) in items.into_iter().flatten() {
-            let opened = base.and_then(|base| base[field].get(key));
-            if value.as_str().is_some_and(is_mask) && opened != Some(value) {
-                return Err(IpcError::new(
-                    ErrorCode::ApplyMaskedValue,
-                    format!(
-                        "{key} still holds a masked value, so Twigo would write the mask: give it a value"
-                    ),
-                ));
-            }
+/// Refuses a value of a Secret, or the `release` of a ConfigMap that holds
+/// a Helm release, that still reads as a mask but is not the one it was
+/// opened with, as `<12 bytes>` would be written.
+fn refuse_masks(secret: bool, base: Option<&Value>, edited: &Value) -> Result<(), IpcError> {
+    let release = holds_helm_release(edited) || base.is_some_and(holds_helm_release);
+    if !secret && !release {
+        return Ok(());
+    }
+    for entry in entries(edited) {
+        if release && (entry.field != Field::Data || entry.key != "release") {
+            continue;
+        }
+        let opened = base.and_then(|base| base[entry.field.name()].get(entry.key));
+        if entry.value.as_str().is_some_and(is_mask) && opened != Some(entry.value) {
+            let key = entry.key;
+            return Err(IpcError::new(
+                ErrorCode::ApplyMaskedValue,
+                format!(
+                    "{key} still holds a masked value, so Twigo would write the mask: give it a value"
+                ),
+            ));
         }
     }
     Ok(())
@@ -601,18 +514,23 @@ fn resource_version(object: &Value) -> Option<&str> {
     object["metadata"]["resourceVersion"].as_str()
 }
 
-/// An object as a side of the diff: as the view shows it, without what would
-/// only be noise.
-pub(crate) fn side(object: Value) -> Value {
-    if object.is_null() {
-        return object;
-    }
-    let mut object = for_view(object);
-    if let Some(metadata) = object["metadata"].as_object_mut() {
-        metadata.remove("resourceVersion");
-        metadata.remove("generation");
-    }
-    object
+/// The two sides of the diff, each as the view shows it, without what would
+/// only be noise; where `release` or either side says the object holds a
+/// Helm release, both show its `release` as a size.
+pub(crate) fn sides(live: Value, result: Value, release: bool) -> (Value, Value) {
+    let release = release || holds_helm_release(&live) || holds_helm_release(&result);
+    let side = |object: Value| {
+        if object.is_null() {
+            return object;
+        }
+        let mut object = for_view_as(object, release);
+        if let Some(metadata) = object["metadata"].as_object_mut() {
+            metadata.remove("resourceVersion");
+            metadata.remove("generation");
+        }
+        object
+    };
+    (side(live), side(result))
 }
 
 /// The object a preview of this request is of.
@@ -726,9 +644,7 @@ pub(crate) async fn preview(
     let keep = |prepared: Prepared| core.bus.keep_preview(&ticket, started, prepared);
 
     let secret = target.is("", &["secrets"]);
-    if secret {
-        refuse_masks(opened.as_ref().map(|opened| &opened.base), &edited)?;
-    }
+    refuse_masks(secret, opened.as_ref().map(|opened| &opened.base), &edited)?;
     let group = target.resource.group.clone();
     let version = target.resource.version.clone();
     let kind = edited["kind"].as_str().unwrap_or_default().to_owned();
@@ -809,14 +725,15 @@ pub(crate) async fn preview(
             }
         };
 
-        let secrets = if secret {
-            let mut objects = vec![&edited];
-            objects.extend(&config);
-            objects.extend(&live);
-            secret_values(&objects)
-        } else {
-            Vec::new()
-        };
+        let mut objects = vec![&edited];
+        objects.extend(&config);
+        objects.extend(&live);
+        let secrets = secret_values(&objects);
+        let release = holds_helm_release(&edited)
+            || opened
+                .as_ref()
+                .is_some_and(|opened| holds_helm_release(&opened.base))
+            || live.as_ref().is_some_and(holds_helm_release);
 
         let holds_what_it_read =
             lock.is_some() && lock.as_deref() == live.as_ref().and_then(resource_version);
@@ -828,7 +745,8 @@ pub(crate) async fn preview(
                 edited: &edited,
                 live: live.as_ref(),
                 ignored,
-                secret,
+                release,
+                bodiless: secret || release,
                 comparable_to: live
                     .as_ref()
                     .filter(|_| status_subresource)
@@ -925,7 +843,12 @@ struct Try<'a> {
     edited: &'a Value,
     live: Option<&'a Value>,
     ignored: Vec<String>,
-    secret: bool,
+    /// The object it opened, the edit or the live object holds a Helm
+    /// release, which the diff's sides mask.
+    release: bool,
+    /// What it sends holds a Secret's values or a Helm release, which its
+    /// kubectl line leaves out.
+    bodiless: bool,
     comparable_to: Option<Value>,
     lock: Option<String>,
     keep: Keep<'a>,
@@ -946,7 +869,7 @@ async fn dry_run(
         target,
         edited,
         live,
-        secret,
+        bodiless,
         lock,
         ..
     } = attempt;
@@ -1024,7 +947,7 @@ async fn dry_run(
         force,
         patch_for_line.as_ref(),
         &kind_name,
-        *secret,
+        *bodiless,
     )?;
     let mut writes = Vec::new();
     if config.is_some() {
@@ -1052,10 +975,15 @@ async fn dry_run(
         })),
         target: (*target).clone(),
     })?;
+    let (live, result) = sides(
+        live.cloned().unwrap_or(Value::Null),
+        result,
+        attempt.release,
+    );
     Ok(ApplyPreviewed::Ready {
         id,
-        live: side(live.cloned().unwrap_or(Value::Null)),
-        result: side(result),
+        live,
+        result,
         warnings,
         removals: removals.iter().map(ToString::to_string).collect(),
         ignored: attempt.ignored.clone(),
@@ -1221,7 +1149,7 @@ fn recreation(
     ];
     let kind_name = target.resource.name();
     let delete = target.kubectl(&["delete", &kind_name, &target.name])?;
-    let printf = kubectl(&["printf", "%s", &body.to_string()])?;
+    let printf = shell_line(&["printf", "%s", &body.to_string()])?;
     let create = target.kubectl(&["create", "--field-manager", FIELD_MANAGER, "-f", "-"])?;
     Ok(Prepared {
         context: target.context.clone(),
@@ -1239,15 +1167,15 @@ fn recreation(
     })
 }
 
-/// The kubectl line of an apply and its merge patch; a Secret's stops at
-/// `-f -`, where its body would go on stdin.
+/// The kubectl line of an apply and its merge patch; a bodiless one stops
+/// at `-f -`, where its body would go on stdin.
 fn apply_line(
     target: &Target,
     config: Option<&Value>,
     force: bool,
     patch: Option<&Value>,
     kind_name: &str,
-    secret: bool,
+    bodiless: bool,
 ) -> Result<String, IpcError> {
     let mut lines = Vec::new();
     if let Some(config) = config {
@@ -1258,34 +1186,40 @@ fn apply_line(
         }
         words.extend(["-f", "-"]);
         let line = target.kubectl(&words)?;
-        lines.push(if secret {
+        lines.push(if bodiless {
             line
         } else {
             format!(
                 "{} | {line}",
-                kubectl(&["printf", "%s", &config.to_string()])?
+                shell_line(&["printf", "%s", &config.to_string()])?
             )
         });
     }
     if let Some(patch) = patch {
-        lines.push(patch_line(target, patch, kind_name, FIELD_MANAGER, secret)?);
+        lines.push(patch_line(
+            target,
+            patch,
+            kind_name,
+            FIELD_MANAGER,
+            bodiless,
+        )?);
     }
     Ok(lines.join(" && "))
 }
 
-/// The `kubectl patch` line of a merge patch, as it is sent; a Secret's
-/// names no body, where a value would be.
+/// The `kubectl patch` line of a merge patch, as it is sent; a bodiless
+/// one names no body, where a value would be.
 fn patch_line(
     target: &Target,
     patch: &Value,
     kind_name: &str,
     manager: &str,
-    secret: bool,
+    bodiless: bool,
 ) -> Result<String, IpcError> {
     let manager = format!("--field-manager={manager}");
     let body = patch.to_string();
     let mut words = vec!["patch", kind_name, &target.name, "--type=merge", &manager];
-    if !secret {
+    if !bodiless {
         words.extend(["-p", &body]);
     }
     target.kubectl(&words)
@@ -1317,7 +1251,7 @@ fn answer_patch(
         target,
         edited,
         live,
-        secret,
+        bodiless,
         lock,
         ..
     } = attempt;
@@ -1333,10 +1267,14 @@ fn answer_patch(
         &locked(&patch, lock.as_deref()),
         &target.resource.name(),
         EDIT_FIELD_MANAGER,
-        *secret,
+        *bodiless,
     )?;
     let warnings: Vec<String> = told.iter().map(|text| scrub(text, &secrets)).collect();
-    let live_view = side(live.cloned().unwrap_or(Value::Null));
+    let (live, result) = sides(
+        live.cloned().unwrap_or(Value::Null),
+        object,
+        attempt.release,
+    );
     let id = (attempt.keep)(Prepared {
         context: target.context.clone(),
         object: attempt.object.clone(),
@@ -1354,8 +1292,8 @@ fn answer_patch(
     })?;
     Ok(ApplyPreviewed::Ready {
         id,
-        live: live_view,
-        result: side(object),
+        live,
+        result,
         warnings,
         removals: removals.iter().map(ToString::to_string).collect(),
         ignored: attempt.ignored.clone(),
@@ -1416,7 +1354,7 @@ pub(crate) async fn apply(
                 destructive: false,
                 consequences,
                 affected: Vec::new(),
-                kubectl: Some(kubectl),
+                command_line: Some(kubectl),
                 doing: format!("Applying {what}"),
                 command,
                 target: audit_target,
@@ -1446,7 +1384,7 @@ pub(crate) async fn apply(
                     "An apply cannot express this edit, so it goes as one merge patch under field manager {EDIT_FIELD_MANAGER}, as kubectl edit would."
                 )],
                 affected: Vec::new(),
-                kubectl: Some(kubectl),
+                command_line: Some(kubectl),
                 doing: format!("Applying {what}"),
                 command,
                 target: audit_target,
@@ -1504,7 +1442,7 @@ pub(crate) async fn apply(
                 destructive: true,
                 consequences,
                 affected,
-                kubectl: Some(kubectl),
+                command_line: Some(kubectl),
                 doing: format!("Recreating {what}"),
                 command,
                 target: audit_target,
@@ -1876,6 +1814,7 @@ mod tests {
     use serde_json::json;
     use twigo_ipc::ResourceRef;
     use twigo_kube::client::Budgets;
+    use twigo_policy::redact::HIDDEN;
 
     use super::*;
 
@@ -2154,35 +2093,6 @@ mod tests {
     }
 
     #[test]
-    fn scrubbing_takes_a_value_only_as_a_whole_token() {
-        let secrets = vec!["a".to_owned(), "hunter2".to_owned(), "x=".to_owned()];
-        assert_eq!(
-            scrub("a a-bcd spat a_b ahunter2 hunter2 at x= cx=", &secrets),
-            format!("{HIDDEN} {HIDDEN}-bcd spat a_b ahunter2 {HIDDEN} at {HIDDEN} cx=")
-        );
-    }
-
-    #[test]
-    fn a_refusal_that_quotes_the_patched_object_loses_it_for_a_secret() {
-        let message = r#""" is invalid: patch: Invalid value: "{\"data\":{\"bad\":\"@@@\"},\"stringData\":{\"k\":\"sec\\\"ret\\nnl\\u003ctag\\u003e\"},\"type\":\"Opaque\"}": illegal base64 data at input byte 0"#;
-        assert_eq!(
-            scrub(message, &["sec\"ret\nnl<tag>".to_owned()]),
-            format!(
-                "\"\" is invalid: patch: Invalid value: {HIDDEN}: illegal base64 data at input byte 0"
-            )
-        );
-        assert_eq!(
-            scrub(message, &[]),
-            message,
-            "only a Secret has values to hide"
-        );
-        assert_eq!(
-            scrub("no quoted object here", &["x".to_owned()]),
-            "no quoted object here"
-        );
-    }
-
-    #[test]
     fn a_secret_s_refusal_keeps_its_causes_reason_and_field_but_never_their_message() {
         let quoted = r#"{\"data\":{\"bad\":\"@@@\"},\"stringData\":{\"k\":\"line1\\nsec\\\"ret\\u003ctag\\u003e\\u0026end\"},\"type\":\"Opaque\"}"#;
         let status = |message: String, cause: String| {
@@ -2206,6 +2116,7 @@ mod tests {
             format!(r#"Invalid value: "{quoted}": illegal base64 data at input byte 0"#),
         );
         let secrets = secret_values(&[&json!({
+            "kind": "Secret",
             "data": { "bad": "@@@" },
             "stringData": { "k": "line1\nsec\"ret<tag>&end" },
         })]);
@@ -2229,9 +2140,40 @@ mod tests {
     }
 
     #[test]
+    fn a_refusal_of_a_config_map_that_holds_a_helm_release_loses_the_release() {
+        let release =
+            "H4sIAAAAAAAC/6pWSkksSVSyUlAqzs9NVUjOzytJzSvRSy9KTVWyUlBKzs8tKEotLs5MKVbSqgUEAAD//w==";
+        let config_map = json!({
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": { "name": "sh.helm.release.v1.app.v1", "labels": { "owner": "helm" } },
+            "data": { "release": release },
+        });
+        let quoted = format!(
+            r#"{{\"apiVersion\":\"v1\",\"data\":{{\"release\":\"{release}\",\"x\":5}},\"kind\":\"ConfigMap\"}}"#
+        );
+        let refused = serde_json::from_value::<Status>(json!({
+            "status": "Failure",
+            "reason": "Invalid",
+            "code": 422,
+            "message": format!(
+                r#""" is invalid: patch: Invalid value: "{quoted}": json: cannot unmarshal number into Go struct field ConfigMap.data of type string"#
+            ),
+        }))
+        .unwrap();
+        let secrets = secret_values(&[&config_map]);
+        let Refused::Other(error) = Refused::of(&kube::Error::Api(Box::new(refused)), &secrets)
+        else {
+            panic!("an ordinary refusal");
+        };
+        assert!(!error.message.contains("H4sI"), "{}", error.message);
+    }
+
+    #[test]
     fn what_a_dry_run_s_answer_holds_is_scrubbed_too() {
-        let mut secrets = secret_values(&[&json!({ "stringData": { "a": "first" } })]);
-        let answer = json!({ "data": { "token": "dHlwZWQ=", "a": "Zmlyc3Q=" } });
+        let mut secrets =
+            secret_values(&[&json!({ "kind": "Secret", "stringData": { "a": "first" } })]);
+        let answer = json!({ "kind": "Secret", "data": { "token": "dHlwZWQ=", "a": "Zmlyc3Q=" } });
         add_answered(&mut secrets, &answer);
         assert_eq!(
             scrub("dHlwZWQ= or typed or first or Zmlyc3Q=", &secrets),
@@ -2258,34 +2200,125 @@ mod tests {
     }
 
     #[test]
-    fn a_secret_s_values_are_scrubbed_encoded_and_decoded() {
-        let secret = json!({
-            "apiVersion": "v1",
-            "kind": "Secret",
-            "data": { "password": "aHVudGVyMg==" },
-            "stringData": { "token": "s3cret" },
-        });
-        let secrets = secret_values(&[&secret]);
-        let text = scrub("bad aHVudGVyMg== and hunter2 and s3cret", &secrets);
-        assert_eq!(text, format!("bad {HIDDEN} and {HIDDEN} and {HIDDEN}"));
-    }
-
-    #[test]
     fn a_mask_is_refused_where_it_would_be_written_and_kept_where_it_was() {
         let base = json!({ "data": { "a": "<12 bytes>" } });
         let same = json!({ "data": { "a": "<12 bytes>" } });
-        assert_eq!(refuse_masks(Some(&base), &same), Ok(()));
+        assert_eq!(refuse_masks(true, Some(&base), &same), Ok(()));
         let renamed = json!({ "data": { "b": "<12 bytes>" } });
         assert_eq!(
-            refuse_masks(Some(&base), &renamed).unwrap_err().kind,
+            refuse_masks(true, Some(&base), &renamed).unwrap_err().kind,
             ErrorKind::InvalidInput
         );
         let changed = json!({ "data": { "a": "<13 bytes>" } });
-        assert!(refuse_masks(Some(&base), &changed).is_err());
+        assert!(refuse_masks(true, Some(&base), &changed).is_err());
         let written = json!({ "stringData": { "t": "<5 bytes>" } });
-        assert!(refuse_masks(None, &written).is_err());
+        assert!(refuse_masks(true, None, &written).is_err());
         let real = json!({ "data": { "a": "aHVudGVyMg==" } });
-        assert_eq!(refuse_masks(Some(&base), &real), Ok(()));
+        assert_eq!(refuse_masks(true, Some(&base), &real), Ok(()));
+    }
+
+    #[test]
+    fn both_sides_hide_a_helm_release_where_the_opened_live_edited_or_answered_object_holds_one() {
+        const RELEASE: &str = "H4sIAAAAAAAC/release+of+app";
+        let config_map = |owner: Option<&str>, release: bool| {
+            let mut object = json!({
+                "apiVersion": "v1",
+                "kind": "ConfigMap",
+                "metadata": {
+                    "name": "sh.helm.release.v1.app.v1",
+                    "labels": { "name": "app" },
+                    "annotations": {
+                        "kubectl.kubernetes.io/last-applied-configuration":
+                            format!(r#"{{"data":{{"release":"{RELEASE}"}}}}"#),
+                    },
+                },
+                "data": { "note": "kept" },
+            });
+            if let Some(owner) = owner {
+                object["metadata"]["labels"]["owner"] = json!(owner);
+            }
+            if release {
+                object["data"]["release"] = json!(RELEASE);
+            }
+            object
+        };
+        for (case, live, result, opened_or_edited, hidden) in [
+            (
+                "an edit that drops owner: helm and the release",
+                config_map(Some("helm"), true),
+                config_map(None, false),
+                false,
+                true,
+            ),
+            (
+                "an edit that gives the object owner: helm",
+                config_map(Some("someone"), true),
+                config_map(Some("helm"), true),
+                false,
+                true,
+            ),
+            (
+                "an object opened or edited as a release",
+                config_map(None, true),
+                config_map(None, true),
+                true,
+                true,
+            ),
+            (
+                "an object that holds no release",
+                config_map(None, true),
+                config_map(None, true),
+                false,
+                false,
+            ),
+        ] {
+            let (live, result) = sides(live, result, opened_or_edited);
+            for side in [&live, &result] {
+                assert_eq!(side.to_string().contains(RELEASE), !hidden, "{case}");
+                assert_eq!(side["data"]["note"], "kept", "{case}");
+            }
+            if hidden {
+                assert_eq!(
+                    live["data"]["release"],
+                    format!("<{} bytes>", RELEASE.len()),
+                    "{case}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_mask_of_a_helm_release_is_refused_where_it_would_be_written_and_no_other_value_is() {
+        let config_map = |labels: Value, data: Value| {
+            json!({
+                "apiVersion": "v1",
+                "kind": "ConfigMap",
+                "metadata": { "name": "sh.helm.release.v1.app.v1", "labels": labels },
+                "data": data,
+            })
+        };
+        let helm = json!({ "owner": "helm" });
+        let base = config_map(
+            helm.clone(),
+            json!({ "release": "<9 bytes>", "note": "<3 bytes>" }),
+        );
+        let same = config_map(
+            helm.clone(),
+            json!({ "release": "<9 bytes>", "note": "<4 bytes>" }),
+        );
+        assert_eq!(refuse_masks(false, Some(&base), &same), Ok(()));
+        let another = config_map(helm.clone(), json!({ "release": "<10 bytes>" }));
+        assert_eq!(
+            refuse_masks(false, Some(&base), &another).unwrap_err().kind,
+            ErrorKind::InvalidInput
+        );
+        let unlabelled = config_map(json!({}), json!({ "release": "<10 bytes>" }));
+        assert!(refuse_masks(false, Some(&base), &unlabelled).is_err());
+        let new = config_map(helm, json!({ "release": "<10 bytes>" }));
+        assert!(refuse_masks(false, None, &new).is_err());
+        let ordinary = config_map(json!({}), json!({ "release": "<10 bytes>" }));
+        assert_eq!(refuse_masks(false, Some(&ordinary), &ordinary), Ok(()));
+        assert_eq!(refuse_masks(false, None, &ordinary), Ok(()));
     }
 
     #[test]
@@ -2317,15 +2350,6 @@ mod tests {
             "Deployment \"immutable-web\" is invalid",
             "Invalid value: -1: must be greater than or equal to 0"
         ));
-    }
-
-    #[test]
-    fn a_value_of_string_data_is_scrubbed_as_the_server_would_store_it() {
-        let secrets = secret_values(&[&json!({ "stringData": { "token": "typed-value" } })]);
-        assert_eq!(
-            scrub("token is dHlwZWQtdmFsdWU=", &secrets),
-            format!("token is {HIDDEN}")
-        );
     }
 
     #[test]
@@ -2457,7 +2481,8 @@ mod tests {
             edited: &edited,
             live: None,
             ignored: Vec::new(),
-            secret: false,
+            release: false,
+            bodiless: false,
             comparable_to: None,
             lock: Some("1".to_owned()),
             keep: &keep,

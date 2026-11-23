@@ -14,7 +14,7 @@ use twigo_policy::friction::Risk;
 use twigo_policy::{Actor, Attributes, Policy};
 use twigo_sessions::shell::{Join, SHELL, Session, Spec};
 
-use super::{Target, clients_for, get, kubectl};
+use super::{Target, clients_for, get, shell_line};
 use crate::Core;
 use crate::bus::{self, Finished, Planned};
 use crate::terminal::Shell;
@@ -170,7 +170,7 @@ pub(crate) async fn shell(
         destructive: false,
         consequences: read.consequences,
         affected: Vec::new(),
-        kubectl: Some(kubectl),
+        command_line: Some(kubectl),
         doing: read.doing,
         context,
         connection,
@@ -218,7 +218,7 @@ fn kubectl_line(kind: ShellKind, spec: &Spec, context: &str) -> Result<String, I
             words.extend([pod.as_str(), "-n", namespace, "-c", container]);
         }
     }
-    kubectl(&words)
+    shell_line(&words)
 }
 
 fn running(pod: &Value, list: &str) -> Vec<String> {

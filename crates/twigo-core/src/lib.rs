@@ -11,6 +11,7 @@ pub mod connections;
 mod delete;
 mod errors;
 mod forward;
+mod helm;
 pub mod objects;
 mod proxy;
 pub mod report;
@@ -34,13 +35,15 @@ use twigo_cache::batcher::Batcher;
 use twigo_cache::discovery::{Followed, Followers, Resources};
 use twigo_cache::hub::{Connect, Hub, Query, Resource, RowFormat};
 use twigo_cache::metrics::{Kind, Opening, Poller};
+use twigo_cache::request::Selectors;
 use twigo_cache::view::Spec;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
     AccessQuery, Ack, AnswerApproval, ApplyPreviewed, ApplyRequest, ApprovalEvent, ClusterVersion,
-    DownloadLogs, ErrorCode, Execute, Friction, GetValues, IpcError, ListBatch, ListQuery,
-    LogBatch, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent, Plan, PlanId,
-    PlanRequest, SchemaQuery, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow,
+    CompareRevisions, ComparedRevisions, DownloadLogs, ErrorCode, Execute, Friction, GetValues,
+    IpcError, ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs, OpenObject, OpenRelease,
+    OpenShell, OperationEvent, Plan, PlanId, PlanRequest, ReleaseBatch, ReleaseListQuery,
+    SchemaQuery, SetLogSource, SetLogView, SetLogWindow, SetParts, SetReleaseView, SetWindow,
     ShellAck, ShellContainers, ShellInput, ShellPod, ShellResize, SubscriptionId, ViewState,
 };
 use twigo_kube::client::{Actor, Clients, ProxyEnv};
@@ -88,6 +91,7 @@ pub struct Core {
     choosing: Mutex<()>,
     lists: Subscriptions<Batcher>,
     objects: Subscriptions<Opened>,
+    releases: Subscriptions<helm::Opened>,
     logs: Subscriptions<Session>,
     shells: Subscriptions<terminal::Shell>,
     forwards: Forwards,
@@ -130,6 +134,23 @@ impl Core {
     /// directory, its clusters' discovery in `cache`, its cache directory,
     /// and whose admin's policy is the file at `policy_file`.
     pub fn new(data: &Path, cache: &Path, policy_file: &Path) -> Arc<Self> {
+        Self::with_hub(data, cache, policy_file, |core| Hub::new(connect(core)))
+    }
+
+    /// A core over the fake's hub, whose context needs no catalog.
+    #[cfg(test)]
+    pub(crate) fn over(data: &Path, hub: Hub) -> Arc<Self> {
+        Self::with_hub(data, &data.join("cache"), &data.join("policy.json"), |_| {
+            hub
+        })
+    }
+
+    fn with_hub(
+        data: &Path,
+        cache: &Path,
+        policy_file: &Path,
+        hub: impl FnOnce(Weak<Core>) -> Hub,
+    ) -> Arc<Self> {
         let shell_env = watch::Sender::new(None);
         let focused = watch::Sender::new(false);
         let (reporter, reports) = twigo_panic::reports();
@@ -148,7 +169,7 @@ impl Core {
         let approvals = Arc::new(Approvals::new(Arc::clone(&policy), catalog.subscribe()));
         let discovery = Arc::new(Cache::new(cache.join("discovery")));
         Arc::new_cyclic(|core| {
-            let hub = Hub::new(connect(core.clone()));
+            let hub = hub(core.clone());
             Self {
                 this: core.clone(),
                 forwards: Forwards::new(Arc::clone(&policy), catalog.subscribe(), hub.clone()),
@@ -161,6 +182,7 @@ impl Core {
                 choosing: Mutex::default(),
                 lists: Subscriptions::new("list"),
                 objects: Subscriptions::new("object"),
+                releases: Subscriptions::new("release"),
                 logs: Subscriptions::new("logs"),
                 shells: Subscriptions::new("shell"),
                 terminals: terminal::Terminals::new(data.join("terminals")),
@@ -398,6 +420,11 @@ impl Core {
             } => actions::suspend(self, &space, target, suspend).await?,
             PlanRequest::Undo { space } => actions::undo(self, &space).await?,
             PlanRequest::Reveal { object, key } => actions::reveal(self, window, object, key)?,
+            PlanRequest::RevealHelm {
+                release,
+                revision,
+                part,
+            } => actions::reveal_helm(self, window, release, revision, part)?,
             PlanRequest::Apply { space, preview } => {
                 actions::apply(self, window, space, preview).await?
             }
@@ -739,11 +766,86 @@ impl Core {
                 },
                 format: RowFormat::Table,
                 namespaces: query.namespaces,
-                field_selector: query.field_selector,
+                selectors: Selectors {
+                    field: query.field_selector,
+                    label: None,
+                },
             })
             .await?;
         self.lists
-            .keep(ticket, Batcher::spawn(rows, spec, metrics, send))
+            .keep(ticket, Batcher::spawn("list", rows, spec, metrics, send))
+    }
+
+    /// The Helm releases of a space's namespaces as a list, whose batches go through `send` until
+    /// it says the window is gone, and which `list_set_window`, `list_ack` and `list_unsubscribe`
+    /// serve as any list (ARCHITECTURE 3.6).
+    pub async fn helm_list_subscribe(
+        &self,
+        window: &str,
+        query: ReleaseListQuery,
+        send: impl FnMut(ListBatch) -> bool + Send + 'static,
+    ) -> Result<SubscriptionId, IpcError> {
+        let ticket = self.lists.ticket(window);
+        let context = self.context(&query.space)?;
+        let list = helm::list(&self.hub, context, query, send).await?;
+        self.lists.keep(ticket, list)
+    }
+
+    /// A Helm release of a space for a window (ARCHITECTURE 3.6): the revisions
+    /// its namespace's release Secrets hold, the shown one decoded, whose
+    /// batches go through `send` until it says the window is gone.
+    pub async fn helm_release_open(
+        &self,
+        window: &str,
+        request: OpenRelease,
+        send: impl FnMut(ReleaseBatch) -> bool + Send + 'static,
+    ) -> Result<SubscriptionId, IpcError> {
+        let ticket = self.releases.ticket(window);
+        let context = self.context(&request.release.space)?;
+        let discovery = self.discovery(&context);
+        let opened = helm::open(&self.hub, context, request, discovery, send).await?;
+        self.releases.keep(ticket, opened)
+    }
+
+    pub fn helm_release_set_view(
+        &self,
+        window: &str,
+        request: SetReleaseView,
+    ) -> Result<(), IpcError> {
+        self.releases.with(window, request.id, |release| {
+            release.set_view(request.revision, request.parts);
+        })
+    }
+
+    pub fn helm_release_ack(&self, window: &str, request: Ack) -> Result<(), IpcError> {
+        self.releases
+            .with(window, request.id, |release| release.ack(request.seq))
+    }
+
+    pub fn helm_release_close(&self, window: &str, id: SubscriptionId) -> Result<(), IpcError> {
+        self.releases.remove(window, id)
+    }
+
+    /// Two revisions of a release, masked so that a value that differs
+    /// says so on both sides (ARCHITECTURE 3.6).
+    pub async fn helm_compare(
+        &self,
+        request: CompareRevisions,
+    ) -> Result<ComparedRevisions, IpcError> {
+        let context = self.context(&request.release.space)?;
+        helm::compare(&self.hub, &context, request).await
+    }
+
+    /// The context's discovery as an open release follows it, which does not wait for the
+    /// catalog to list the context.
+    fn discovery(&self, context: &str) -> helm::Discovery {
+        let (core, context) = (self.this.clone(), context.to_owned());
+        Box::pin(async move {
+            let Some(core) = core.upgrade() else {
+                return std::future::pending().await;
+            };
+            core.followed(&context).await.follow()
+        })
     }
 
     /// A list or an object does not wait for the catalog to list the context, and has the
@@ -976,12 +1078,14 @@ impl Core {
         Ok(())
     }
 
-    /// Ends the lists, open objects, logs sessions, shells and terminals,
-    /// plans, asks and offers of a window that reloads or closes: its asks
-    /// are denied. The forwards stay, and the window stops following them.
+    /// Ends the lists, open objects and releases, logs sessions, shells and
+    /// terminals, plans, asks and offers of a window that reloads or closes:
+    /// its asks are denied. The forwards stay, and the window stops following
+    /// them.
     pub fn drop_window(&self, window: &str) {
         self.lists.drop_window(window);
         self.objects.drop_window(window);
+        self.releases.drop_window(window);
         self.logs.drop_window(window);
         self.shells.drop_window(window);
         self.bus.drop_window(window);

@@ -46,12 +46,12 @@ use crate::cluster::{Cluster, Resolved};
 use crate::decode::Decode;
 use crate::meta::MetaDecoder;
 use crate::object::{Object, ObjectDecoder};
-use crate::request::{Collection, Format, field_value};
+use crate::request::{Collection, Format, Selectors, field_value};
 use crate::store::{Drained, Feed, Item, RowKey};
 use crate::table::{Column, Row, TableDecoder};
 use crate::upstream::{self, Clock, Env, Failure, Spec, Upstream};
 
-pub use crate::upstream::{Connect, RETRY_WITHIN, backoff};
+pub use crate::upstream::{Connect, RETRY_WITHIN, backoff, refusal_pause};
 
 /// How long an upstream outlives its last subscription.
 pub const LINGER: Duration = Duration::from_secs(60);
@@ -166,7 +166,7 @@ pub struct Query {
     pub format: RowFormat,
     /// Empty for every namespace where the person may list the resource.
     pub namespaces: Vec<String>,
-    pub field_selector: Option<String>,
+    pub selectors: Selectors,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -181,7 +181,7 @@ struct Key {
     resource: Resource,
     format: Format,
     scope: Scope,
-    field_selector: Option<String>,
+    selectors: Selectors,
 }
 
 impl Key {
@@ -199,7 +199,7 @@ impl Key {
             version: self.resource.version.clone(),
             path: self.resource.path(&self.scope),
             format: self.format,
-            field_selector: self.field_selector.clone(),
+            selectors: self.selectors.clone(),
             resource: self.resource.name(),
         }
     }
@@ -341,7 +341,7 @@ impl Hub {
             resource: query.resource.clone(),
             format,
             scope: Scope::Cluster,
-            field_selector: query.field_selector.clone(),
+            selectors: query.selectors.clone(),
         };
         // A cluster-scoped resource has no namespaces to filter by, and a
         // namespace named twice gets one part.
@@ -428,7 +428,7 @@ impl Hub {
         let collection = Collection {
             path: &path,
             format: Format::Metadata,
-            field_selector: None,
+            selectors: Selectors::NONE,
         };
         let rows = upstream::read(
             &clients,
@@ -590,7 +590,10 @@ impl Hub {
             resource,
             format: Format::Object,
             scope: namespace.map_or(Scope::Cluster, Scope::Namespace),
-            field_selector,
+            selectors: Selectors {
+                field: field_selector,
+                label: None,
+            },
         };
         let mut subscription = Subscription::new(key.clone(), &[]);
         let part = self.hold(&key, None);

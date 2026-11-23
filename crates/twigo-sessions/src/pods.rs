@@ -12,6 +12,7 @@ use futures::future::{BoxFuture, select_all};
 use twigo_cache::hub::{self, Delta, Hub, Query, Resource, RowFormat, Subscription};
 use twigo_cache::meta::Meta;
 use twigo_cache::object::Object;
+use twigo_cache::request::Selectors;
 use twigo_cache::store::Item;
 use twigo_cache::table::{Column, Row};
 use twigo_ipc::{ErrorCode, IpcError, ViewState};
@@ -90,7 +91,7 @@ impl Subscriptions {
                     resource: v1(group, resource),
                     format: RowFormat::Metadata,
                     namespaces: vec![target.namespace.clone()],
-                    field_selector: None,
+                    selectors: Selectors::default(),
                 })
                 .await?,
             ),

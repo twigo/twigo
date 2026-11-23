@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useId,
@@ -325,8 +326,15 @@ function CommandLine({ command }: { command: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="flex items-start gap-1 rounded-lg bg-row-active py-1.5 pr-1 pl-2 font-mono text-2xs leading-[18px] text-support">
-      <code className="min-w-0 flex-1 wrap-anywhere whitespace-pre-wrap select-text">
-        {command}
+      <code className="min-w-0 flex-1 whitespace-pre-wrap select-text">
+        {command.split(" ").map((word, at) => (
+          <Fragment key={at}>
+            {at > 0 && " "}
+            <span className="inline-block max-w-full wrap-anywhere">
+              {word}
+            </span>
+          </Fragment>
+        ))}
       </code>
       <Button
         type="button"

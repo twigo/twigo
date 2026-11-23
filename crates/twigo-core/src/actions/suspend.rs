@@ -103,7 +103,7 @@ pub(crate) async fn suspend(
         doing: format!("{} {what}", words.doing),
         consequences,
         affected,
-        kubectl: Some(kubectl),
+        command_line: Some(kubectl),
         command,
         target: named,
         writes: vec![attributes],

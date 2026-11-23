@@ -1,0 +1,1687 @@
+{
+  "fmt-a/alpha": {
+    "1": [
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": []
+        },
+        "value": "{\"database\":{\"password\":\"user-password-r1\"},\"extra\":[\"one\",\"two\"],\"global\":{\"region\":\"us-east\"},\"image\":{\"tag\":\"1.1\"},\"removeMe\":null,\"replicaCount\":2,\"sub\":{\"subOnly\":null},\"zz\":\"user key that sorts last\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "database"
+          ]
+        },
+        "value": "{\"password\":\"user-password-r1\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "database",
+            "password"
+          ]
+        },
+        "value": "\"user-password-r1\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "extra"
+          ]
+        },
+        "value": "[\"one\",\"two\"]",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "extra",
+            0
+          ]
+        },
+        "value": "\"one\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "extra",
+            1
+          ]
+        },
+        "value": "\"two\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "global"
+          ]
+        },
+        "value": "{\"region\":\"us-east\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "global",
+            "region"
+          ]
+        },
+        "value": "\"us-east\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "image"
+          ]
+        },
+        "value": "{\"tag\":\"1.1\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "image",
+            "tag"
+          ]
+        },
+        "value": "\"1.1\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "removeMe"
+          ]
+        },
+        "value": "null",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "replicaCount"
+          ]
+        },
+        "value": "2",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "sub"
+          ]
+        },
+        "value": "{\"subOnly\":null}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "sub",
+            "subOnly"
+          ]
+        },
+        "value": "null",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "zz"
+          ]
+        },
+        "value": "\"user key that sorts last\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": []
+        },
+        "value": "{\"alpha\":\"first-key-alphabetically\",\"database\":{\"host\":\"db.example\",\"password\":\"chart-default-password\"},\"fromSub\":{\"answer\":42},\"global\":{\"region\":\"eu-west\"},\"image\":{\"pullPolicy\":\"IfNotPresent\",\"repository\":\"registry.example/demo\",\"tag\":\"1.0\"},\"removeMe\":\"present-in-chart\",\"replicaCount\":1,\"sub\":{\"exported\":{\"answer\":42},\"global\":{\"region\":\"eu-west\"},\"greeting\":\"hello from parent\",\"subOnly\":\"a default only the subchart has\"},\"zeta\":\"last-in-file\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "alpha"
+          ]
+        },
+        "value": "\"first-key-alphabetically\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "database"
+          ]
+        },
+        "value": "{\"host\":\"db.example\",\"password\":\"chart-default-password\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "database",
+            "host"
+          ]
+        },
+        "value": "\"db.example\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "database",
+            "password"
+          ]
+        },
+        "value": "\"chart-default-password\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "fromSub"
+          ]
+        },
+        "value": "{\"answer\":42}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "fromSub",
+            "answer"
+          ]
+        },
+        "value": "42",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "global"
+          ]
+        },
+        "value": "{\"region\":\"eu-west\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "global",
+            "region"
+          ]
+        },
+        "value": "\"eu-west\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "image"
+          ]
+        },
+        "value": "{\"pullPolicy\":\"IfNotPresent\",\"repository\":\"registry.example/demo\",\"tag\":\"1.0\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "image",
+            "pullPolicy"
+          ]
+        },
+        "value": "\"IfNotPresent\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "image",
+            "repository"
+          ]
+        },
+        "value": "\"registry.example/demo\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "image",
+            "tag"
+          ]
+        },
+        "value": "\"1.0\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "removeMe"
+          ]
+        },
+        "value": "\"present-in-chart\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "replicaCount"
+          ]
+        },
+        "value": "1",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "sub"
+          ]
+        },
+        "value": "{\"exported\":{\"answer\":42},\"global\":{\"region\":\"eu-west\"},\"greeting\":\"hello from parent\",\"subOnly\":\"a default only the subchart has\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "sub",
+            "exported"
+          ]
+        },
+        "value": "{\"answer\":42}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "sub",
+            "exported",
+            "answer"
+          ]
+        },
+        "value": "42",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "sub",
+            "global"
+          ]
+        },
+        "value": "{\"region\":\"eu-west\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "sub",
+            "global",
+            "region"
+          ]
+        },
+        "value": "\"eu-west\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "sub",
+            "greeting"
+          ]
+        },
+        "value": "\"hello from parent\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "sub",
+            "subOnly"
+          ]
+        },
+        "value": "\"a default only the subchart has\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "zeta"
+          ]
+        },
+        "value": "\"last-in-file\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "secret",
+          "document": 0,
+          "items": [],
+          "key": "host"
+        },
+        "value": "db.example",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "secret",
+          "document": 0,
+          "items": [],
+          "key": "password"
+        },
+        "value": "user-password-r1",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "secret",
+          "document": 0,
+          "items": [],
+          "key": "token"
+        },
+        "value": "token-for-alpha",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "manifest"
+        },
+        "value": "---\n# Source: demo/templates/secret.yaml\napiVersion: v1\nkind: Secret\nmetadata:\n  name: alpha-db\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\ntype: Opaque\nstringData:\n  host: \"db.example\"\n  password: \"user-password-r1\"\ndata:\n  token: \"dG9rZW4tZm9yLWFscGhh\"\n\n---\n# Source: demo/charts/sub/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-sub\ndata:\n  greeting: \"hello from parent\"\n  subOnly: \n  region: \"us-east\"\n\n---\n# Source: demo/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-config\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\ndata:\n  replicas: \"2\"\n  image: \"registry.example/demo:1.1\"\n  region: \"us-east\"\n  fromSub: \"42\"\n  app.toml: |\n    [server]\n    listen = \"0.0.0.0:8080\"\n    \n\n---\n# Source: demo/templates/service.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: alpha-svc\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\nspec:\n  selector:\n    app.kubernetes.io/instance: alpha\n  ports:\n    - name: http\n      port: 80\n      targetPort: 8080\n\n\n",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "notes"
+        },
+        "value": "Thank you for installing demo.\n\nRelease alpha is at revision 1 in fmt-a.\nThe image is registry.example/demo:1.1.\n",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "description"
+        },
+        "value": "Install complete",
+        "binary": false
+      }
+    ],
+    "2": [
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": []
+        },
+        "value": "{\"database\":{\"password\":\"user-password-r2\"},\"image\":{\"tag\":\"1.2\"}}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "database"
+          ]
+        },
+        "value": "{\"password\":\"user-password-r2\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "database",
+            "password"
+          ]
+        },
+        "value": "\"user-password-r2\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "image"
+          ]
+        },
+        "value": "{\"tag\":\"1.2\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "image",
+            "tag"
+          ]
+        },
+        "value": "\"1.2\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": []
+        },
+        "value": "{\"alpha\":\"first-key-alphabetically\",\"database\":{\"host\":\"db.example\",\"password\":\"chart-default-password\"},\"fromSub\":{\"answer\":42},\"global\":{\"region\":\"eu-west\"},\"image\":{\"pullPolicy\":\"IfNotPresent\",\"repository\":\"registry.example/demo\",\"tag\":\"1.0\"},\"removeMe\":\"present-in-chart\",\"replicaCount\":1,\"sub\":{\"exported\":{\"answer\":42},\"global\":{\"region\":\"eu-west\"},\"greeting\":\"hello from parent\",\"subOnly\":\"a default only the subchart has\"},\"zeta\":\"last-in-file\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "alpha"
+          ]
+        },
+        "value": "\"first-key-alphabetically\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "database"
+          ]
+        },
+        "value": "{\"host\":\"db.example\",\"password\":\"chart-default-password\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "database",
+            "host"
+          ]
+        },
+        "value": "\"db.example\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "database",
+            "password"
+          ]
+        },
+        "value": "\"chart-default-password\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "fromSub"
+          ]
+        },
+        "value": "{\"answer\":42}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "fromSub",
+            "answer"
+          ]
+        },
+        "value": "42",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "global"
+          ]
+        },
+        "value": "{\"region\":\"eu-west\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "global",
+            "region"
+          ]
+        },
+        "value": "\"eu-west\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "image"
+          ]
+        },
+        "value": "{\"pullPolicy\":\"IfNotPresent\",\"repository\":\"registry.example/demo\",\"tag\":\"1.0\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "image",
+            "pullPolicy"
+          ]
+        },
+        "value": "\"IfNotPresent\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "image",
+            "repository"
+          ]
+        },
+        "value": "\"registry.example/demo\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "image",
+            "tag"
+          ]
+        },
+        "value": "\"1.0\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "removeMe"
+          ]
+        },
+        "value": "\"present-in-chart\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "replicaCount"
+          ]
+        },
+        "value": "1",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "sub"
+          ]
+        },
+        "value": "{\"exported\":{\"answer\":42},\"global\":{\"region\":\"eu-west\"},\"greeting\":\"hello from parent\",\"subOnly\":\"a default only the subchart has\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "sub",
+            "exported"
+          ]
+        },
+        "value": "{\"answer\":42}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "sub",
+            "exported",
+            "answer"
+          ]
+        },
+        "value": "42",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "sub",
+            "global"
+          ]
+        },
+        "value": "{\"region\":\"eu-west\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "sub",
+            "global",
+            "region"
+          ]
+        },
+        "value": "\"eu-west\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "sub",
+            "greeting"
+          ]
+        },
+        "value": "\"hello from parent\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "sub",
+            "subOnly"
+          ]
+        },
+        "value": "\"a default only the subchart has\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "zeta"
+          ]
+        },
+        "value": "\"last-in-file\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "secret",
+          "document": 0,
+          "items": [],
+          "key": "host"
+        },
+        "value": "db.example",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "secret",
+          "document": 0,
+          "items": [],
+          "key": "password"
+        },
+        "value": "user-password-r2",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "secret",
+          "document": 0,
+          "items": [],
+          "key": "token"
+        },
+        "value": "token-for-alpha",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "manifest"
+        },
+        "value": "---\n# Source: demo/templates/secret.yaml\napiVersion: v1\nkind: Secret\nmetadata:\n  name: alpha-db\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\ntype: Opaque\nstringData:\n  host: \"db.example\"\n  password: \"user-password-r2\"\ndata:\n  token: \"dG9rZW4tZm9yLWFscGhh\"\n\n---\n# Source: demo/charts/sub/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-sub\ndata:\n  greeting: \"hello from parent\"\n  subOnly: \"a default only the subchart has\"\n  region: \"eu-west\"\n\n---\n# Source: demo/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-config\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\ndata:\n  replicas: \"1\"\n  image: \"registry.example/demo:1.2\"\n  region: \"eu-west\"\n  fromSub: \"42\"\n  app.toml: |\n    [server]\n    listen = \"0.0.0.0:8080\"\n    \n\n---\n# Source: demo/templates/service.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: alpha-svc\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\nspec:\n  selector:\n    app.kubernetes.io/instance: alpha\n  ports:\n    - name: http\n      port: 80\n      targetPort: 8080\n\n\n",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "notes"
+        },
+        "value": "Thank you for installing demo.\n\nRelease alpha is at revision 2 in fmt-a.\nThe image is registry.example/demo:1.2.\n",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "description"
+        },
+        "value": "Upgrade complete",
+        "binary": false
+      }
+    ]
+  },
+  "fmt-a/epsilon": {
+    "1": [
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": []
+        },
+        "value": "{\"password\":\"epsilon-password-r1\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "password"
+          ]
+        },
+        "value": "\"epsilon-password-r1\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": []
+        },
+        "value": "{\"extra\":\"\",\"password\":\"chart-default-password\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "extra"
+          ]
+        },
+        "value": "\"\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "password"
+          ]
+        },
+        "value": "\"chart-default-password\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "secret",
+          "document": 0,
+          "items": [],
+          "key": "password"
+        },
+        "value": "epsilon-password-r1",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "manifest"
+        },
+        "value": "---\n# Source: failing/templates/secret.yaml\napiVersion: v1\nkind: Secret\nmetadata:\n  name: epsilon-credentials\ntype: Opaque\ndata:\n  password: \"ZXBzaWxvbi1wYXNzd29yZC1yMQ==\"\n\n\n",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "notes"
+        },
+        "value": "Log in as admin with the password epsilon-password-r1.\n",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "description"
+        },
+        "value": "Install complete",
+        "binary": false
+      }
+    ],
+    "2": [
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": []
+        },
+        "value": "{\"extra\":\"not base64!\",\"password\":\"epsilon-password-r2\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "extra"
+          ]
+        },
+        "value": "\"not base64!\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "password"
+          ]
+        },
+        "value": "\"epsilon-password-r2\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": []
+        },
+        "value": "{\"extra\":\"\",\"password\":\"chart-default-password\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "extra"
+          ]
+        },
+        "value": "\"\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "password"
+          ]
+        },
+        "value": "\"chart-default-password\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "secret",
+          "document": 0,
+          "items": [],
+          "key": "extra"
+        },
+        "value": "not base64!",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "secret",
+          "document": 0,
+          "items": [],
+          "key": "password"
+        },
+        "value": "epsilon-password-r2",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "manifest"
+        },
+        "value": "---\n# Source: failing/templates/secret.yaml\napiVersion: v1\nkind: Secret\nmetadata:\n  name: epsilon-credentials\ntype: Opaque\ndata:\n  password: \"ZXBzaWxvbi1wYXNzd29yZC1yMg==\"\n  extra: \"not base64!\"\n\n\n",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "notes"
+        },
+        "value": "Log in as admin with the password epsilon-password-r2.\n",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "description"
+        },
+        "value": "Upgrade \"epsilon\" failed: cannot patch \"epsilon-credentials\" with kind Secret:  \"\" is invalid: patch: Invalid value: \"{\\\"apiVersion\\\":\\\"v1\\\",\\\"data\\\":{\\\"extra\\\":\\\"not base64!\\\",\\\"password\\\":\\\"ZXBzaWxvbi1wYXNzd29yZC1yMg==\\\"},\\\"kind\\\":\\\"Secret\\\",\\\"metadata\\\":{\\\"annotations\\\":{\\\"meta.helm.sh/release-name\\\":\\\"epsilon\\\",\\\"meta.helm.sh/release-namespace\\\":\\\"fmt-a\\\"},\\\"creationTimestamp\\\":\\\"2026-11-22T21:53:02Z\\\",\\\"labels\\\":{\\\"app.kubernetes.io/managed-by\\\":\\\"Helm\\\"},\\\"managedFields\\\":[{\\\"manager\\\":\\\"helm\\\",\\\"operation\\\":\\\"Update\\\",\\\"apiVersion\\\":\\\"v1\\\",\\\"time\\\":\\\"2026-11-22T21:53:02Z\\\",\\\"fieldsType\\\":\\\"FieldsV1\\\",\\\"fieldsV1\\\":{\\\"f:data\\\":{\\\".\\\":{},\\\"f:password\\\":{}},\\\"f:metadata\\\":{\\\"f:annotations\\\":{\\\".\\\":{},\\\"f:meta.helm.sh/release-name\\\":{},\\\"f:meta.helm.sh/release-namespace\\\":{}},\\\"f:labels\\\":{\\\".\\\":{},\\\"f:app.kubernetes.io/managed-by\\\":{}}},\\\"f:type\\\":{}}}],\\\"name\\\":\\\"epsilon-credentials\\\",\\\"namespace\\\":\\\"fmt-a\\\",\\\"resourceVersion\\\":\\\"3709\\\",\\\"uid\\\":\\\"344c3ec0-77df-48dd-880f-5a373ba83101\\\"},\\\"type\\\":\\\"Opaque\\\"}\": illegal base64 data at input byte 3",
+        "binary": false
+      }
+    ]
+  },
+  "fmt-b/alpha": {
+    "1": [
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": []
+        },
+        "value": "null",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": []
+        },
+        "value": "{\"message\":\"hello\",\"nested\":{\"level1\":{\"level2\":\"deep\"}},\"ports\":[80,443]}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "message"
+          ]
+        },
+        "value": "\"hello\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "nested"
+          ]
+        },
+        "value": "{\"level1\":{\"level2\":\"deep\"}}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "nested",
+            "level1"
+          ]
+        },
+        "value": "{\"level2\":\"deep\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "nested",
+            "level1",
+            "level2"
+          ]
+        },
+        "value": "\"deep\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "ports"
+          ]
+        },
+        "value": "[80,443]",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "ports",
+            0
+          ]
+        },
+        "value": "80",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "ports",
+            1
+          ]
+        },
+        "value": "443",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "manifest"
+        },
+        "value": "---\n# Source: plain/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-plain\ndata:\n  message: \"hello\"\n  ports: \"80,443\"\n  deep: \"deep\"\n\n\n",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "description"
+        },
+        "value": "Install complete",
+        "binary": false
+      }
+    ]
+  },
+  "fmt-b/beta": {
+    "1": [
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": []
+        },
+        "value": "{\"message\":\"hi-from-v3\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "message"
+          ]
+        },
+        "value": "\"hi-from-v3\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": []
+        },
+        "value": "{\"message\":\"hello\",\"nested\":{\"level1\":{\"level2\":\"deep\"}},\"ports\":[80,443]}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "message"
+          ]
+        },
+        "value": "\"hello\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "nested"
+          ]
+        },
+        "value": "{\"level1\":{\"level2\":\"deep\"}}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "nested",
+            "level1"
+          ]
+        },
+        "value": "{\"level2\":\"deep\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "nested",
+            "level1",
+            "level2"
+          ]
+        },
+        "value": "\"deep\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "ports"
+          ]
+        },
+        "value": "[80,443]",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "ports",
+            0
+          ]
+        },
+        "value": "80",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "ports",
+            1
+          ]
+        },
+        "value": "443",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "manifest"
+        },
+        "value": "---\n# Source: plain/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: beta-plain\ndata:\n  message: \"hi-from-v3\"\n  ports: \"80,443\"\n  deep: \"deep\"\n\n",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "description"
+        },
+        "value": "Install complete",
+        "binary": false
+      }
+    ],
+    "2": [
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": []
+        },
+        "value": "{\"message\":\"second\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "message"
+          ]
+        },
+        "value": "\"second\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": []
+        },
+        "value": "{\"message\":\"hello\",\"nested\":{\"level1\":{\"level2\":\"deep\"}},\"ports\":[80,443]}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "message"
+          ]
+        },
+        "value": "\"hello\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "nested"
+          ]
+        },
+        "value": "{\"level1\":{\"level2\":\"deep\"}}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "nested",
+            "level1"
+          ]
+        },
+        "value": "{\"level2\":\"deep\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "nested",
+            "level1",
+            "level2"
+          ]
+        },
+        "value": "\"deep\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "ports"
+          ]
+        },
+        "value": "[80,443]",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "ports",
+            0
+          ]
+        },
+        "value": "80",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "ports",
+            1
+          ]
+        },
+        "value": "443",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "manifest"
+        },
+        "value": "---\n# Source: plain/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: beta-plain\ndata:\n  message: \"second\"\n  ports: \"80,443\"\n  deep: \"deep\"\n\n",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "description"
+        },
+        "value": "Uninstallation complete",
+        "binary": false
+      }
+    ]
+  },
+  "fmt-d/stuck": {
+    "1": [
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": []
+        },
+        "value": "{\"message\":\"hi-from-v3\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "message"
+          ]
+        },
+        "value": "\"hi-from-v3\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": []
+        },
+        "value": "{\"message\":\"hello\",\"nested\":{\"level1\":{\"level2\":\"deep\"}},\"ports\":[80,443]}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "message"
+          ]
+        },
+        "value": "\"hello\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "nested"
+          ]
+        },
+        "value": "{\"level1\":{\"level2\":\"deep\"}}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "nested",
+            "level1"
+          ]
+        },
+        "value": "{\"level2\":\"deep\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "nested",
+            "level1",
+            "level2"
+          ]
+        },
+        "value": "\"deep\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "ports"
+          ]
+        },
+        "value": "[80,443]",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "ports",
+            0
+          ]
+        },
+        "value": "80",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "ports",
+            1
+          ]
+        },
+        "value": "443",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "manifest"
+        },
+        "value": "---\n# Source: plain/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: beta-plain\ndata:\n  message: \"hi-from-v3\"\n  ports: \"80,443\"\n  deep: \"deep\"\n\n",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "description"
+        },
+        "value": "Install complete",
+        "binary": false
+      }
+    ],
+    "2": [
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": []
+        },
+        "value": "{\"message\":\"never applied\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": false,
+          "path": [
+            "message"
+          ]
+        },
+        "value": "\"never applied\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": []
+        },
+        "value": "{\"message\":\"hello\",\"nested\":{\"level1\":{\"level2\":\"deep\"}},\"ports\":[80,443]}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "message"
+          ]
+        },
+        "value": "\"hello\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "nested"
+          ]
+        },
+        "value": "{\"level1\":{\"level2\":\"deep\"}}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "nested",
+            "level1"
+          ]
+        },
+        "value": "{\"level2\":\"deep\"}",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "nested",
+            "level1",
+            "level2"
+          ]
+        },
+        "value": "\"deep\"",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "ports"
+          ]
+        },
+        "value": "[80,443]",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "ports",
+            0
+          ]
+        },
+        "value": "80",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "values",
+          "defaults": true,
+          "path": [
+            "ports",
+            1
+          ]
+        },
+        "value": "443",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "manifest"
+        },
+        "value": "---\n# Source: plain/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: beta-plain\ndata:\n  message: \"hi-from-v3\"\n  ports: \"80,443\"\n  deep: \"deep\"\n\n",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "description"
+        },
+        "value": "Preparing upgrade",
+        "binary": false
+      }
+    ]
+  }
+}

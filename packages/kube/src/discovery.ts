@@ -1,4 +1,5 @@
 import {
+  isHelmList,
   toIpcError,
   type Discovered,
   type Gvr,
@@ -6,6 +7,7 @@ import {
   type Resource,
 } from "@twigo/protocol";
 import { useEffect, useState } from "react";
+import { HELM_RESOURCE } from "./helm/status";
 import {
   Changes,
   useChanges,
@@ -184,6 +186,7 @@ export function servedAs(
   resources: readonly Resource[],
   gvr: Gvr,
 ): Resource | undefined {
+  if (isHelmList(gvr)) return HELM_RESOURCE;
   return (
     resources.find((candidate) => sameGvr(candidate.gvr, gvr)) ??
     resources.find(

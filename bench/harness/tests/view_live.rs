@@ -25,6 +25,7 @@ use kube::{Api, Config};
 use tokio::sync::mpsc;
 use twigo_cache::batcher::Batcher;
 use twigo_cache::hub::{Connect, Delta, Hub, Query, Resource, RowFormat};
+use twigo_cache::request::Selectors;
 use twigo_cache::view::{QueryView, Spec};
 use twigo_ipc::{Cell, Gvr, ListBatch, ListQuery, Parts, Row, RowId, Sort, ViewState};
 use twigo_kube::client::{Clients, Gate, Options};
@@ -70,7 +71,7 @@ fn hub_query(context: &str) -> Query {
         },
         format: RowFormat::Table,
         namespaces: vec![NAMESPACE.to_owned()],
-        field_selector: None,
+        selectors: Selectors::default(),
     }
 }
 
@@ -239,6 +240,7 @@ async fn under_churn(path: &std::ffi::OsStr, context: &str, clients: &Arc<Client
     let hub = Hub::new(connect(clients));
     let (sender, batches) = mpsc::unbounded_channel();
     let batcher = Batcher::spawn(
+        "list",
         hub.rows(hub_query(context)).await.unwrap(),
         Spec::new(context, &query(context)).unwrap(),
         None,

@@ -56,6 +56,8 @@ const SUSPENDS =
 const CRON_JOB = "resource.group == batch && resource.kind == CronJob";
 /** Pinned wherever the item shows. */
 const ALWAYS = "true";
+/** Rows that are objects of the cluster's API: a Helm release is read from Secrets and has no YAML, verbs or capabilities of its own. */
+const OBJECT = "resource.group != helm.sh";
 
 /** Where a key of a verb works: in a focused list, and on the Overview of an object editor that has its object, the other views and a text field there taking typing. */
 const FOCUSED = `listFocus || (pageFocus && !inputFocus && ${OBJECT_SUBJECT})`;
@@ -312,7 +314,7 @@ export function registerResourceActions(
       title: "Show YAML",
       icon: FileCode,
       key: "e",
-      when: LIST_URI,
+      when: `${LIST_URI} && ${OBJECT}`,
       menus: [["resource/context", "navigation"]],
       run: (lookup) => {
         const found = target(lookup);
@@ -326,7 +328,7 @@ export function registerResourceActions(
       title: "Open in Editor",
       icon: SquareArrowOutUpRight,
       key: "mod+enter",
-      when: LIST_URI,
+      when: `${LIST_URI} && ${OBJECT}`,
       menus: [["resource/context", "navigation"]],
       run: (lookup) => {
         const found = target(lookup);
@@ -606,6 +608,7 @@ export function registerResourceActions(
       icon: Trash2,
       key: "mod+backspace",
       keyWhen: "!listMarked",
+      when: OBJECT,
       requires: [
         { when: "resource.capability.delete", reason: "You may not delete it" },
       ],
@@ -632,7 +635,7 @@ export function registerResourceActions(
       icon: Trash2,
       key: "mod+backspace",
       keyWhen: "listMarked",
-      when: "marked.capability.delete",
+      when: `marked.capability.delete && ${OBJECT}`,
       danger: true,
       sends: "write",
       menus: [["resource/marked", "8_delete"]],

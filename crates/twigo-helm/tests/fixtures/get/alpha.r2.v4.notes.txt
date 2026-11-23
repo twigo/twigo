@@ -1,0 +1,6 @@
+NOTES:
+Thank you for installing demo.
+
+Release alpha is at revision 2 in fmt-a.
+The image is registry.example/demo:1.2.
+

@@ -38,7 +38,7 @@ pub(crate) async fn protection(
         destructive: false,
         consequences: consequences(&context, &planned),
         affected: Vec::new(),
-        kubectl: None,
+        command_line: None,
         doing,
         previewed: None,
         run: bus::Run::Protects {

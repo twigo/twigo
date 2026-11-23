@@ -1,5 +1,5 @@
-//! ConfigMaps and Secrets: their keys with sizes, never a Secret's values
-//! (ARCHITECTURE 3.6).
+//! ConfigMaps and Secrets: their keys with sizes, never a Secret's values,
+//! nor those of a ConfigMap that holds a Helm release (ARCHITECTURE 3.6).
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -37,7 +37,7 @@ pub(crate) fn config_map(input: &Input<'_>) -> Described {
     let keys = entries.len();
     blocks.push(Block::Data {
         entries,
-        readable: true,
+        readable: !twigo_policy::redact::holds_helm_release(object),
     });
     Described {
         sections: vec![keys_section(keys, blocks)],

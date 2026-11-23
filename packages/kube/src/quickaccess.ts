@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  isHelmList,
   ListView,
   lowerAscii,
   REFUSED,
@@ -12,6 +13,7 @@ import {
   type Row,
 } from "@twigo/protocol";
 import { fuzzyMatch, type TextRange } from "@twigo/ui";
+import { HELM_RESOURCE } from "./helm/status";
 import {
   ALL_NAMESPACES,
   filtered,
@@ -31,7 +33,7 @@ import type { ListServices } from "./services";
 import { listUri, parseListUri, parseObjectUri } from "./uri";
 
 /** A `:` query in k9s's grammar: `po payments /api app=web @prod-eu`. */
-export interface K9sQuery {
+interface K9sQuery {
   readonly resource: string;
   readonly namespace?: string;
   readonly text?: string;
@@ -39,7 +41,7 @@ export interface K9sQuery {
   readonly context?: string;
 }
 
-export function parseK9s(input: string): K9sQuery | undefined {
+function parseK9s(input: string): K9sQuery | undefined {
   const [resource, ...rest] = input.trim().split(/\s+/).filter(Boolean);
   if (!resource) return undefined;
   const labels: string[] = [];
@@ -75,7 +77,7 @@ export function namespacesOf(word: string): readonly string[] | undefined {
  * The resource a name means, as kubectl resolves it: plural, singular, short
  * name or kind. Discovery lists the core group first, so `events` is core.
  */
-export function resolveResource(
+function resolveResource(
   resources: readonly Resource[],
   name: string,
 ): Resource | undefined {
@@ -128,7 +130,10 @@ export function listProvider(
     async items(filter) {
       const space = spaces.active;
       if (!space) return [];
-      const resources = await discovery.resources(space.id);
+      const resources = [
+        ...(await discovery.resources(space.id)),
+        HELM_RESOURCE,
+      ];
       const query = parseK9s(filter);
       if (!query) {
         return resources.map((resource) => titled(resource));
@@ -151,6 +156,8 @@ export function listProvider(
       }
       const resource = resolveResource(resources, query.resource);
       if (!resource) return [];
+      // A release has no labels of its own to select by.
+      if (isHelmList(resource.gvr) && query.labels !== undefined) return [];
       const namespaces =
         query.namespace === undefined
           ? undefined
@@ -183,7 +190,10 @@ export function listProvider(
     async accept(item, filter, _context, options) {
       const space = spaces.active;
       if (!space) return;
-      const resources = await discovery.resources(space.id);
+      const resources = [
+        ...(await discovery.resources(space.id)),
+        HELM_RESOURCE,
+      ];
       const query = parseK9s(filter);
       const typed = query && /\s/.test(filter.trim()) ? query : undefined;
       const resource = typed
@@ -450,7 +460,7 @@ export function resourceProvider(
 }
 
 /** A recent editor as quick access and the home show it. */
-export interface RecentRow {
+interface RecentRow {
   readonly label: string;
   readonly icon?: LucideIcon;
   /** An object's namespace, or a list's scope and filter. */

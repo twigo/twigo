@@ -204,6 +204,23 @@ fn a_config_map_lists_text_and_binary_keys_with_their_sizes() {
 }
 
 #[test]
+fn a_config_map_that_holds_a_helm_release_offers_none_of_its_values_to_read() {
+    let mut object = recorded()["configmap"].object.clone();
+    object["metadata"]["labels"]["owner"] = Value::from("helm");
+    let overview = describe(Input {
+        object: &object,
+        printed: &[],
+        events: &EventList::default(),
+        facts: &[],
+    });
+    let Block::Data { entries, readable } = &overview.sections[0].blocks[0] else {
+        panic!("the data block");
+    };
+    assert!(!readable);
+    assert_eq!(entries.len(), 3, "its keys still show with their sizes");
+}
+
+#[test]
 fn a_pod_names_its_controller_and_its_events() {
     let described = described();
     let pod = &described["pod"];

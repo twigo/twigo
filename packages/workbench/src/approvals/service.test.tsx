@@ -84,7 +84,7 @@ const PLAN: Plan = {
   destructive: true,
   consequences: [],
   affected: [],
-  kubectl: "kubectl --context dev delete pods web-1 -n default",
+  commandLine: "kubectl --context dev delete pods web-1 -n default",
   doing: "Deleting pod web-1",
 };
 

@@ -42,6 +42,17 @@ async function withEveryEnablement() {
   workbench.keys.set("space.id", "dev");
   workbench.keys.set("operationUndo", ["dev"]);
   workbench.keys.set("resource.scalable", true);
+  workbench.keys.set("list.uri", "helm-list://dev");
+  workbench.keys.set("helm.revision", 2);
+  workbench.keys.set("helm.previous", 1);
+  for (const key of [
+    "helm.canReveal",
+    "helm.canHide",
+    "helm.canRevealAll",
+    "helm.canHideAll",
+    "helm.marked",
+  ])
+    workbench.keys.set(key, true);
   for (const key of [
     "resource.forward",
     "forward",
@@ -73,6 +84,11 @@ const KINDS = [
     kind: "CronJob",
     commands: /^k8s\.(cronjob\.|resource\.(suspend|resume)$)/,
   },
+  {
+    group: "helm.sh",
+    kind: "HelmRelease",
+    commands: /^helm\.(release|values?|text)\./,
+  },
 ] as const;
 
 test("every registered command appears in the palette", async () => {
@@ -98,6 +114,8 @@ test("every registered command appears in the palette", async () => {
       (id) =>
         id !== "k8s.logs.open" &&
         id !== "k8s.shell.open" &&
+        (!/^helm\.revisions?\./.test(id) ||
+          id === "helm.revisions.clearMarks") &&
         (!id.startsWith("k8s.forward.") || id === "k8s.forward.stopAll"),
     );
   expect(ids.length).toBeGreaterThan(25);

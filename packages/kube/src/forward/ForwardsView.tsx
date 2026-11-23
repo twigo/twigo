@@ -29,15 +29,7 @@ const COLUMNS: readonly GridColumn[] = [
  * list service: Enter opens a forward's tab, and its menu and keys act on
  * the selected row.
  */
-export function ForwardsView({ forwards }: { forwards: Forwards }) {
-  const { spaces } = useWorkbench();
-  useChanges(spaces.changes);
-  const space = spaces.active;
-  if (!space) return null;
-  return <SpaceForwards key={space.id} forwards={forwards} space={space.id} />;
-}
-
-function SpaceForwards({
+export function ForwardsView({
   forwards,
   space,
 }: {

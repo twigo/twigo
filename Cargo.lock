@@ -6040,9 +6040,11 @@ name = "twigo-core"
 version = "0.1.0"
 dependencies = [
  "atomic-write-file",
+ "backon",
  "base64 0.23.1",
  "bytes",
  "fastrand",
+ "flate2",
  "form_urlencoded",
  "futures",
  "http",
@@ -6074,6 +6076,7 @@ dependencies = [
  "twigo-core",
  "twigo-describe",
  "twigo-env",
+ "twigo-helm",
  "twigo-ipc",
  "twigo-kube",
  "twigo-log",
@@ -6123,6 +6126,15 @@ version = "0.1.0"
 [[package]]
 name = "twigo-helm"
 version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "flate2",
+ "jiff",
+ "serde",
+ "serde_json",
+ "twigo-ipc",
+ "twigo-policy",
+]
 
 [[package]]
 name = "twigo-ipc"
@@ -6258,6 +6270,7 @@ dependencies = [
  "jiff",
  "percent-encoding",
  "serde",
+ "serde-saphyr",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",

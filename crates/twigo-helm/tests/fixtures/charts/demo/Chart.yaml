@@ -1,0 +1,17 @@
+apiVersion: v2
+name: demo
+description: A chart written for Twigo's Helm decoder fixtures
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - fixture
+annotations:
+  fixture.twigo.example/purpose: decoder
+dependencies:
+  - name: sub
+    version: 0.1.0
+    repository: "file://charts/sub"
+    import-values:
+      - child: exported
+        parent: fromSub

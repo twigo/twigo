@@ -1,11 +1,12 @@
 //! What an ask shows of what its request would do (`ApprovalDetail`): a
 //! write of a resource itself is dry-run through the same actor's clients
 //! and compared with the live object, both sides as an apply's diff shows
-//! them, a Secret's values masked and none of the server's words about it
-//! shown; a delete shows its propagation, an exec what it runs. The dry run
-//! goes only where the gate takes it for one, to a group-version
-//! kube-apiserver serves itself: an aggregated server that ignored `dryRun`
-//! would perform the write before the person answers.
+//! them, a Secret's values and a ConfigMap's Helm release masked, and none
+//! of the server's words about either shown, nor the body sent; a delete
+//! shows its propagation, an exec what it runs. The dry run goes only where
+//! the gate takes it for one, to a group-version kube-apiserver serves
+//! itself: an aggregated server that ignored `dryRun` would perform the
+//! write before the person answers.
 
 use bytes::Bytes;
 use http::header::{ACCEPT, HeaderValue};
@@ -16,8 +17,9 @@ use serde_json::Value;
 use twigo_ipc::{ApprovalDetail, IpcError, NoDiff, RequestClass};
 use twigo_kube::client::{ActorClients, Server};
 use twigo_policy::Attributes;
+use twigo_policy::redact::holds_helm_release;
 
-use crate::actions::{send, side};
+use crate::actions::{send, sides};
 
 /// The largest body an ask shows as sent.
 const SHOWN_BODY: usize = 4 << 10;
@@ -27,7 +29,11 @@ const SHOWN_BODY: usize = 4 << 10;
 /// ([`applyPatchToCurrentObject`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/patch.go#L334-L358)),
 /// values the request never named among them, so no list of values can say
 /// what to take out.
-const UNSAID: &str = "Twigo does not show its words, which may quote the Secret's values";
+const SECRET_UNSAID: &str = "Twigo does not show its words, which may quote the Secret's values";
+/// [`SECRET_UNSAID`] for a ConfigMap that holds a Helm release, which a
+/// refusal of a patch quotes whole in the patched ConfigMap.
+const RELEASE_UNSAID: &str =
+    "Twigo does not show its words, which may quote the Helm release the ConfigMap holds";
 
 pub(crate) async fn of(
     actor: &ActorClients,
@@ -35,17 +41,19 @@ pub(crate) async fn of(
     parts: &Parts,
     body: &Bytes,
 ) -> ApprovalDetail {
+    let sent: Option<Value> = serde_json::from_slice(body).ok();
     if attributes.deletes {
-        let body: Option<Value> = serde_json::from_slice(body).ok();
         let options = match attributes.subresource.as_deref() {
-            Some("eviction") => body.as_ref().map(|body| &body["deleteOptions"]),
-            _ => body.as_ref(),
+            Some("eviction") => sent.as_ref().map(|sent| &sent["deleteOptions"]),
+            _ => sent.as_ref(),
         };
         let propagation = options
             .and_then(|options| options["propagationPolicy"].as_str())
             .map(str::to_owned);
         return ApprovalDetail::Delete { propagation };
     }
+    let secret = attributes.resource.as_deref() == Some("secrets");
+    let release = sent.as_ref().is_some_and(holds_helm_release);
     let reason = if attributes.class == RequestClass::Exec {
         match session(attributes, parts) {
             Some(session) => return session,
@@ -56,13 +64,21 @@ pub(crate) async fn of(
     } else if attributes.subresource.is_some() {
         NoDiff::Subresource
     } else {
-        let secret = attributes.resource.as_deref() == Some("secrets");
-        match diff(actor, parts, body, secret).await {
-            Ok(diff) => return diff,
-            Err(reason) => reason,
-        }
+        return diff(actor, parts, body, secret, release).await;
     };
-    let shown = attributes.resource.as_deref() != Some("secrets") && body.len() <= SHOWN_BODY;
+    unknown(reason, body, unsaid(secret, release))
+}
+
+fn unsaid(secret: bool, release: bool) -> Option<&'static str> {
+    if secret {
+        Some(SECRET_UNSAID)
+    } else {
+        release.then_some(RELEASE_UNSAID)
+    }
+}
+
+fn unknown(reason: NoDiff, body: &Bytes, unsaid: Option<&str>) -> ApprovalDetail {
+    let shown = unsaid.is_none() && body.len() <= SHOWN_BODY;
     ApprovalDetail::Unknown {
         reason,
         body: shown
@@ -101,50 +117,67 @@ fn session(attributes: &Attributes, parts: &Parts) -> Option<ApprovalDetail> {
     })
 }
 
+/// The dry run's diff, or why there is none; `release` says that the body
+/// holds a Helm release, which the live object or the answer may say too.
 async fn diff(
     actor: &ActorClients,
     parts: &Parts,
     body: &Bytes,
     secret: bool,
-) -> Result<ApprovalDetail, NoDiff> {
+    release: bool,
+) -> ApprovalDetail {
+    let none = |reason| unknown(reason, body, unsaid(secret, release));
     let dry_run = dry_run(parts, body);
     if let Some((group, version)) = Attributes::dry_run_group(&dry_run) {
         match actor.server(&group, &version).await {
             Some(Server::Itself) => {}
-            Some(Server::Aggregated) => return Err(NoDiff::Aggregated),
-            None => return Err(NoDiff::Unverified),
+            Some(Server::Aggregated) => return none(NoDiff::Aggregated),
+            None => return none(NoDiff::Unverified),
         }
     }
     let class = actor.attributes(&dry_run).await.class;
     if !matches!(class, RequestClass::DryRun | RequestClass::SecretRead) {
         // The reviews of authorization.k8s.io answer whatever `dryRun`
         // says.
-        return Err(NoDiff::NotAResource);
+        return none(NoDiff::NotAResource);
     }
     let api = &actor.api;
-    let (result, mut warnings) = send(api, dry_run).await.map_err(|error| {
-        let refused = twigo_kube::errors::request(&error);
-        NoDiff::Refused {
-            error: if secret {
-                IpcError::new(refused.code, UNSAID)
-            } else {
-                refused
-            },
-        }
-    })?;
-    if secret && !warnings.is_empty() {
-        warnings = vec![UNSAID.to_owned()];
-    }
-    let live = if parts.method == Method::POST {
+    let answer = send(api, dry_run).await;
+    // A refusal reads the live object only for whether it holds a Helm
+    // release, which a Secret never does.
+    let live = if parts.method == Method::POST || (secret && answer.is_err()) {
         Value::Null
     } else {
         live(api, parts).await
     };
-    Ok(ApprovalDetail::Diff {
-        live: side(live),
-        result: side(result),
+    let release = release
+        || holds_helm_release(&live)
+        || answer
+            .as_ref()
+            .is_ok_and(|(result, _)| holds_helm_release(result));
+    let unsaid = unsaid(secret, release);
+    let (result, mut warnings) = match answer {
+        Ok(answer) => answer,
+        Err(error) => {
+            let refused = twigo_kube::errors::request(&error);
+            let error = match unsaid {
+                Some(unsaid) => IpcError::new(refused.code, unsaid),
+                None => refused,
+            };
+            return unknown(NoDiff::Refused { error }, body, unsaid);
+        }
+    };
+    if let Some(unsaid) = unsaid
+        && !warnings.is_empty()
+    {
+        warnings = vec![unsaid.to_owned()];
+    }
+    let (live, result) = sides(live, result, release);
+    ApprovalDetail::Diff {
+        live,
+        result,
         warnings,
-    })
+    }
 }
 
 /// The same request with `dryRun=All`, asking for JSON.

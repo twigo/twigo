@@ -14,6 +14,7 @@ import {
   textOptions,
   Uri,
 } from "./monaco";
+import { topKeyMarks } from "./landmarks";
 import { statusLines } from "./object";
 import { landmarksOf, outlineOf, pathAt, type Entry } from "./outline";
 import {
@@ -77,19 +78,7 @@ function landmarks(
 ): editor.IModelDeltaDecoration[] {
   const { keys, managed } = landmarksOf(outline);
   return [
-    ...keys.map(([start, end]) => {
-      const from = model.getPositionAt(start);
-      const to = model.getPositionAt(end);
-      return {
-        range: {
-          startLineNumber: from.lineNumber,
-          startColumn: from.column,
-          endLineNumber: to.lineNumber,
-          endColumn: to.column,
-        },
-        options: { inlineClassName: "twigo-yaml-top-key" },
-      };
-    }),
+    ...topKeyMarks(keys, model),
     ...(managed
       ? [
           {

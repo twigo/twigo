@@ -11,6 +11,7 @@ import type {
   Column,
   KeyboardLayout,
   ListBatch,
+  ListQuery,
   MetricsState,
   Report,
   RowId,
@@ -66,6 +67,13 @@ import {
   PINNED_ANSWERS,
   type EditScenario,
 } from "./edits";
+import {
+  compare,
+  HELM_KIND,
+  listQueryOf,
+  MockRelease,
+  type ReleaseBinding,
+} from "./helm";
 import { KINDS, wireRow, type MockKind, type MockRow } from "./kinds";
 import { CLUSTER_STREAMS } from "../logs";
 import { MockLogs } from "./logs";
@@ -80,7 +88,7 @@ import {
   type MetricsScenario,
 } from "./metrics";
 import { MockObject } from "./objects";
-import { MockParts, type PartsView } from "./parts";
+import { MockParts, pinOf, type PartsView } from "./parts";
 import { printedColumns } from "./printed";
 import {
   isShellScenario,
@@ -485,6 +493,20 @@ export function createMockBackend(
     return found;
   };
 
+  const releases = new Map<
+    number,
+    { readonly release: MockRelease; readonly context: string }
+  >();
+  const release = (id: number) => {
+    const found = releases.get(id);
+    if (!found)
+      throw new IpcError(
+        "subscription.not-found",
+        `no release subscription ${id}`,
+      );
+    return found;
+  };
+
   const objectContexts = new Map<number, string>();
   const edits = new MockEdits();
   const bus = new MockBus({
@@ -539,6 +561,7 @@ export function createMockBackend(
     context: (id) => space(id).contexts[0],
     cluster,
     reveal: (id, key) => object(id).reveal(key),
+    release,
     secret: (id) => {
       const context = objectContexts.get(id);
       if (context === undefined) {
@@ -721,6 +744,23 @@ export function createMockBackend(
       subscription(id).ack(seq);
       return null;
     },
+    helm_release_set_view: ({ id, revision, parts }) => {
+      release(id).release.setView({ revision, parts });
+      return null;
+    },
+    helm_release_ack: ({ id }) => {
+      release(id);
+      return null;
+    },
+    helm_release_close: (id) => {
+      release(id).release.close();
+      releases.delete(id);
+      return null;
+    },
+    helm_compare: (request) => {
+      space(request.release.space);
+      return compare(request);
+    },
     object_set_parts: ({ id, parts }) => {
       object(id).setParts(parts);
       return null;
@@ -837,6 +877,109 @@ export function createMockBackend(
     }, RATE_TICK_MS);
   };
 
+  /**
+   * What the scenario does to an open release: its namespace's Secrets are in
+   * the state the list of releases reads them in, which a refused namespace
+   * of `rbacNamespaces` is, and `objectPanicked` ends the editor on an
+   * internal error after what it showed.
+   */
+  const releaseBinding = (namespace: string): ReleaseBinding => {
+    const refused: ViewState = {
+      state: "forbidden",
+      verb: "list",
+      resource: "secrets",
+    };
+    const status =
+      pinOf(scenario, "secrets")?.({ kind: "namespace", name: namespace }, 0, 1)
+        ?.state.state === "forbidden" || lists === "forbidden"
+        ? refused
+        : lists === "live"
+          ? undefined
+          : PINNED[lists];
+    return {
+      ...(status && { status }),
+      ...(scenario === "objectPanicked" && { ends: CAUSED.listPanicked }),
+    };
+  };
+
+  /** A list of `kind`, whose refusals name `refused`: Secrets, which a release is read from. */
+  const openList = (
+    query: ListQuery,
+    kind: MockKind,
+    refused: string,
+    onMessage: (batch: ListBatch) => void,
+  ): number => {
+    const [context] = space(query.space).contexts;
+    if (context === undefined) {
+      throw new IpcError(
+        "context.not-listed",
+        `space ${query.space} has no context`,
+      );
+    }
+    const selected = parseFields(query.fieldSelector, kind);
+    const served = queryColumns(printedColumns(query.gvr, kind.columns), query);
+    const join =
+      kind.metrics && metrics.served
+        ? new MetricsJoin(metrics, metricsAt(served), context, query.namespaces)
+        : undefined;
+    const columns = join
+      ? [
+          ...served.slice(0, join.at),
+          ...METRIC_COLUMNS,
+          ...served.slice(join.at),
+        ]
+      : served;
+    const compiled = compileQuery(query, columns);
+    const id = nextId++;
+    const forbidden: ViewState = {
+      state: "forbidden",
+      verb: "list",
+      resource: refused,
+    };
+    const failed = listFailure(scenario, context);
+    const state: Exclude<ListScenario, "forbidden"> | ViewState = failed
+      ? { state: "error", error: failed }
+      : typeof selected === "string"
+        ? {
+            state: "error",
+            error: wire("server.invalid", selected, {
+              reason: "BadRequest",
+              causes: [],
+            }),
+          }
+        : lists === "forbidden" ||
+            (lists === "live" && FORBIDDEN[context]?.includes(refused))
+          ? forbidden
+          : lists === "live" && ANONYMOUS.includes(context)
+            ? PINNED.unauthorized
+            : lists;
+    subscriptions.set(
+      id,
+      new Subscription(
+        compiled,
+        typeof selected === "string" ? () => true : selected,
+        columns,
+        kind,
+        cluster(context),
+        state,
+        new MockParts(
+          { ...query, gvr: { ...query.gvr, resource: refused } },
+          scenario,
+          cluster(context).resolved,
+        ),
+        onMessage,
+        join,
+      ),
+    );
+    if (lists === "live" && churn === undefined) {
+      churn =
+        changesPerSecond === undefined
+          ? demoChurn()
+          : steadyChurn(changesPerSecond);
+    }
+    return id;
+  };
+
   const streams: {
     [C in SubscriptionCommand]: (
       request: RequestOf<C>,
@@ -844,86 +987,37 @@ export function createMockBackend(
     ) => ResponseOf<C>;
   } = {
     list_subscribe: (query, onMessage) => {
-      const [context] = space(query.space).contexts;
-      if (context === undefined) {
-        throw new IpcError(
-          "context.not-listed",
-          `space ${query.space} has no context`,
-        );
-      }
       const { group, version, resource } = query.gvr;
       const kind = KINDS[`${group}/${version}/${resource}`];
       if (!kind) {
+        space(query.space);
         throw new IpcError(
           "apply.kind-not-served",
           `the mock backend serves only pods, nodes, deployments, jobs and events, not ${resource}`,
         );
       }
-      const selected = parseFields(query.fieldSelector, kind);
-      const served = queryColumns(
-        printedColumns(query.gvr, kind.columns),
-        query,
-      );
-      const join =
-        kind.metrics && metrics.served
-          ? new MetricsJoin(
-              metrics,
-              metricsAt(served),
-              context,
-              query.namespaces,
-            )
-          : undefined;
-      const columns = join
-        ? [
-            ...served.slice(0, join.at),
-            ...METRIC_COLUMNS,
-            ...served.slice(join.at),
-          ]
-        : served;
-      const compiled = compileQuery(query, columns);
-      const id = nextId++;
-      const forbidden: ViewState = {
-        state: "forbidden",
-        verb: "list",
-        resource,
-      };
-      const failed = listFailure(scenario, context);
-      const state: Exclude<ListScenario, "forbidden"> | ViewState = failed
-        ? { state: "error", error: failed }
-        : typeof selected === "string"
-          ? {
-              state: "error",
-              error: wire("server.invalid", selected, {
-                reason: "BadRequest",
-                causes: [],
-              }),
-            }
-          : lists === "forbidden" ||
-              (lists === "live" && FORBIDDEN[context]?.includes(resource))
-            ? forbidden
-            : lists === "live" && ANONYMOUS.includes(context)
-              ? PINNED.unauthorized
-              : lists;
-      subscriptions.set(
-        id,
-        new Subscription(
-          compiled,
-          typeof selected === "string" ? () => true : selected,
-          columns,
-          kind,
-          cluster(context),
-          state,
-          new MockParts(query, scenario, cluster(context).resolved),
-          onMessage,
-          join,
-        ),
-      );
-      if (lists === "live" && churn === undefined) {
-        churn =
-          changesPerSecond === undefined
-            ? demoChurn()
-            : steadyChurn(changesPerSecond);
+      return openList(query, kind, resource, onMessage);
+    },
+    helm_list_subscribe: (request, onMessage) =>
+      openList(listQueryOf(request), HELM_KIND, "secrets", onMessage),
+    helm_release_open: ({ release: ref, revision, parts }, onMessage) => {
+      const [context] = space(ref.space).contexts;
+      if (context === undefined) {
+        throw new IpcError(
+          "context.not-listed",
+          `space ${ref.space} has no context`,
+        );
       }
+      const id = nextId++;
+      releases.set(id, {
+        release: new MockRelease(
+          ref,
+          { revision, parts },
+          onMessage,
+          releaseBinding(ref.namespace),
+        ),
+        context,
+      });
       return id;
     },
     object_open: ({ object: query, parts }, onMessage) => {

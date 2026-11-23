@@ -1,0 +1,4 @@
+# A Secret value that the notes print, and a value placed in the Secret's
+# data as it is, which the API server refuses when it is no base64.
+password: chart-default-password
+extra: ""

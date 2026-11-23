@@ -1,6 +1,4 @@
-import { FrameAcks } from "./acks";
 import type { Backend } from "./backend";
-import { IpcError, toIpcError } from "./error";
 import type {
   EventList,
   ObjectBatch,
@@ -8,13 +6,12 @@ import type {
   ObjectQuery,
   Overview,
   Related,
-  SubscriptionId,
   ViewState,
 } from "./generated";
 import { isShown, type ShownUsage } from "./metrics";
+import { OpenView } from "./openView";
 
 export interface ObjectSnapshot {
-  readonly seq: number;
   readonly status: ViewState;
   /** False until the object is listed, and once it is deleted. */
   readonly exists: boolean;
@@ -32,7 +29,6 @@ export interface ObjectSnapshot {
 }
 
 export const INITIAL_OBJECT: ObjectSnapshot = {
-  seq: 0,
   status: { state: "connecting" },
   exists: false,
   overview: undefined,
@@ -43,78 +39,31 @@ export const INITIAL_OBJECT: ObjectSnapshot = {
 };
 
 /**
- * One open object as a store for `useSyncExternalStore`, the drawer's or a
- * resource editor's (ARCHITECTURE 4.3). Rust follows only the parts its
- * views show, and each batch carries the parts that changed; it is
- * acknowledged on the next animation frame, as a list's is.
+ * One open object, the drawer's or a resource editor's (ARCHITECTURE 4.3):
+ * Rust follows only the parts its views show.
  */
-export class ObjectView {
+export class ObjectView extends OpenView<
+  ObjectParts,
+  ObjectBatch,
+  ObjectSnapshot
+> {
   readonly #backend: Backend;
-  readonly #listeners = new Set<() => void>();
-  #snapshot = INITIAL_OBJECT;
-  #id: SubscriptionId | undefined;
-  readonly #opened: Promise<SubscriptionId>;
-  #parts: ObjectParts;
-  #partsSent: ObjectParts;
-  readonly #acks = new FrameAcks(
-    (id, seq) => this.#backend.invoke("object_ack", { id, seq }),
-    () => this.#closed,
-    (error) => {
-      this.#fail(error);
-    },
-  );
-  #closed = false;
 
   constructor(backend: Backend, object: ObjectQuery, parts: ObjectParts) {
+    super(
+      {
+        open: (onBatch) =>
+          backend.subscribe("object_open", { object, parts }, onBatch),
+        ask: (id, next) =>
+          backend.invoke("object_set_parts", { id, parts: next }),
+        ack: (id, seq) => backend.invoke("object_ack", { id, seq }),
+        close: (id) => backend.invoke("object_close", id),
+        what: "object",
+      },
+      INITIAL_OBJECT,
+      parts,
+    );
     this.#backend = backend;
-    this.#parts = parts;
-    this.#partsSent = parts;
-    this.#opened = backend.subscribe(
-      "object_open",
-      { object, parts },
-      (batch) => {
-        this.#apply(batch);
-      },
-    );
-    this.#opened.then(
-      (id) => {
-        this.#id = id;
-        if (this.#closed) {
-          void this.#backend.invoke("object_close", id);
-          return;
-        }
-        if (!sameParts(this.#parts, this.#partsSent)) this.#sendParts();
-        this.#acks.opened(id);
-      },
-      (error: unknown) => {
-        this.#fail(error);
-      },
-    );
-  }
-
-  readonly subscribe = (listener: () => void): (() => void) => {
-    this.#listeners.add(listener);
-    return () => this.#listeners.delete(listener);
-  };
-
-  readonly getSnapshot = (): ObjectSnapshot => this.#snapshot;
-
-  setParts(parts: ObjectParts): void {
-    if (this.#closed || sameParts(parts, this.#parts)) return;
-    this.#parts = parts;
-    if (this.#id !== undefined) this.#sendParts();
-  }
-
-  /**
-   * Its subscription's id, which commands name it by, once it is open:
-   * a batch may come before the id.
-   */
-  id(): Promise<SubscriptionId> {
-    return this.#opened.then((id) => {
-      if (this.#closed)
-        throw new IpcError("subscription.not-found", "the object is closed");
-      return id;
-    });
   }
 
   /** The values of a ConfigMap's keys; null for a key it lacks or holds as binary data. */
@@ -124,30 +73,8 @@ export class ObjectView {
     );
   }
 
-  close(): void {
-    this.#closed = true;
-    this.#listeners.clear();
-    if (this.#id !== undefined) {
-      void this.#backend.invoke("object_close", this.#id);
-    }
-  }
-
-  #sendParts(): void {
-    if (this.#id === undefined) return;
-    const parts = this.#parts;
-    this.#partsSent = parts;
-    this.#backend
-      .invoke("object_set_parts", { id: this.#id, parts })
-      .catch((error: unknown) => {
-        this.#fail(error);
-      });
-  }
-
-  #apply(batch: ObjectBatch): void {
-    if (this.#closed) return;
-    const previous = this.#snapshot;
-    this.#publish({
-      seq: batch.seq,
+  protected next(batch: ObjectBatch, previous: ObjectSnapshot): ObjectSnapshot {
+    return {
       status: batch.status,
       exists: batch.exists,
       overview: batch.exists
@@ -159,21 +86,11 @@ export class ObjectView {
       events: batch.events ?? previous.events,
       related: batch.related ?? previous.related,
       usage: usageAfter(batch, previous.usage),
-    });
-    this.#acks.took(batch.seq);
+    };
   }
 
-  #fail(error: unknown): void {
-    if (this.#closed) return;
-    this.#publish({
-      ...this.#snapshot,
-      status: { state: "error", error: toIpcError(error) },
-    });
-  }
-
-  #publish(snapshot: ObjectSnapshot): void {
-    this.#snapshot = snapshot;
-    for (const listener of this.#listeners) listener();
+  protected same(a: ObjectParts, b: ObjectParts): boolean {
+    return sameParts(a, b);
   }
 }
 

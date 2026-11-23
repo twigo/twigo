@@ -1,0 +1,17 @@
+# A comment that the release never stores: Helm parses values.yaml into a map.
+replicaCount: 1
+image:
+  repository: registry.example/demo
+  tag: "1.0"
+  pullPolicy: IfNotPresent
+database:
+  host: db.example
+  # A secret-grade default in the chart itself.
+  password: chart-default-password
+removeMe: present-in-chart
+zeta: last-in-file
+alpha: first-key-alphabetically
+global:
+  region: eu-west
+sub:
+  greeting: hello from parent

@@ -22,6 +22,7 @@ import {
   Puzzle,
   Scale,
   Server,
+  ShipWheel,
   Shield,
   ShieldCheck,
   ShieldHalf,
@@ -32,7 +33,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import type { Gvr } from "@twigo/protocol";
+import { isHelmList, type Gvr } from "@twigo/protocol";
 
 /** Lucide icons for the built-in kinds, by resource (ARCHITECTURE 4.9). */
 export const KIND_ICONS: Readonly<Record<string, LucideIcon>> = {
@@ -64,6 +65,7 @@ export const KIND_ICONS: Readonly<Record<string, LucideIcon>> = {
   leases: TimerReset,
   events: Zap,
   customresourcedefinitions: Puzzle,
+  helm: ShipWheel,
 };
 
 /** Custom resources, whose groups always hold a dot, get the generic icon. */
@@ -73,6 +75,7 @@ export function kindIcon(gvr: Gvr): LucideIcon {
 
 /** The key of `KIND_ICONS` for a resource; custom resources have none. */
 export function iconKey(gvr: Gvr): string {
+  if (isHelmList(gvr)) return "helm";
   return isBuiltIn(gvr) ? gvr.resource : "";
 }
 
@@ -84,7 +87,7 @@ export const NAMESPACES: Gvr = {
 };
 
 /** True for the groups Kubernetes itself serves; a custom group holds a dot outside k8s.io. */
-export function isBuiltIn(gvr: Gvr): boolean {
+function isBuiltIn(gvr: Gvr): boolean {
   return !gvr.group.includes(".") || gvr.group.endsWith(".k8s.io");
 }
 
@@ -218,9 +221,13 @@ export function sections<T extends { readonly gvr: Gvr }>(
 const kindWords = (kind: string) =>
   kind.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(" ");
 
+/** A title inside a sentence: lower case, but for Helm, a name. */
+export const inText = (title: string): string =>
+  title.toLowerCase().replace(/^helm\b/, "Helm");
+
 /** One object of a kind as its list's title says the kind: `NetworkPolicy` → `network policy`. */
 export const singularTitle = (kind: string): string =>
-  kindWords(kind).join(" ").toLowerCase();
+  inText(kindWords(kind).join(" "));
 
 /**
  * A list's title from its kind's words and its resource, the plural that

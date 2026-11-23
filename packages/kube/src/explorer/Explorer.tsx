@@ -1,5 +1,11 @@
 import type { ReactNode } from "react";
-import { SHOWS_ROWS, type Gvr, type Resource } from "@twigo/protocol";
+import {
+  HELM_RELEASES,
+  SHOWS_ROWS,
+  type Gvr,
+  type Resource,
+} from "@twigo/protocol";
+import { ShipWheel } from "lucide-react";
 import { Count, Skeleton, StatusDot, Tree, type TreeRow } from "@twigo/ui";
 import {
   useChanges,
@@ -18,21 +24,15 @@ export const EXPLORER_VIEW = "kube.resources";
 
 const DEFAULT_OPEN = ["Workloads"];
 
+const HELM_SECTION = "Helm";
+
 /**
  * The resource tree of the active space (ARCHITECTURE 4.1): the lists the
  * user pinned, then the kinds by section. A click opens a list as a
  * preview, a double click keeps it; a kind whose list is open shows its
  * rows and its worst health. The open sections are kept per space.
  */
-export function Explorer({ services }: { services: ListServices }) {
-  const { spaces } = useWorkbench();
-  useChanges(spaces.changes);
-  const space = spaces.active;
-  if (!space) return null;
-  return <SpaceExplorer key={space.id} services={services} space={space.id} />;
-}
-
-function SpaceExplorer({
+export function Explorer({
   services,
   space,
 }: {
@@ -134,6 +134,35 @@ function ResourceTree({
       };
     }),
   ];
+
+  const releases = listUri({ space, gvr: HELM_RELEASES });
+  const opened = open.includes(HELM_SECTION);
+  rows.push(
+    {
+      id: HELM_SECTION,
+      depth: 0,
+      label: "Helm",
+      icon: ShipWheel,
+      open: opened,
+    },
+    ...(opened
+      ? [
+          {
+            id: releases,
+            parent: HELM_SECTION,
+            depth: 1,
+            label: "Releases",
+            trailing: (
+              <Total
+                status={statuses.get(releases)}
+                gvr={HELM_RELEASES}
+                whole
+              />
+            ),
+          },
+        ]
+      : []),
+  );
 
   return (
     <Tree

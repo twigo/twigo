@@ -1,4 +1,9 @@
-import type { Access, Backend, Gvr } from "@twigo/protocol";
+import {
+  isHelmList,
+  type Access,
+  type Backend,
+  type Gvr,
+} from "@twigo/protocol";
 import { Changes } from "@twigo/workbench";
 
 /** A capability of the list's own resource: `resource.capability.patch/scale`. */
@@ -162,6 +167,8 @@ export class Capabilities {
     basis: unknown,
     learns?: string,
   ): void {
+    // A release is no object of the cluster's API: no review names its verbs.
+    if (isHelmList(resource)) return;
     if (learns !== undefined && this.#known.get(learns)?.basis !== basis)
       this.#known.set(learns, {
         basis,

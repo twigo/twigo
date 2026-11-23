@@ -3,6 +3,12 @@ import { cn } from "../lib/cn";
 import { Button } from "./button";
 import { Kbd } from "./kbd";
 
+const TEXT = {
+  muted: "text-support",
+  error: "text-error",
+  warn: "text-warn-foreground",
+} as const;
+
 // One placeholder for empty / no-results / error / loading regions so states
 // stop drifting apart. `hero` centers an icon + title + body + optional action
 // and shortcut hint (view roots, the editor watermark); `inline` is a single
@@ -22,7 +28,7 @@ export function EmptyState({
 }: {
   icon?: LucideIcon;
   iconClassName?: string;
-  variant?: "muted" | "error";
+  variant?: keyof typeof TEXT;
   density?: "hero" | "inline";
   title?: string;
   action?: { label: string; onClick: () => void; icon?: LucideIcon };
@@ -39,7 +45,7 @@ export function EmptyState({
         role={role}
         className={cn(
           "flex items-start gap-1.5 px-2 py-3 text-xs leading-5",
-          variant === "error" ? "text-error" : "text-support",
+          TEXT[variant],
           className,
         )}
       >
@@ -58,7 +64,7 @@ export function EmptyState({
     <div
       className={cn(
         "flex animate-in flex-col items-center justify-center gap-2 px-6 text-center text-sm fade-in slide-in-from-bottom-1 duration-300",
-        variant === "error" ? "text-error" : "text-support",
+        TEXT[variant],
         className,
       )}
     >
@@ -66,7 +72,7 @@ export function EmptyState({
         <Icon
           className={cn(
             "size-8",
-            variant === "error" ? "opacity-70" : "opacity-30",
+            variant === "muted" ? "opacity-30" : "opacity-70",
             iconClassName,
           )}
         />

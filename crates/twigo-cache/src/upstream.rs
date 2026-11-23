@@ -29,7 +29,7 @@ use twigo_kube::client::{Clients, Waiting};
 use crate::cluster::{Cluster, REFUSED_FOR};
 use crate::decode::{Decode, DecodeError, Event};
 use crate::encoding;
-use crate::request::{self, Collection, Format, WatchFrom};
+use crate::request::{self, Collection, Format, Selectors, WatchFrom};
 use crate::store::{Item, Items, Store};
 
 /// Items per list page.
@@ -73,7 +73,7 @@ pub(crate) struct Spec {
     pub version: String,
     pub path: String,
     pub format: Format,
-    pub field_selector: Option<String>,
+    pub selectors: Selectors,
     /// How a 403 names it: `pods`, or `deployments.apps`.
     pub resource: String,
 }
@@ -300,9 +300,10 @@ pub fn backoff() -> ExponentialBackoff {
     paced(Duration::from_millis(500), RETRY_WITHIN / 2)
 }
 
-/// The pause before a part whose first list RBAC refused tries again: the
-/// hub's own lifetime of RBAC's no, `REFUSED_FOR`.
-fn refusal_pause() -> Duration {
+/// The pause before what RBAC refused is asked again, as a part whose first
+/// list it refused waits: the hub's own lifetime of RBAC's no,
+/// `REFUSED_FOR`, 30–60 s.
+pub fn refusal_pause() -> Duration {
     paced(REFUSED_FOR, REFUSED_FOR)
         .next()
         .expect("the backoff has no maximum of attempts")
@@ -798,7 +799,7 @@ where
         Collection {
             path: &self.spec.path,
             format: self.spec.format,
-            field_selector: self.spec.field_selector.as_deref(),
+            selectors: &self.spec.selectors,
         }
     }
 }

@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::AsyncBufReadExt;
 use k8s_openapi::api::authentication::v1::TokenRequest;
-use k8s_openapi::api::core::v1::{Namespace, Pod, ServiceAccount};
+use k8s_openapi::api::core::v1::{ConfigMap, Namespace, Pod, ServiceAccount};
 use k8s_openapi::api::rbac::v1::{ClusterRole, ClusterRoleBinding, Role, RoleBinding};
 use kube::api::{DeleteParams, Patch, PatchParams, PostParams};
 use kube::config::{AuthInfo, KubeConfigOptions, Kubeconfig};
@@ -258,7 +258,7 @@ impl Live {
             },
             format: RowFormat::Table,
             namespaces: namespaces.iter().map(|&name| name.to_owned()).collect(),
-            field_selector: None,
+            selectors: Selectors::default(),
         }
     }
 }
@@ -336,7 +336,7 @@ async fn a_watch_resumed_from_a_compacted_version_relists() {
         resource: live.query(&[]).resource,
         format: Format::Table,
         scope: Scope::Namespace(namespace.clone()),
-        field_selector: None,
+        selectors: Selectors::default(),
     };
     let env = || Env {
         connect: Arc::clone(&hub.inner.connect),
@@ -575,6 +575,64 @@ async fn a_service_account_that_may_list_namespaces_reads_all_of_those_it_may_li
     for namespace in &namespaces {
         live.delete_namespace(namespace).await;
     }
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn the_server_keeps_a_label_selected_upstream_to_the_objects_with_the_label() {
+    let live = live().await;
+    let namespace = live.namespace("hub-labels").await;
+    let config_maps = Api::<ConfigMap>::namespaced(live.admin.clone(), &namespace);
+    for (name, team) in [
+        ("a1", Some("a")),
+        ("a2", Some("a")),
+        ("b1", Some("b")),
+        ("c1", None),
+    ] {
+        let labels = team.map(|team| json!({ "team": team }));
+        let config_map: ConfigMap = serde_json::from_value(json!({
+            "metadata": { "name": name, "labels": labels }
+        }))
+        .unwrap();
+        config_maps
+            .create(&PostParams::default(), &config_map)
+            .await
+            .unwrap();
+    }
+    let (hub, _clients) = live.hub(None);
+    let mut query = live.query(&[&namespace]);
+    query.resource.resource = "configmaps".to_owned();
+    query.format = RowFormat::Metadata;
+    query.selectors.label = Some("team=a".to_owned());
+    let mut selected = hub.rows(query).await.unwrap();
+    until(&mut selected, |selected| {
+        ready(selected) && names(selected) == ["a1", "a2"]
+    })
+    .await;
+
+    let relabel = |team: serde_json::Value| json!({ "metadata": { "labels": { "team": team } } });
+    config_maps
+        .patch(
+            "c1",
+            &PatchParams::default(),
+            &Patch::Merge(&relabel(json!("a"))),
+        )
+        .await
+        .unwrap();
+    until(&mut selected, |selected| {
+        names(selected) == ["a1", "a2", "c1"]
+    })
+    .await;
+    config_maps
+        .patch(
+            "a1",
+            &PatchParams::default(),
+            &Patch::Merge(&relabel(json!("b"))),
+        )
+        .await
+        .unwrap();
+    until(&mut selected, |selected| names(selected) == ["a2", "c1"]).await;
+    live.delete_namespace(&namespace).await;
 }
 
 #[tokio::test]

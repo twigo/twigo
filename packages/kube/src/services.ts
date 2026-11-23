@@ -9,6 +9,7 @@ import { PinnedLists } from "./explorer/pinned";
 import { createEdits, type EditServices } from "./edit/services";
 import { OverviewStates } from "./object/overviewStates";
 import { PageStates } from "./object/pageStates";
+import { ReleaseStates } from "./helm/states";
 import { ListPresets } from "./presets";
 import { Selection } from "./selection";
 
@@ -37,6 +38,8 @@ export interface ListServices {
   readonly capabilities: Capabilities;
   /** Each YAML editor's working copy, preview and schema. */
   readonly edits: EditServices;
+  /** What each release editor and inspector shows beyond the release: its view, its plate, its marks and what the person revealed. */
+  readonly releases: ReleaseStates;
 }
 
 export function createServices(workbench: Workbench): ListServices {
@@ -46,11 +49,13 @@ export function createServices(workbench: Workbench): ListServices {
   });
   const grids = new ListGrids();
   const pages = new PageStates();
+  const releases = new ReleaseStates();
   workbench.editors.onClose((uri) => {
     states.closed(uri);
     capabilities.closed(uri);
     grids.closed(uri);
     pages.closed(uri);
+    releases.closed(uri);
   });
   return {
     discovery: new Discovery(workbench),
@@ -65,5 +70,6 @@ export function createServices(workbench: Workbench): ListServices {
     pages,
     capabilities,
     edits: createEdits(workbench),
+    releases,
   };
 }

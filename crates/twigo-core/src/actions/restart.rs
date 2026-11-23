@@ -100,7 +100,7 @@ pub(crate) async fn restart(
         doing: format!("Restarting {what}"),
         consequences,
         affected,
-        kubectl: Some(kubectl),
+        command_line: Some(kubectl),
         command: "restart",
         target: named,
         writes: vec![attributes],

@@ -884,6 +884,128 @@ async fn no_secret_value_reaches_the_webview_by_any_answer() {
     cluster.delete(&namespace).await;
 }
 
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn an_edit_of_a_config_map_that_holds_a_helm_release_names_none_of_it() {
+    const RELEASE: &str = "H4sIAAAAAAAC/release+of+a+config+map/kept+by+helm=";
+    const LAST_APPLIED: &str = "kubectl.kubernetes.io/last-applied-configuration";
+    let cluster = Cluster::connect().await;
+    let namespace = cluster.namespace("apply-release").await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let name = "sh.helm.release.v1.app.v1";
+    let path = format!("/api/v1/namespaces/{namespace}/configmaps/{name}");
+    server_apply(
+        &cluster.admin,
+        &path,
+        &json!({
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": {
+                "name": name,
+                "labels": { "owner": "helm", "name": "app", "version": "1", "status": "deployed" },
+                "annotations": { LAST_APPLIED: format!(r#"{{"data":{{"release":"{RELEASE}"}}}}"#) },
+            },
+            "data": { "release": RELEASE },
+        }),
+        "twigo",
+    )
+    .await;
+    let live = settled(&cluster.admin, &path).await;
+    let masked = || {
+        let mut base = view(&live);
+        base["data"]["release"] = json!(format!("<{} bytes>", RELEASE.len()));
+        base["metadata"]["annotations"]
+            .as_object_mut()
+            .unwrap()
+            .remove(LAST_APPLIED);
+        base
+    };
+    let request = |edited: Value| ApplyRequest {
+        space: cluster.context.clone(),
+        opened: Some(OpenedEdit {
+            target: reference("", "v1", "configmaps", Some(&namespace), name),
+            base: masked(),
+            lock: rv(&live),
+            locked: None,
+        }),
+        edited,
+        force: false,
+        drop: vec![],
+    };
+    let annotated = |key: &str| {
+        let mut edited = masked();
+        edited["metadata"]["annotations"] = json!({ key: "1" });
+        request(edited)
+    };
+    let free = |context: &str, text: &str| assert!(!text.contains(RELEASE), "{context}: {text}");
+
+    let answer = preview(&core, annotated("note")).await;
+    free("the preview", &serde_json::to_string(&answer).unwrap());
+    let (id, _, _, _) = ready(answer);
+    let plan = plan(&core, &cluster, id).await;
+    free("the plan", &serde_json::to_string(&plan).unwrap());
+    assert!(
+        line(&plan).ends_with(&format!("-f - -n {namespace}")),
+        "{}",
+        line(&plan)
+    );
+
+    for owner in [None, Some("someone")] {
+        let mut edited = masked();
+        let labels = edited["metadata"]["labels"].as_object_mut().unwrap();
+        match owner {
+            Some(owner) => labels.insert("owner".to_owned(), json!(owner)),
+            None => labels.remove("owner"),
+        };
+        let answer = preview(&core, request(edited)).await;
+        free(
+            &format!("the preview of owner {owner:?}"),
+            &serde_json::to_string(&answer).unwrap(),
+        );
+        let ApplyPreviewed::Ready { live, result, .. } = answer else {
+            panic!("expected ready, got {answer:?}");
+        };
+        assert_eq!(
+            result["metadata"]["labels"].get("owner"),
+            owner.map(|owner| json!(owner)).as_ref()
+        );
+        for side in [&live, &result] {
+            assert_eq!(side["data"]["release"], masked()["data"]["release"]);
+        }
+    }
+
+    let policy = admission_policy(
+        &cluster,
+        &namespace,
+        ("", "configmaps"),
+        json!(["Deny"]),
+        json!({
+            "expression": "!has(object.metadata.annotations) || !('refuse' in object.metadata.annotations)",
+            "messageExpression": "'it holds ' + object.data.release",
+        }),
+    )
+    .await;
+    let refused = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        loop {
+            if let Err(refused) = core.apply_preview("main", annotated("refuse")).await {
+                break refused;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("the policy refuses within 60 s");
+    free("the refusal", &serde_json::to_string(&refused).unwrap());
+    assert!(
+        refused.message.contains("it holds <hidden>"),
+        "{}",
+        refused.message
+    );
+    delete_admission_policy(&cluster, &policy).await;
+    cluster.delete(&namespace).await;
+}
+
 async fn dispatched(admin: &kube::Client, user: &str) -> u64 {
     let request = http::Request::get("/metrics").body(Vec::new()).unwrap();
     let metrics = admin.request_text(request).await.unwrap();

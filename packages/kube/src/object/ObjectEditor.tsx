@@ -40,8 +40,8 @@ import {
   useFiltered,
   type PageStates,
 } from "./pageStates";
-import type { ObjectTabs } from "./tabs";
-import { useReveal } from "./reveal";
+import { OBJECT_TABS, type ObjectTabs } from "./tabs";
+import { useSecretReveal } from "./reveal";
 import { hasUsage } from "./figures";
 import { objectQuery, refResource, refUri, useObject } from "./useObject";
 import { printedOf, useHeader } from "./useHeader";
@@ -118,7 +118,7 @@ function ObjectPage({
     related: tab === "related",
     usage: asked,
   });
-  const reveal = useReveal(id);
+  const reveal = useSecretReveal(id);
   const page = tab === "overview";
   const filtered = useFiltered(pages, uri) && page;
   const known =
@@ -274,6 +274,7 @@ function ObjectPage({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <ObjectViews
           tab={tab}
+          tabs={OBJECT_TABS}
           snapshot={snapshot}
           onChange={(next) => {
             tabs.set(uri, next);

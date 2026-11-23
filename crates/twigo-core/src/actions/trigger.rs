@@ -76,7 +76,7 @@ pub(crate) async fn trigger(
             "Job {job} runs once from its template, beside its schedule."
         )],
         affected: Vec::new(),
-        kubectl: Some(kubectl),
+        command_line: Some(kubectl),
         command: "trigger",
         target: named,
         writes: vec![create],

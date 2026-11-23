@@ -1,10 +1,12 @@
-import { FileCode, FolderTree, GitCompare } from "lucide-react";
+import { FileCode, FolderTree, GitCompare, ShipWheel } from "lucide-react";
 import { Changes, errorOneLine, type Workbench } from "@twigo/workbench";
 import { RequestDetail } from "./approvals/RequestDetail";
 import { Explorer, EXPLORER_VIEW } from "./explorer/Explorer";
 import { registerEdits } from "./edit/commands";
 import { DiffEditor } from "./edit/DiffEditors";
 import { ManifestEditor } from "./edit/ManifestEditor";
+import { registerHelm } from "./helm/commands";
+import { ReleaseEditor } from "./helm/ReleaseEditor";
 import { Home } from "./home/Home";
 import { ListIcon, ObjectIcon } from "./KindIcon";
 import { ListActions } from "./list/ListActions";
@@ -32,7 +34,10 @@ import { createServices, type ListServices } from "./services";
 import { tabPaths } from "./tabPaths";
 import {
   DIFF_SCHEME,
+  HELM_LIST_SCHEME,
+  HELM_SCHEME,
   LIST_SCHEME,
+  parseHelmUri,
   OBJECT_SCHEME,
   parseDiffUri,
   parseListUri,
@@ -82,7 +87,7 @@ export function registerKube(workbench: Workbench): void {
     id: EXPLORER_VIEW,
     title: "Resources",
     container: "kube.explorer",
-    component: () => <Explorer services={services} />,
+    component: ({ space }) => <Explorer services={services} space={space} />,
   });
   views.registerStatusBarItem({
     id: "kube.cluster",
@@ -118,6 +123,34 @@ export function registerKube(workbench: Workbench): void {
     focus: (uri) => {
       services.grids.focus(uri);
     },
+  });
+  editors.register({
+    id: "kube.helm.list",
+    scheme: HELM_LIST_SCHEME,
+    space: (uri) => parseListUri(uri.href)?.space,
+    title: () => "Helm Releases",
+    tooltip: (uri) => paths.list(uri.href),
+    icon: ListIcon,
+    component: ({ uri }) => <ListEditor uri={uri} services={services} />,
+    actions: ({ uri }) => <ListActions uri={uri} services={services} />,
+    focus: (uri) => {
+      services.grids.focus(uri);
+    },
+  });
+  editors.register({
+    id: "kube.helm",
+    scheme: HELM_SCHEME,
+    space: (uri) => parseHelmUri(uri.href)?.space,
+    title: (uri) => {
+      const input = parseHelmUri(uri.href);
+      return input
+        ? `${input.name}${input.revision === undefined ? "" : ` r${String(input.revision)}`}`
+        : uri.href;
+    },
+    titleEndTells: true,
+    tooltip: (uri) => paths.release(uri.href),
+    icon: ({ className }) => <ShipWheel className={className} />,
+    component: ({ uri }) => <ReleaseEditor uri={uri} services={services} />,
   });
 
   const objectTabs = new ObjectTabs();
@@ -155,6 +188,7 @@ export function registerKube(workbench: Workbench): void {
     space: (uri) => {
       const input = parseDiffUri(uri.href);
       if (input?.kind === "objects") return input.space;
+      if (input?.kind === "release") return input.release.space;
       return input && editorSpace(input.editor);
     },
     title: (uri) => {
@@ -176,6 +210,8 @@ export function registerKube(workbench: Workbench): void {
           return `Server · ${name(input.editor)}`;
         case "objects":
           return `${name(input.left)} ↔ ${name(input.right)}`;
+        case "release":
+          return `${input.release.name} r${String(input.from)} ↔ r${String(input.to)}`;
       }
     },
     titleEndTells: true,
@@ -264,6 +300,7 @@ export function registerKube(workbench: Workbench): void {
   registerSessions(workbench, { logs, shells, terminals });
   registerForwards(workbench, new Forwards(workbench.backend), paths);
   registerResourceActions(workbench, services);
+  registerHelm(workbench, services);
   registerEdits(workbench, {
     discovery: services.discovery,
     edits: services.edits,

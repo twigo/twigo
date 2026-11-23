@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::{
-    Environment, Gvr, IpcError, Mode, ObjectRef, PreviewId, ShellKind, ShellTarget, SubscriptionId,
+    Environment, Gvr, HelmPart, IpcError, Mode, ObjectRef, PreviewId, ShellKind, ShellTarget,
+    SubscriptionId,
 };
 
 /// An object of a space, by its resource as discovery names it.
@@ -73,6 +74,13 @@ pub enum PlanRequest {
     Undo { space: String },
     /// Shows a value of an open Secret.
     Reveal { object: SubscriptionId, key: String },
+    /// Shows a part of the revision an open release shows, refused once it
+    /// shows another.
+    RevealHelm {
+        release: SubscriptionId,
+        revision: u32,
+        part: HelmPart,
+    },
     /// Applies what a preview prepared, or for a Pod or a Job whose edit
     /// the server refused as immutable deletes it and creates it anew.
     Apply { space: String, preview: PreviewId },
@@ -123,9 +131,9 @@ pub struct Plan {
     /// The exact objects it acts on and those that follow, by what happens
     /// to them.
     pub affected: Vec<Affected>,
-    /// The kubectl command that does the same; none for what only Twigo
-    /// does, such as a change of a context's mode.
-    pub kubectl: Option<String>,
+    /// The kubectl or helm command that does the same; none for what only
+    /// Twigo does, such as a change of a context's mode.
+    pub command_line: Option<String>,
     /// What a toast or the status bar says while it counts down or runs:
     /// `Deleting pod web-1`.
     pub doing: String,
@@ -185,8 +193,8 @@ pub enum OperationEvent {
     Stopped {
         text: String,
     },
-    /// A Secret's value, shown until the Reveal ends; base64 when it is
-    /// not UTF-8.
+    /// A Secret's value, or a part of a Helm release as its [`HelmPart`]
+    /// says, shown until the Reveal ends; base64 when it is not UTF-8.
     Revealed {
         value: String,
         binary: bool,

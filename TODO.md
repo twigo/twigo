@@ -152,3 +152,9 @@ Findings that belong to no step yet.
   - `apply::a_status_write_during_a_preview_does_not_answer_stale` (`crates/twigo-core/tests/bus_live/apply.rs`) answered `Stale` on Kubernetes 1.33 and passed on 1.34 to 1.37 in the same run; the cause was not looked for.
   - `packages/kube/src/logs/logs.test.tsx` ended with an unhandled `requestAnimationFrame is not defined` from `FrameAcks` (`packages/protocol/src/acks.ts`): a timer of the mock's logs fired after the test's environment was gone, with every test passed.
 - A test that failed once in a local run and passed on the next (2026-11-18, on a branch of the object page): `a sort by a column the width has dropped stays, and the Name header says so until the column is back` in `packages/kube/src/list/ResourceGrid.test.tsx` (`pnpm --filter @twigo/kube test`, vitest 5.1.0) read the rows one row apart from the order they had before the width fell; the next run passed 1,167 tests, and the cause was not looked for.
+- Helm releases, not built in the step that reads them only (ARCHITECTURE 4.3, 4.4):
+  - The live state of the objects a release created: the Overview's Objects section lists what the manifest holds, and nothing reads those objects in the cluster.
+  - A link from an object's page to the release that created it.
+  - A `helm ` prefix in quick access that takes a release's name.
+  - Run in Terminal for a release's helm command, which Copy helm Command only copies.
+  - Hiding Helm's storage Secrets (`sh.helm.release.v1.*`) in the Secrets list, where they show as any Secret does.

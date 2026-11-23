@@ -1,5 +1,6 @@
 import type { Cell, Column, Gvr, Row, ValueCount } from "@twigo/protocol";
 import type { Tone } from "@twigo/ui";
+import { IN_FLIGHT_RELEASE, statusTone } from "./helm/status";
 
 /** How a cell draws its text (ARCHITECTURE 4.4). */
 export type CellKind =
@@ -15,6 +16,8 @@ export type CellKind =
   | "age"
   /** A time since something else, as the server printed it: `5m`. */
   | "since"
+  /** A chart's name and version: `demo-0.1.0`, the name in content and the version in support. */
+  | "chart"
   /** Measured CPU, nanocores, as kubectl prints it. */
   | "cpu"
   /** Measured memory, bytes, as kubectl prints it. */
@@ -70,6 +73,14 @@ export interface ColumnRule {
   readonly into?: { readonly column: string; readonly room: number };
   /** A hovered row's icons may lie over its cells, as over an age or a measure. */
   readonly coverable: boolean;
+  /**
+   * Its text is why the row's object cannot be read, as a wire name: the row
+   * says it in place of its health column's word and in its tone, and the
+   * column is drawn nowhere.
+   */
+  readonly problem: boolean;
+  /** Its words narrow at their last `-`, so that the tail that tells them apart stays and the tooltip has the whole word. */
+  readonly cutInMiddle: boolean;
 }
 
 /** The order columns leave a narrowing list: `ColumnRule.drop`. */
@@ -168,8 +179,9 @@ function nodeStatus(text: string): Tone | undefined {
 }
 
 /** States still in flight, whose dot pulses. */
-export const IN_FLIGHT =
-  /^(ContainerCreating|PodInitializing|Terminating|RestartingAllContainers|Init:\d+\/\d+)$/;
+export const IN_FLIGHT = new RegExp(
+  `^(ContainerCreating|PodInitializing|Terminating|RestartingAllContainers|Init:\\d+\\/\\d+)$|${IN_FLIGHT_RELEASE.source}`,
+);
 
 /** Rules for a column of any kind, by name. */
 const BY_NAME: Readonly<Record<string, Partial<ColumnRule>>> = {
@@ -218,6 +230,22 @@ const BY_RESOURCE: Readonly<Record<string, Partial<ColumnRule>>> = {
     recedes: true,
     drop: DROP.health,
   },
+  "helm.sh/releases/Namespace": { drop: 1 },
+  "helm.sh/releases/App Version": { width: 112, secondary: true, drop: 2 },
+  "helm.sh/releases/Updated": { width: 80, drop: 3 },
+  "helm.sh/releases/Chart": { cell: "chart", width: 200, drop: 4 },
+  "helm.sh/releases/Revision": { width: 80, drop: 5 },
+  "helm.sh/releases/Status": {
+    cell: "status",
+    width: 160,
+    cutInMiddle: true,
+    groups: true,
+    health: true,
+    tone: statusTone,
+    recedes: true,
+    drop: DROP.health,
+  },
+  "helm.sh/releases/Problem": { problem: true, drop: DROP.health },
   "apps/deployments/Ready": {
     cell: "ratio",
     width: 64,
@@ -264,6 +292,8 @@ export function columnRule(gvr: Gvr, column: Column): ColumnRule {
     ticks,
     drop: 0,
     coverable: true,
+    problem: false,
+    cutInMiddle: false,
     ...BY_KIND[column.kind],
     ...BY_NAME[column.name],
     ...BY_RESOURCE[key(gvr, column.name)],
@@ -309,6 +339,19 @@ export function rowTone(
   if (health === undefined) return undefined;
   const status = healthText(health, columns, row);
   return status === undefined ? undefined : cellTone(gvr, health, status);
+}
+
+/** The code in a row's column that says why its object cannot be read, or why a request for it failed; none for a row with neither. */
+export function problemOf(
+  gvr: Gvr,
+  columns: readonly Column[],
+  row: Row,
+): string | undefined {
+  const at = columns.findIndex(
+    (column) => BY_RESOURCE[key(gvr, column.name)]?.problem === true,
+  );
+  const cell = at < 0 ? undefined : row.cells[at];
+  return typeof cell === "string" && cell !== "" ? cell : undefined;
 }
 
 /** Whether a value of a resource's health column says the object ran to completion. */

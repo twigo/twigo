@@ -13,12 +13,14 @@ use http::Method;
 use kube::api::{DeleteParams, Preconditions, PropagationPolicy};
 use serde_json::Value;
 use twigo_cache::hub::{Query, Resource, RowFormat};
-use twigo_cache::request::field_value;
+use twigo_cache::request::{Selectors, field_value};
 use twigo_ipc::{Affected, ErrorCode, ErrorKind, IpcError, ResourceRef};
 use twigo_policy::friction::Risk;
 
 use super::dependents::{Deleted, dependents};
-use super::{Target, clients_for, counted, get, kind_words, kubectl, object_ref, plural, sentence};
+use super::{
+    Target, clients_for, counted, get, kind_words, object_ref, plural, sentence, shell_line,
+};
 use crate::Core;
 use crate::bus::{self, Finished, Planned, Progress};
 
@@ -211,7 +213,7 @@ pub(crate) async fn delete(
         destructive: true,
         consequences,
         affected,
-        kubectl: Some(line),
+        command_line: Some(line),
         command: "delete",
         target: if several {
             format!("{what}{place}")
@@ -264,7 +266,7 @@ fn kubectl_lines(
             if let Some(namespace) = namespace {
                 words.extend(["-n", namespace]);
             }
-            kubectl(&words)
+            shell_line(&words)
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(lines.join("; "))
@@ -437,7 +439,10 @@ impl Run {
                 resource: self.resource.clone(),
                 format: RowFormat::Metadata,
                 namespaces,
-                field_selector,
+                selectors: Selectors {
+                    field: field_selector,
+                    label: None,
+                },
             })
             .await;
         let stopped = |left: usize| {

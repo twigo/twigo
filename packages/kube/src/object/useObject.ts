@@ -1,10 +1,4 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useMemo } from "react";
 import {
   INITIAL_OBJECT,
   ObjectView,
@@ -16,57 +10,29 @@ import {
 } from "@twigo/protocol";
 import { sameGvr, type Loaded } from "../discovery";
 import { objectUri, type ObjectInput } from "../uri";
+import { useOpenView } from "./useOpenView";
 
-const NOTHING = () => () => undefined;
+const open = (backend: Backend, query: ObjectQuery, parts: ObjectParts) =>
+  new ObjectView(backend, query, parts);
 const INITIAL = () => INITIAL_OBJECT;
 
-/**
- * An open object while `query` names one, following the parts that `parts`
- * asks for. A new query opens its object, which replaces the last one's on its
- * first batch; the snapshot is only ever the current query's.
- */
+/** An open object while `query` names one, following the parts that `parts` asks for. */
 export function useObject(
   backend: Backend,
   query: ObjectQuery | undefined,
   parts: ObjectParts,
 ) {
-  const key = query && JSON.stringify(query);
-  const [live, setLive] = useState<{ key: string; view: ObjectView }>();
-  const shown = useRef(parts);
-  const { overview, manifest, events, related, usage } = parts;
-  useEffect(() => {
-    shown.current = { overview, manifest, events, related, usage };
-  }, [overview, manifest, events, related, usage]);
-  useEffect(() => {
-    if (key === undefined) return;
-    const view = new ObjectView(
-      backend,
-      JSON.parse(key) as ObjectQuery,
-      shown.current,
-    );
-    const first = view.subscribe(() => {
-      first();
-      setLive({ key, view });
-    });
-    return () => {
-      first();
-      view.close();
-      setLive((shown) => (shown?.view === view ? undefined : shown));
-    };
-  }, [backend, key]);
-  const current = live?.key === key ? live?.view : undefined;
-  useEffect(() => {
-    current?.setParts({ overview, manifest, events, related, usage });
-  }, [current, overview, manifest, events, related, usage]);
-  const snapshot = useSyncExternalStore(
-    current?.subscribe ?? NOTHING,
-    current?.getSnapshot ?? INITIAL,
+  const { snapshot, current, id } = useOpenView(
+    backend,
+    open,
+    query,
+    parts,
+    INITIAL,
   );
   const values = useMemo(
     () => current && ((keys: readonly string[]) => current.values(keys)),
     [current],
   );
-  const id = useMemo(() => current && (() => current.id()), [current]);
   return { snapshot, values, id };
 }
 

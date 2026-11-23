@@ -7,7 +7,7 @@ import {
   ReportButton,
   ReportLink,
 } from "@twigo/workbench";
-import { viewProblem } from "./viewProblem";
+import { viewProblem, type ReleasesIn } from "./viewProblem";
 
 /**
  * What a view shows when Rust cannot give it rows, an object or the
@@ -22,6 +22,7 @@ export function ViewStatus({
   onRetry,
   onChoose,
   inline = false,
+  releases,
 }: {
   status: ViewState;
   /** What failed to load, lower case: `pods`. */
@@ -32,9 +33,11 @@ export function ViewStatus({
   onChoose?: () => void;
   /** A one-line message for a panel too small for the full one. */
   inline?: boolean;
+  /** Given by a list of Helm releases: a refusal names the Secrets they are read from. */
+  releases?: ReleasesIn;
 }): ReactNode {
   const everyNamespace = onChoose !== undefined && status.state === "forbidden";
-  const shown = viewProblem(status, what, everyNamespace);
+  const shown = viewProblem(status, what, everyNamespace, releases);
   if (!shown) return null;
   const internal = isInternalError(shown.error);
   const retry = everyNamespace

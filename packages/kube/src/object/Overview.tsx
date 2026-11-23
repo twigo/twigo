@@ -1,10 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Check,
   ChevronDown,
   ChevronRight,
-  Eye,
-  EyeOff,
   Minus,
   TriangleAlert,
   X,
@@ -23,7 +21,7 @@ import type {
   ShownUsage,
 } from "@twigo/protocol";
 import { toIpcError } from "@twigo/protocol";
-import { Button, cn, LinkButton, Section as Folding, Table } from "@twigo/ui";
+import { cn, LinkButton, Section as Folding, Table } from "@twigo/ui";
 import { ErrorMessage, useChanges } from "@twigo/workbench";
 import { formatBytes } from "@twigo/utils";
 import { Containers } from "./Containers";
@@ -43,6 +41,7 @@ import {
 import { outlineOf, type Outline } from "./outline";
 import type { GroupFolds, PageStates } from "./pageStates";
 import type { Reveal } from "./reveal";
+import { RevealButton } from "./RevealButton";
 import { numericColumns } from "./numeric";
 import { unexplained } from "./conditions";
 import { UsageView } from "./Usage";
@@ -75,6 +74,8 @@ export interface OverviewProps {
   readonly usage?: ShownUsage | undefined;
   /** The full page, which opens every section but the Metadata. */
   readonly fullPage?: boolean;
+  /** What a section holds after its blocks, by its id: what only the webview has, such as a release's notes. */
+  readonly slots?: Readonly<Record<string, ReactNode>> | undefined;
 }
 
 /**
@@ -101,6 +102,7 @@ export function Overview({
   onEvents,
   usage,
   fullPage = false,
+  slots,
 }: OverviewProps) {
   useChanges(states.changes);
   useChanges(pages.changes);
@@ -217,6 +219,7 @@ export function Overview({
                 }}
               />
             )}
+            {slots?.[part.id]}
           </div>
         )}
       </Folding>
@@ -477,12 +480,10 @@ function SecretRow({ entry, reveal }: { entry: DataEntry; reveal: Reveal }) {
           {entry.binary && "binary, "}
           {formatBytes(entry.bytes)}
         </span>
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          aria-label={showing ? `Hide ${entry.key}` : `Reveal ${entry.key}`}
-          tooltip={showing ? "Hide" : "Reveal"}
-          isLoading={shown.state === "revealing" && shown.by === reveal}
+        <RevealButton
+          label={entry.key}
+          showing={showing}
+          loading={shown.state === "revealing" && shown.by === reveal}
           onClick={() => {
             if (showing) {
               setShown({ state: "hidden" });
@@ -500,9 +501,7 @@ function SecretRow({ entry, reveal }: { entry: DataEntry; reveal: Reveal }) {
               );
             });
           }}
-        >
-          {showing ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
-        </Button>
+        />
       </div>
       {showing && (
         <pre className="mb-1 ml-0 max-h-80 overflow-auto rounded-lg bg-muted p-2 font-mono text-xs break-all whitespace-pre-wrap">

@@ -19,7 +19,7 @@ use http::Method;
 use k8s_openapi::api::core::v1::Pod;
 use serde_json::json;
 use twigo_cache::hub::{Query, Resource, RowFormat};
-use twigo_cache::request::field_value;
+use twigo_cache::request::{Selectors, field_value};
 use twigo_ipc::{Affected, ErrorCode, ErrorKind, IpcError, ObjectRef};
 use twigo_kube::client::Clients;
 use twigo_policy::friction::Risk;
@@ -201,7 +201,7 @@ pub(crate) async fn drain(core: &Core, space: &str, name: String) -> Result<Plan
         destructive: true,
         consequences,
         affected,
-        kubectl: Some(kubectl),
+        command_line: Some(kubectl),
         command: "drain",
         target: named,
         writes,
@@ -433,7 +433,10 @@ impl Run {
                 },
                 format: RowFormat::Metadata,
                 namespaces: Vec::new(),
-                field_selector: Some(format!("spec.nodeName={}", field_value(name))),
+                selectors: Selectors {
+                    field: Some(format!("spec.nodeName={}", field_value(name))),
+                    label: None,
+                },
             })
             .await
             .map_err(|error| stays(error.message))?;

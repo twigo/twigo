@@ -198,7 +198,7 @@ test("a shell asks as exec does: at once in read-write, to confirm in guarded, r
   const guarded = await answered(plan("staging"));
   expect(guarded.friction).toEqual({ kind: "confirm" });
   const { namespace, pod, container } = targetOf("staging");
-  expect(guarded.kubectl).toBe(
+  expect(guarded.commandLine).toBe(
     `kubectl --context staging exec -it ${pod} -n ${namespace} -c ${container} -- sh -c 'export TERM=xterm-256color; command -v bash >/dev/null && exec bash || exec sh'`,
   );
   const readOnly = await refused(plan("prod-eu"));
@@ -222,7 +222,7 @@ test("an attach is planned apart from a shell, and a container that does not run
   );
   expect(attach.confirm).toBe("Attach");
   const { namespace, pod, container } = targetOf("kind-local");
-  expect(attach.kubectl).toBe(
+  expect(attach.commandLine).toBe(
     `kubectl --context kind-local attach ${pod} -n ${namespace} -c ${container}`,
   );
   expect(attach.consequences).toEqual([
@@ -237,7 +237,7 @@ test("an attach is planned apart from a shell, and a container that does not run
       kind: "attach",
     }),
   );
-  expect(joined.kubectl).toBe(
+  expect(joined.commandLine).toBe(
     `kubectl --context kind-local attach -it ${pod} -n ${namespace} -c ${container}`,
   );
   const error = await refused(

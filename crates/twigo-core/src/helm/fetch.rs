@@ -1,0 +1,180 @@
+//! One revision of a release, fetched with one `GET` of its Secret through
+//! the UI's clients and decoded on the blocking pool, where a panic marks
+//! that revision alone. The Secret's bytes go once it is decoded. A request
+//! that fails, or whose answer Twigo cannot read, says nothing of the
+//! revision, so it is asked again.
+
+use std::borrow::Cow;
+use std::collections::BTreeMap;
+
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
+use bytes::Bytes;
+use http::header::{ACCEPT, ACCEPT_ENCODING};
+use http::{HeaderMap, Request, StatusCode};
+use http_body_util::BodyExt;
+use kube::client::Body;
+use serde::Deserialize;
+use twigo_cache::encoding;
+use twigo_cache::hub::Hub;
+use twigo_helm::Stored;
+use twigo_ipc::{ErrorCode, IpcError};
+use twigo_kube::client::Clients;
+
+/// The seam of one revision's decode, as `TWIGO_PANIC` names it.
+pub(crate) const DECODE: &str = "helm decode";
+
+/// How many revisions a list or a History fetches at once, as the metrics
+/// poller keeps to four requests (ARCHITECTURE 3.6).
+pub(super) const AT_ONCE: usize = 4;
+
+/// The name Helm gives the Secret of a release's revision
+/// ([`makeKey`](https://github.com/helm/helm/blob/v4.3.2/pkg/storage/storage.go#L327-L329)).
+pub(crate) fn secret_name(release: &str, revision: u32) -> String {
+    format!("sh.helm.release.v1.{release}.v{revision}")
+}
+
+/// Why a revision was not read.
+pub(crate) enum Failed {
+    /// The request failed: no clients for the context, a lost connection, a
+    /// refusal, a server's error, or an answer Twigo cannot read. It says
+    /// nothing of the revision.
+    Request(IpcError),
+    /// The Secret is gone, or what it holds cannot be read, which stands
+    /// until it changes.
+    Read(IpcError),
+}
+
+impl Failed {
+    pub(crate) fn error(self) -> IpcError {
+        match self {
+            Failed::Request(error) | Failed::Read(error) => error,
+        }
+    }
+}
+
+/// The revision the Secret `name` of `namespace` holds in `context`, read
+/// by `decode`; `helm.revision-gone` once the Secret is gone.
+pub(crate) async fn decoded<T: Send + 'static>(
+    hub: &Hub,
+    context: &str,
+    namespace: &str,
+    name: &str,
+    decode: fn(&Stored<'_>) -> Result<T, IpcError>,
+) -> Result<T, Failed> {
+    let clients = hub.clients(context).await.map_err(Failed::Request)?;
+    let (headers, body) = fetched(&clients, namespace, name).await?;
+    let read = move || {
+        let body = encoding::page(&headers, body).map_err(|_| Failed::Request(damaged()))?;
+        read(body, decode)
+    };
+    twigo_panic::contain(DECODE, twigo_panic::blocking(read))
+        .await
+        .unwrap_or_else(|_| Err(Failed::Read(IpcError::panicked("reading this revision"))))
+}
+
+fn damaged() -> IpcError {
+    IpcError::new(
+        ErrorCode::AnswerUndecodable,
+        "the server's gzip of the Secret is damaged",
+    )
+}
+
+/// The Secret's response as it came, its gzip not yet undone.
+async fn fetched(
+    clients: &Clients,
+    namespace: &str,
+    name: &str,
+) -> Result<(HeaderMap, Bytes), Failed> {
+    let path = super::secret_resource()
+        .object_path(Some(namespace), name)
+        .map_err(Failed::Read)?;
+    let request = Request::get(path)
+        .header(ACCEPT, "application/json")
+        .header(ACCEPT_ENCODING, encoding::GZIP)
+        .body(Body::from(Vec::new()))
+        .expect("a checked path and constant headers form a valid request");
+    let failed = |error: kube::Error| Failed::Request(twigo_kube::errors::request(&error));
+    let (parts, body) = clients
+        .api
+        .send(request)
+        .await
+        .map_err(failed)?
+        .into_parts();
+    let body = body.collect().await.map_err(failed)?.to_bytes();
+    match parts.status {
+        status if status.is_success() => Ok((parts.headers, body)),
+        StatusCode::NOT_FOUND => Err(Failed::Read(IpcError::new(
+            ErrorCode::HelmRevisionGone,
+            format!("Helm no longer keeps the revision in {name}"),
+        ))),
+        status => {
+            let body =
+                encoding::page(&parts.headers, body).map_err(|_| Failed::Request(damaged()))?;
+            Err(failed(twigo_kube::errors::refused(status, &body)))
+        }
+    }
+}
+
+/// The fields of a Secret a revision is read from.
+#[derive(Deserialize)]
+struct Secret<'a> {
+    #[serde(default, borrow, rename = "type")]
+    kind: Cow<'a, str>,
+    #[serde(borrow)]
+    metadata: Metadata<'a>,
+    #[serde(default, borrow)]
+    data: Data<'a>,
+}
+
+#[derive(Deserialize)]
+struct Metadata<'a> {
+    #[serde(borrow)]
+    name: Cow<'a, str>,
+    #[serde(borrow)]
+    namespace: Cow<'a, str>,
+    #[serde(default)]
+    labels: BTreeMap<String, String>,
+}
+
+#[derive(Default, Deserialize)]
+struct Data<'a> {
+    #[serde(default, borrow)]
+    release: Option<Cow<'a, str>>,
+}
+
+/// The Secret's JSON, its `data.release` with the API's base64 taken off and
+/// the body dropped before `decode` reads it; an answer that is no Secret
+/// Twigo can read fails as its request.
+fn read<T>(body: Bytes, decode: fn(&Stored<'_>) -> Result<T, IpcError>) -> Result<T, Failed> {
+    let undecodable =
+        |what: &str| Failed::Request(IpcError::new(ErrorCode::AnswerUndecodable, what.to_owned()));
+    let secret: Secret<'_> = serde_json::from_slice(&body).map_err(|error| {
+        undecodable(&format!(
+            "the Secret is not one Twigo can read: it breaks at line {}, column {}",
+            error.line(),
+            error.column()
+        ))
+    })?;
+    let release = secret
+        .data
+        .release
+        .map(|text| STANDARD.decode(text.as_bytes()))
+        .transpose()
+        .map_err(|_| undecodable("the server sent the Secret's release in no base64"))?;
+    let (name, namespace, kind) = (
+        secret.metadata.name.into_owned(),
+        secret.metadata.namespace.into_owned(),
+        secret.kind.into_owned(),
+    );
+    let labels = secret.metadata.labels;
+    drop(body);
+    decode(&Stored {
+        name: &name,
+        namespace: &namespace,
+        kind: &kind,
+        labels: &labels,
+        release: release.as_deref(),
+    })
+    .map_err(Failed::Read)
+}

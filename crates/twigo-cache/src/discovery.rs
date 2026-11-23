@@ -24,6 +24,7 @@ use twigo_kube::kubeconfig::Fingerprint;
 
 use crate::hub::{Hub, Query, RETRY_WITHIN, Resource, RowFormat, Subscription};
 use crate::metrics::Api;
+use crate::request::Selectors;
 use crate::table::Row;
 
 /// The API server updates its discovery from a change of a CRD or an
@@ -412,7 +413,7 @@ async fn indexes(hub: &Hub, context: &str) -> [Index; 2] {
                 },
                 format: RowFormat::Metadata,
                 namespaces: Vec::new(),
-                field_selector: None,
+                selectors: Selectors::default(),
             })
             .await
             .expect("its names are path segments");

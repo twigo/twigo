@@ -168,9 +168,9 @@ test("showing the usage part asks for it, and asks again only when it changes", 
   const view = new ObjectView(fake.backend, POD, OVERVIEW);
   fake.resolve(7);
   await vi.runAllTimersAsync();
-  view.setParts({ ...OVERVIEW, usage: true });
-  view.setParts({ ...OVERVIEW, usage: true });
-  view.setParts(OVERVIEW);
+  view.setAsk({ ...OVERVIEW, usage: true });
+  view.setAsk({ ...OVERVIEW, usage: true });
+  view.setAsk(OVERVIEW);
   const sent = fake.calls.filter(([command]) => command === "object_set_parts");
   expect(sent.map(([, request]) => request)).toEqual([
     { id: 7, parts: { ...OVERVIEW, usage: true } },
@@ -193,7 +193,7 @@ test("parts set before the id arrives go once it does", async () => {
   const fake = fakeBackend();
   const view = new ObjectView(fake.backend, POD, OVERVIEW);
   const shown = { ...OVERVIEW, manifest: true };
-  view.setParts(shown);
+  view.setAsk(shown);
   expect(fake.calls.some(([command]) => command === "object_set_parts")).toBe(
     false,
   );
@@ -229,7 +229,7 @@ test("the mock answers with the recorded pod under the name asked for", async ()
   });
   const sections = overview?.sections ?? [];
   expect(sections[sections.length - 1]?.id).toBe("core.metadata");
-  view.setParts({ ...OVERVIEW, manifest: true, related: true });
+  view.setAsk({ ...OVERVIEW, manifest: true, related: true });
   await vi.runAllTimersAsync();
   const manifest = JSON.parse(view.getSnapshot().manifest ?? "{}") as {
     metadata: { name: string; namespace: string };

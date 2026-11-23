@@ -1,12 +1,13 @@
 //! The command bus against a kind cluster with kwok: each friction a plan
-//! names, each action seen in its object afterwards, and the kubectl line of
-//! each plan, run here, doing what the plan does.
+//! names, each action seen in its object afterwards, and the kubectl or helm
+//! line of each plan, run here, doing what the plan does.
 //!
 //! TWIGO_TEST_KUBECONFIG=… cargo test -p twigo-core --test bus_live -- --ignored
 
 mod actions;
 mod apply;
 mod bus;
+mod helm;
 mod shell;
 
 use std::ffi::OsString;
@@ -241,12 +242,12 @@ pub async fn protect(core: &Core, request: PlanRequest) -> Result<Vec<OperationE
     run(core, &plan, typed.as_deref()).await
 }
 
-/// The plan's kubectl line, which every plan of a command to the cluster
+/// The plan's command line, which every plan of a command to the cluster
 /// has.
 pub fn line(plan: &Plan) -> &str {
-    plan.kubectl
+    plan.command_line
         .as_deref()
-        .expect("a plan of a command to the cluster has its kubectl line")
+        .expect("a plan of a command to the cluster has its command line")
 }
 
 /// The plan's kubectl line, run by a shell over `kubeconfig` only.

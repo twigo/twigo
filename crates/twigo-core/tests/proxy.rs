@@ -58,7 +58,11 @@ type FakeBody = UnsyncBoxBody<Bytes, Infallible>;
 /// answers what has `slow=1` in its query, but a dry run, only after `SLOW`.
 /// A dry-run patch of a Secret it refuses quoting the patched Secret, as
 /// kube-apiserver refuses one that no longer decodes, and any other dry-run
-/// write of one it answers with a warning that quotes a value. A watch with
+/// write of one it answers with a warning that quotes a value. It keeps the
+/// ConfigMap `RELEASE`, which holds a Helm release, refuses a dry-run patch
+/// of it quoting the patched ConfigMap and a dry-run create of it as one
+/// that exists, and answers any other dry-run write of it with a warning
+/// that quotes the release. A watch with
 /// `flood=1` in its query it answers with data as fast as it is read. A
 /// write's body it reads as kube-apiserver does, and names a create by its
 /// `generateName` as kube-apiserver would. The APIService of
@@ -209,11 +213,23 @@ async fn answer(
         *response.status_mut() = StatusCode::BAD_REQUEST;
         return Ok(response);
     }
-    let secret = request.uri().path().contains("/secrets/") && query.contains("dryRun");
-    if secret && request.method() == Method::PATCH {
-        let patched = json!({ "apiVersion": "v1", "kind": "Secret", "metadata": { "name": "s", "namespace": "a" }, "data": { "password": SECRET_VALUE } });
+    let dry_run = query.contains("dryRun");
+    let secret = request.uri().path().contains("/secrets/") && dry_run;
+    let release = request.uri().path() == format!("{CONFIGMAPS}/{RELEASE}");
+    if (secret || (release && dry_run)) && request.method() == Method::PATCH {
+        let (patched, error) = if secret {
+            let patched = json!({ "apiVersion": "v1", "kind": "Secret", "metadata": { "name": "s", "namespace": "a" }, "data": { "password": SECRET_VALUE } });
+            (patched, "illegal base64 data at input byte 0")
+        } else {
+            let mut patched = release_config_map();
+            patched["data"]["x"] = json!(1);
+            (
+                patched,
+                "json: cannot unmarshal number into Go struct field ConfigMap.data of type string",
+            )
+        };
         let message = format!(
-            " \"\" is invalid: patch: Invalid value: {:?}: illegal base64 data at input byte 0",
+            " \"\" is invalid: patch: Invalid value: {:?}: {error}",
             patched.to_string()
         );
         let status = json!({ "kind": "Status", "apiVersion": "v1", "status": "Failure", "code": 422, "reason": "Invalid", "message": message });
@@ -223,6 +239,16 @@ async fn answer(
     }
     let method = request.method().clone();
     let sent = request.into_body().collect().await.unwrap().to_bytes();
+    if method == Method::POST
+        && dry_run
+        && serde_json::from_slice::<Value>(&sent)
+            .is_ok_and(|sent| sent["metadata"]["name"] == RELEASE)
+    {
+        let status = json!({ "kind": "Status", "apiVersion": "v1", "status": "Failure", "code": 409, "reason": "AlreadyExists", "message": format!("configmaps \"{RELEASE}\" already exists") });
+        let mut response = Response::new(body(status.to_string()));
+        *response.status_mut() = StatusCode::CONFLICT;
+        return Ok(response);
+    }
     let object = match serde_json::from_slice::<AsGoReads>(&sent) {
         Ok(AsGoReads(mut object)) if method != Method::DELETE => {
             let metadata = &mut object["metadata"];
@@ -234,6 +260,7 @@ async fn answer(
             }
             object
         }
+        _ if release => release_config_map(),
         _ => json!({
             "apiVersion": "v1",
             "kind": "ConfigMap",
@@ -249,6 +276,10 @@ async fn answer(
     headers.insert("content-type", "application/json".parse().unwrap());
     if secret {
         let warning = format!("299 - \"the live password {SECRET_VALUE} is weak\"");
+        headers.insert("warning", warning.parse().unwrap());
+    }
+    if release && dry_run {
+        let warning = format!("299 - \"data.release {RELEASE_VALUE} is large\"");
         headers.insert("warning", warning.parse().unwrap());
     }
     Ok(response)
@@ -282,6 +313,28 @@ fn api_service(name: &str) -> Response<FakeBody> {
 /// A value of the Secret `s` as the fake stores it: `secret-value` in
 /// base64.
 const SECRET_VALUE: &str = "c2VjcmV0LXZhbHVl";
+
+/// The ConfigMap Helm's ConfigMap driver keeps the first revision of the
+/// release `r` in.
+const RELEASE: &str = "sh.helm.release.v1.r.v1";
+/// Its `release`, as the fake stores it.
+const RELEASE_VALUE: &str = "H4sIAAAAAAAAcmVsZWFzZQ";
+
+fn release_config_map() -> Value {
+    let applied = format!(r#"{{"data":{{"release":"{RELEASE_VALUE}"}}}}"#);
+    json!({
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {
+            "name": RELEASE,
+            "namespace": "a",
+            "resourceVersion": "1",
+            "labels": { "owner": "helm", "name": "r", "version": "1" },
+            "annotations": { "kubectl.kubernetes.io/last-applied-configuration": applied },
+        },
+        "data": { "release": RELEASE_VALUE },
+    })
+}
 
 /// JSON as Go's decoder reads it into Kubernetes' types, where an object's
 /// key given twice merges the two objects, while serde_json keeps the last.
@@ -1657,6 +1710,12 @@ async fn no_word_of_the_server_s_about_a_secret_reaches_its_ask() {
         answer_with(&core, &ask, ApprovalAnswer::Deny, None);
         sending.await.unwrap();
     }
+    let reads = fake
+        .seen()
+        .iter()
+        .filter(|seen| seen.method == Method::GET)
+        .count();
+    assert_eq!(reads, 0, "a refused ask reads no Secret");
 
     let replacing = process
         .request("PUT", "kind-a", "/api/v1/namespaces/a/secrets/s")
@@ -1673,6 +1732,67 @@ async fn no_word_of_the_server_s_about_a_secret_reaches_its_ask() {
     answer_with(&core, &ask, ApprovalAnswer::Deny, None);
     sending.await.unwrap();
     assert_eq!(fake.writes(Method::PATCH) + fake.writes(Method::PUT), 0);
+}
+
+#[tokio::test]
+async fn no_word_of_the_server_s_about_a_helm_release_nor_a_body_of_one_reaches_its_ask() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+    let unsaid =
+        "Twigo does not show its words, which may quote the Helm release the ConfigMap holds";
+    let path = format!("{CONFIGMAPS}/{RELEASE}");
+    let mut stored = release_config_map();
+    stored["metadata"]
+        .as_object_mut()
+        .unwrap()
+        .remove("resourceVersion");
+    let mut superseded = stored.clone();
+    superseded["metadata"]["labels"]["status"] = json!("superseded");
+
+    for (method, path, kind, sent) in [
+        (
+            "PATCH",
+            path.as_str(),
+            "application/merge-patch+json",
+            json!({ "data": { "x": 1 } }),
+        ),
+        ("POST", CONFIGMAPS, "application/json", stored),
+        ("PUT", path.as_str(), "application/json", superseded),
+    ] {
+        let writing = process
+            .request(method, "kind-a", path)
+            .header("content-type", kind)
+            .body(json_body(&sent))
+            .unwrap();
+        let sending = tokio::spawn(send(process.at(), writing));
+        let ask = asked(&mut events).await;
+        let text = serde_json::to_string(&ask).unwrap();
+        assert!(!text.contains(RELEASE_VALUE), "{method}: {text}");
+        match &ask.detail {
+            ApprovalDetail::Unknown {
+                reason: NoDiff::Refused { error },
+                body: None,
+            } if method != "PUT" => {
+                assert_eq!(
+                    (error.message.as_str(), &error.server),
+                    (unsaid, &None),
+                    "{method}"
+                );
+            }
+            ApprovalDetail::Diff { warnings, .. } if method == "PUT" => {
+                assert_eq!(*warnings, [unsaid]);
+            }
+            detail => panic!("{method}: {detail:?}"),
+        }
+        answer_with(&core, &ask, ApprovalAnswer::Deny, None);
+        sending.await.unwrap();
+    }
+    let writes = [Method::PATCH, Method::POST, Method::PUT].map(|method| fake.writes(method));
+    assert_eq!(writes, [0, 0, 0]);
 }
 
 #[tokio::test]

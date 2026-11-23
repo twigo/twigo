@@ -1,0 +1,2731 @@
+{
+  "releases": [
+    {
+      "compared": [
+        {
+          "defaults": {
+            "from": "{\"alpha\":\"<24 bytes>\",\"database\":{\"host\":\"<10 bytes>\",\"password\":\"<22 bytes>\"},\"fromSub\":{\"answer\":\"<2 bytes>\"},\"global\":{\"region\":\"<7 bytes>\"},\"image\":{\"pullPolicy\":\"<12 bytes>\",\"repository\":\"<21 bytes>\",\"tag\":\"<3 bytes>\"},\"removeMe\":\"<16 bytes>\",\"replicaCount\":\"<1 bytes>\",\"sub\":{\"exported\":{\"answer\":\"<2 bytes>\"},\"global\":{\"region\":\"<7 bytes>\"},\"greeting\":\"<17 bytes>\",\"subOnly\":\"<31 bytes>\"},\"zeta\":\"<12 bytes>\"}",
+            "to": "{\"alpha\":\"<24 bytes>\",\"database\":{\"host\":\"<10 bytes>\",\"password\":\"<22 bytes>\"},\"fromSub\":{\"answer\":\"<2 bytes>\"},\"global\":{\"region\":\"<7 bytes>\"},\"image\":{\"pullPolicy\":\"<12 bytes>\",\"repository\":\"<21 bytes>\",\"tag\":\"<3 bytes>\"},\"removeMe\":\"<16 bytes>\",\"replicaCount\":\"<1 bytes>\",\"sub\":{\"exported\":{\"answer\":\"<2 bytes>\"},\"global\":{\"region\":\"<7 bytes>\"},\"greeting\":\"<17 bytes>\",\"subOnly\":\"<31 bytes>\"},\"zeta\":\"<12 bytes>\"}"
+          },
+          "from": 1,
+          "manifest": {
+            "from": "---\n# Source: demo/templates/secret.yaml\napiVersion: v1\ndata:\n  token: <15 bytes>\nkind: Secret\nmetadata:\n  labels:\n    app.kubernetes.io/instance: alpha\n    app.kubernetes.io/name: demo\n    helm.sh/chart: demo-0.1.0\n  name: alpha-db\nstringData:\n  host: <10 bytes>\n  password: <16 bytes, before>\ntype: Opaque\n\n---\n# Source: demo/charts/sub/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-sub\ndata:\n  greeting: \"hello from parent\"\n  subOnly: \n  region: \"us-east\"\n\n---\n# Source: demo/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-config\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\ndata:\n  replicas: \"2\"\n  image: \"registry.example/demo:1.1\"\n  region: \"us-east\"\n  fromSub: \"42\"\n  app.toml: |\n    [server]\n    listen = \"0.0.0.0:8080\"\n    \n\n---\n# Source: demo/templates/service.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: alpha-svc\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\nspec:\n  selector:\n    app.kubernetes.io/instance: alpha\n  ports:\n    - name: http\n      port: 80\n      targetPort: 8080\n\n\n",
+            "to": "---\n# Source: demo/templates/secret.yaml\napiVersion: v1\ndata:\n  token: <15 bytes>\nkind: Secret\nmetadata:\n  labels:\n    app.kubernetes.io/instance: alpha\n    app.kubernetes.io/name: demo\n    helm.sh/chart: demo-0.1.0\n  name: alpha-db\nstringData:\n  host: <10 bytes>\n  password: <16 bytes, after>\ntype: Opaque\n\n---\n# Source: demo/charts/sub/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-sub\ndata:\n  greeting: \"hello from parent\"\n  subOnly: \"a default only the subchart has\"\n  region: \"eu-west\"\n\n---\n# Source: demo/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-config\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\ndata:\n  replicas: \"1\"\n  image: \"registry.example/demo:1.2\"\n  region: \"eu-west\"\n  fromSub: \"42\"\n  app.toml: |\n    [server]\n    listen = \"0.0.0.0:8080\"\n    \n\n---\n# Source: demo/templates/service.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: alpha-svc\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\nspec:\n  selector:\n    app.kubernetes.io/instance: alpha\n  ports:\n    - name: http\n      port: 80\n      targetPort: 8080\n\n\n"
+          },
+          "to": 2,
+          "values": {
+            "from": "{\"database\":{\"password\":\"<16 bytes, before>\"},\"extra\":[\"<3 bytes>\",\"<3 bytes>\"],\"global\":{\"region\":\"<7 bytes>\"},\"image\":{\"tag\":\"<3 bytes, before>\"},\"removeMe\":null,\"replicaCount\":\"<1 bytes>\",\"sub\":{\"subOnly\":null},\"zz\":\"<24 bytes>\"}",
+            "to": "{\"database\":{\"password\":\"<16 bytes, after>\"},\"image\":{\"tag\":\"<3 bytes, after>\"}}"
+          }
+        }
+      ],
+      "latest": {
+        "appVersion": "1.0.0",
+        "chart": "demo-0.1.0",
+        "lastDeployed": "2026-11-22T20:14:04.369027Z",
+        "name": "alpha",
+        "problem": null,
+        "revision": 2,
+        "status": "deployed"
+      },
+      "name": "alpha",
+      "namespace": "fmt-a",
+      "revisions": [
+        {
+          "description": {
+            "hidden": false,
+            "text": "Install complete"
+          },
+          "line": {
+            "appVersion": "1.0.0",
+            "chart": "demo-0.1.0",
+            "description": {
+              "hidden": false,
+              "text": "Install complete"
+            },
+            "problem": null,
+            "revision": 1,
+            "rollbackOf": null,
+            "status": "superseded",
+            "updated": "2026-11-22T20:14:04.237774Z"
+          },
+          "manifest": {
+            "secrets": [
+              {
+                "document": 0,
+                "entries": [
+                  {
+                    "binary": false,
+                    "bytes": 10,
+                    "key": "host"
+                  },
+                  {
+                    "binary": false,
+                    "bytes": 16,
+                    "key": "password"
+                  },
+                  {
+                    "binary": false,
+                    "bytes": 15,
+                    "key": "token"
+                  }
+                ],
+                "items": [],
+                "line": 2,
+                "name": "alpha-db",
+                "namespace": null
+              }
+            ],
+            "text": "---\n# Source: demo/templates/secret.yaml\napiVersion: v1\ndata:\n  token: <15 bytes>\nkind: Secret\nmetadata:\n  labels:\n    app.kubernetes.io/instance: alpha\n    app.kubernetes.io/name: demo\n    helm.sh/chart: demo-0.1.0\n  name: alpha-db\nstringData:\n  host: <10 bytes>\n  password: <16 bytes>\ntype: Opaque\n\n---\n# Source: demo/charts/sub/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-sub\ndata:\n  greeting: \"hello from parent\"\n  subOnly: \n  region: \"us-east\"\n\n---\n# Source: demo/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-config\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\ndata:\n  replicas: \"2\"\n  image: \"registry.example/demo:1.1\"\n  region: \"us-east\"\n  fromSub: \"42\"\n  app.toml: |\n    [server]\n    listen = \"0.0.0.0:8080\"\n    \n\n---\n# Source: demo/templates/service.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: alpha-svc\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\nspec:\n  selector:\n    app.kubernetes.io/instance: alpha\n  ports:\n    - name: http\n      port: 80\n      targetPort: 8080\n\n\n",
+            "unread": []
+          },
+          "notes": {
+            "hidden": false,
+            "text": "Thank you for installing demo.\n\nRelease alpha is at revision 1 in fmt-a.\nThe image is registry.example/demo:1.1.\n"
+          },
+          "overview": {
+            "header": {
+              "created": "2026-11-22T20:14:04.237774Z",
+              "generated": null,
+              "node": null,
+              "owner": null,
+              "printed": [
+                {
+                  "column": "Name",
+                  "value": "alpha"
+                },
+                {
+                  "column": "Revision",
+                  "value": "2"
+                },
+                {
+                  "column": "Status",
+                  "value": "deployed"
+                },
+                {
+                  "column": "Chart",
+                  "value": "demo-0.1.0"
+                },
+                {
+                  "column": "App Version",
+                  "value": "1.0.0"
+                },
+                {
+                  "column": "Problem",
+                  "value": ""
+                }
+              ],
+              "sentence": [],
+              "vitals": [
+                {
+                  "label": "Revision",
+                  "note": [
+                    {
+                      "text": "r2 deployed",
+                      "type": "text"
+                    }
+                  ],
+                  "value": {
+                    "text": "1",
+                    "type": "text"
+                  }
+                },
+                {
+                  "label": "Chart version",
+                  "note": [],
+                  "value": {
+                    "text": "0.1.0",
+                    "type": "text"
+                  }
+                },
+                {
+                  "label": "App version",
+                  "note": [],
+                  "value": {
+                    "text": "1.0.0",
+                    "type": "text"
+                  }
+                }
+              ]
+            },
+            "sections": [
+              {
+                "blocks": [
+                  {
+                    "columns": [
+                      "Kind",
+                      "Name",
+                      "Namespace"
+                    ],
+                    "rows": [
+                      [
+                        {
+                          "text": "Secret",
+                          "type": "text"
+                        },
+                        {
+                          "target": {
+                            "group": "",
+                            "kind": "Secret",
+                            "name": "alpha-db",
+                            "namespace": "fmt-a",
+                            "version": "v1"
+                          },
+                          "text": "alpha-db",
+                          "type": "link"
+                        },
+                        {
+                          "text": "fmt-a",
+                          "type": "text"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "ConfigMap",
+                          "type": "text"
+                        },
+                        {
+                          "target": {
+                            "group": "",
+                            "kind": "ConfigMap",
+                            "name": "alpha-sub",
+                            "namespace": "fmt-a",
+                            "version": "v1"
+                          },
+                          "text": "alpha-sub",
+                          "type": "link"
+                        },
+                        {
+                          "text": "fmt-a",
+                          "type": "text"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "ConfigMap",
+                          "type": "text"
+                        },
+                        {
+                          "target": {
+                            "group": "",
+                            "kind": "ConfigMap",
+                            "name": "alpha-config",
+                            "namespace": "fmt-a",
+                            "version": "v1"
+                          },
+                          "text": "alpha-config",
+                          "type": "link"
+                        },
+                        {
+                          "text": "fmt-a",
+                          "type": "text"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "Service",
+                          "type": "text"
+                        },
+                        {
+                          "target": {
+                            "group": "",
+                            "kind": "Service",
+                            "name": "alpha-svc",
+                            "namespace": "fmt-a",
+                            "version": "v1"
+                          },
+                          "text": "alpha-svc",
+                          "type": "link"
+                        },
+                        {
+                          "text": "fmt-a",
+                          "type": "text"
+                        }
+                      ]
+                    ],
+                    "type": "table"
+                  }
+                ],
+                "fold": "open",
+                "id": "helm.objects",
+                "summary": [
+                  {
+                    "text": "4 objects",
+                    "type": "text"
+                  }
+                ],
+                "title": "Objects",
+                "tone": null
+              },
+              {
+                "blocks": [
+                  {
+                    "columns": [
+                      "Name",
+                      "Kind",
+                      "Events",
+                      "Weight",
+                      "Last run"
+                    ],
+                    "rows": [
+                      [
+                        {
+                          "text": "alpha-hook",
+                          "type": "text"
+                        },
+                        {
+                          "text": "ConfigMap",
+                          "type": "text"
+                        },
+                        {
+                          "text": "post-install, post-upgrade",
+                          "type": "text"
+                        },
+                        {
+                          "text": "5",
+                          "type": "text"
+                        },
+                        {
+                          "text": "Succeeded",
+                          "type": "text"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "alpha-test",
+                          "type": "text"
+                        },
+                        {
+                          "text": "ConfigMap",
+                          "type": "text"
+                        },
+                        {
+                          "text": "test",
+                          "type": "text"
+                        },
+                        {
+                          "text": "0",
+                          "type": "text"
+                        },
+                        {
+                          "text": "Not run",
+                          "type": "text"
+                        }
+                      ]
+                    ],
+                    "type": "table"
+                  }
+                ],
+                "fold": "folded",
+                "id": "helm.hooks",
+                "summary": [
+                  {
+                    "text": "2 hooks",
+                    "type": "text"
+                  }
+                ],
+                "title": "Hooks",
+                "tone": null
+              },
+              {
+                "blocks": [
+                  {
+                    "fields": [
+                      {
+                        "default": false,
+                        "label": "Name",
+                        "value": {
+                          "text": "demo",
+                          "type": "text"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Description",
+                        "value": {
+                          "text": "A chart written for Twigo's Helm decoder fixtures",
+                          "type": "text"
+                        }
+                      }
+                    ],
+                    "type": "fields"
+                  }
+                ],
+                "fold": "folded",
+                "id": "helm.chart",
+                "summary": [
+                  {
+                    "text": "demo",
+                    "type": "text"
+                  }
+                ],
+                "title": "Chart",
+                "tone": null
+              },
+              {
+                "blocks": [
+                  {
+                    "fields": [
+                      {
+                        "default": false,
+                        "label": "First deployed",
+                        "value": {
+                          "at": "2026-11-22T20:14:04.237774Z",
+                          "type": "time"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Last deployed",
+                        "value": {
+                          "at": "2026-11-22T20:14:04.237774Z",
+                          "type": "time"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Apply method",
+                        "value": {
+                          "text": "Server-side apply",
+                          "type": "text"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Labels",
+                        "value": {
+                          "labels": [
+                            {
+                              "key": "team",
+                              "value": "fixtures"
+                            }
+                          ],
+                          "type": "labels"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Stored in",
+                        "value": {
+                          "target": {
+                            "group": "",
+                            "kind": "Secret",
+                            "name": "sh.helm.release.v1.alpha.v1",
+                            "namespace": "fmt-a",
+                            "version": "v1"
+                          },
+                          "text": "sh.helm.release.v1.alpha.v1",
+                          "type": "link"
+                        }
+                      }
+                    ],
+                    "type": "fields"
+                  }
+                ],
+                "fold": "folded",
+                "id": "helm.metadata",
+                "summary": [],
+                "title": "Metadata",
+                "tone": null
+              }
+            ]
+          },
+          "problem": null,
+          "revision": 1,
+          "values": {
+            "defaults": "{\"alpha\":\"<24 bytes>\",\"database\":{\"host\":\"<10 bytes>\",\"password\":\"<22 bytes>\"},\"fromSub\":{\"answer\":\"<2 bytes>\"},\"global\":{\"region\":\"<7 bytes>\"},\"image\":{\"pullPolicy\":\"<12 bytes>\",\"repository\":\"<21 bytes>\",\"tag\":\"<3 bytes>\"},\"removeMe\":\"<16 bytes>\",\"replicaCount\":\"<1 bytes>\",\"sub\":{\"exported\":{\"answer\":\"<2 bytes>\"},\"global\":{\"region\":\"<7 bytes>\"},\"greeting\":\"<17 bytes>\",\"subOnly\":\"<31 bytes>\"},\"zeta\":\"<12 bytes>\"}",
+            "user": "{\"database\":{\"password\":\"<16 bytes>\"},\"extra\":[\"<3 bytes>\",\"<3 bytes>\"],\"global\":{\"region\":\"<7 bytes>\"},\"image\":{\"tag\":\"<3 bytes>\"},\"removeMe\":null,\"replicaCount\":\"<1 bytes>\",\"sub\":{\"subOnly\":null},\"zz\":\"<24 bytes>\"}"
+          }
+        },
+        {
+          "description": {
+            "hidden": false,
+            "text": "Upgrade complete"
+          },
+          "line": {
+            "appVersion": "1.0.0",
+            "chart": "demo-0.1.0",
+            "description": {
+              "hidden": false,
+              "text": "Upgrade complete"
+            },
+            "problem": null,
+            "revision": 2,
+            "rollbackOf": null,
+            "status": "deployed",
+            "updated": "2026-11-22T20:14:04.369027Z"
+          },
+          "manifest": {
+            "secrets": [
+              {
+                "document": 0,
+                "entries": [
+                  {
+                    "binary": false,
+                    "bytes": 10,
+                    "key": "host"
+                  },
+                  {
+                    "binary": false,
+                    "bytes": 16,
+                    "key": "password"
+                  },
+                  {
+                    "binary": false,
+                    "bytes": 15,
+                    "key": "token"
+                  }
+                ],
+                "items": [],
+                "line": 2,
+                "name": "alpha-db",
+                "namespace": null
+              }
+            ],
+            "text": "---\n# Source: demo/templates/secret.yaml\napiVersion: v1\ndata:\n  token: <15 bytes>\nkind: Secret\nmetadata:\n  labels:\n    app.kubernetes.io/instance: alpha\n    app.kubernetes.io/name: demo\n    helm.sh/chart: demo-0.1.0\n  name: alpha-db\nstringData:\n  host: <10 bytes>\n  password: <16 bytes>\ntype: Opaque\n\n---\n# Source: demo/charts/sub/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-sub\ndata:\n  greeting: \"hello from parent\"\n  subOnly: \"a default only the subchart has\"\n  region: \"eu-west\"\n\n---\n# Source: demo/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-config\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\ndata:\n  replicas: \"1\"\n  image: \"registry.example/demo:1.2\"\n  region: \"eu-west\"\n  fromSub: \"42\"\n  app.toml: |\n    [server]\n    listen = \"0.0.0.0:8080\"\n    \n\n---\n# Source: demo/templates/service.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: alpha-svc\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\nspec:\n  selector:\n    app.kubernetes.io/instance: alpha\n  ports:\n    - name: http\n      port: 80\n      targetPort: 8080\n\n\n",
+            "unread": []
+          },
+          "notes": {
+            "hidden": false,
+            "text": "Thank you for installing demo.\n\nRelease alpha is at revision 2 in fmt-a.\nThe image is registry.example/demo:1.2.\n"
+          },
+          "overview": {
+            "header": {
+              "created": "2026-11-22T20:14:04.369027Z",
+              "generated": null,
+              "node": null,
+              "owner": null,
+              "printed": [
+                {
+                  "column": "Name",
+                  "value": "alpha"
+                },
+                {
+                  "column": "Revision",
+                  "value": "2"
+                },
+                {
+                  "column": "Status",
+                  "value": "deployed"
+                },
+                {
+                  "column": "Chart",
+                  "value": "demo-0.1.0"
+                },
+                {
+                  "column": "App Version",
+                  "value": "1.0.0"
+                },
+                {
+                  "column": "Problem",
+                  "value": ""
+                }
+              ],
+              "sentence": [],
+              "vitals": [
+                {
+                  "label": "Revision",
+                  "note": [],
+                  "value": {
+                    "text": "2",
+                    "type": "text"
+                  }
+                },
+                {
+                  "label": "Chart version",
+                  "note": [],
+                  "value": {
+                    "text": "0.1.0",
+                    "type": "text"
+                  }
+                },
+                {
+                  "label": "App version",
+                  "note": [],
+                  "value": {
+                    "text": "1.0.0",
+                    "type": "text"
+                  }
+                }
+              ]
+            },
+            "sections": [
+              {
+                "blocks": [
+                  {
+                    "columns": [
+                      "Kind",
+                      "Name",
+                      "Namespace"
+                    ],
+                    "rows": [
+                      [
+                        {
+                          "text": "Secret",
+                          "type": "text"
+                        },
+                        {
+                          "target": {
+                            "group": "",
+                            "kind": "Secret",
+                            "name": "alpha-db",
+                            "namespace": "fmt-a",
+                            "version": "v1"
+                          },
+                          "text": "alpha-db",
+                          "type": "link"
+                        },
+                        {
+                          "text": "fmt-a",
+                          "type": "text"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "ConfigMap",
+                          "type": "text"
+                        },
+                        {
+                          "target": {
+                            "group": "",
+                            "kind": "ConfigMap",
+                            "name": "alpha-sub",
+                            "namespace": "fmt-a",
+                            "version": "v1"
+                          },
+                          "text": "alpha-sub",
+                          "type": "link"
+                        },
+                        {
+                          "text": "fmt-a",
+                          "type": "text"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "ConfigMap",
+                          "type": "text"
+                        },
+                        {
+                          "target": {
+                            "group": "",
+                            "kind": "ConfigMap",
+                            "name": "alpha-config",
+                            "namespace": "fmt-a",
+                            "version": "v1"
+                          },
+                          "text": "alpha-config",
+                          "type": "link"
+                        },
+                        {
+                          "text": "fmt-a",
+                          "type": "text"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "Service",
+                          "type": "text"
+                        },
+                        {
+                          "target": {
+                            "group": "",
+                            "kind": "Service",
+                            "name": "alpha-svc",
+                            "namespace": "fmt-a",
+                            "version": "v1"
+                          },
+                          "text": "alpha-svc",
+                          "type": "link"
+                        },
+                        {
+                          "text": "fmt-a",
+                          "type": "text"
+                        }
+                      ]
+                    ],
+                    "type": "table"
+                  }
+                ],
+                "fold": "open",
+                "id": "helm.objects",
+                "summary": [
+                  {
+                    "text": "4 objects",
+                    "type": "text"
+                  }
+                ],
+                "title": "Objects",
+                "tone": null
+              },
+              {
+                "blocks": [
+                  {
+                    "columns": [
+                      "Name",
+                      "Kind",
+                      "Events",
+                      "Weight",
+                      "Last run"
+                    ],
+                    "rows": [
+                      [
+                        {
+                          "text": "alpha-hook",
+                          "type": "text"
+                        },
+                        {
+                          "text": "ConfigMap",
+                          "type": "text"
+                        },
+                        {
+                          "text": "post-install, post-upgrade",
+                          "type": "text"
+                        },
+                        {
+                          "text": "5",
+                          "type": "text"
+                        },
+                        {
+                          "text": "Succeeded",
+                          "type": "text"
+                        }
+                      ],
+                      [
+                        {
+                          "text": "alpha-test",
+                          "type": "text"
+                        },
+                        {
+                          "text": "ConfigMap",
+                          "type": "text"
+                        },
+                        {
+                          "text": "test",
+                          "type": "text"
+                        },
+                        {
+                          "text": "0",
+                          "type": "text"
+                        },
+                        {
+                          "text": "Not run",
+                          "type": "text"
+                        }
+                      ]
+                    ],
+                    "type": "table"
+                  }
+                ],
+                "fold": "folded",
+                "id": "helm.hooks",
+                "summary": [
+                  {
+                    "text": "2 hooks",
+                    "type": "text"
+                  }
+                ],
+                "title": "Hooks",
+                "tone": null
+              },
+              {
+                "blocks": [
+                  {
+                    "fields": [
+                      {
+                        "default": false,
+                        "label": "Name",
+                        "value": {
+                          "text": "demo",
+                          "type": "text"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Description",
+                        "value": {
+                          "text": "A chart written for Twigo's Helm decoder fixtures",
+                          "type": "text"
+                        }
+                      }
+                    ],
+                    "type": "fields"
+                  }
+                ],
+                "fold": "folded",
+                "id": "helm.chart",
+                "summary": [
+                  {
+                    "text": "demo",
+                    "type": "text"
+                  }
+                ],
+                "title": "Chart",
+                "tone": null
+              },
+              {
+                "blocks": [
+                  {
+                    "fields": [
+                      {
+                        "default": false,
+                        "label": "First deployed",
+                        "value": {
+                          "at": "2026-11-22T20:14:04.237774Z",
+                          "type": "time"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Last deployed",
+                        "value": {
+                          "at": "2026-11-22T20:14:04.369027Z",
+                          "type": "time"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Apply method",
+                        "value": {
+                          "text": "Server-side apply",
+                          "type": "text"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Labels",
+                        "value": {
+                          "labels": [
+                            {
+                              "key": "team",
+                              "value": "fixtures"
+                            }
+                          ],
+                          "type": "labels"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Stored in",
+                        "value": {
+                          "target": {
+                            "group": "",
+                            "kind": "Secret",
+                            "name": "sh.helm.release.v1.alpha.v2",
+                            "namespace": "fmt-a",
+                            "version": "v1"
+                          },
+                          "text": "sh.helm.release.v1.alpha.v2",
+                          "type": "link"
+                        }
+                      }
+                    ],
+                    "type": "fields"
+                  }
+                ],
+                "fold": "folded",
+                "id": "helm.metadata",
+                "summary": [],
+                "title": "Metadata",
+                "tone": null
+              }
+            ]
+          },
+          "problem": null,
+          "revision": 2,
+          "values": {
+            "defaults": "{\"alpha\":\"<24 bytes>\",\"database\":{\"host\":\"<10 bytes>\",\"password\":\"<22 bytes>\"},\"fromSub\":{\"answer\":\"<2 bytes>\"},\"global\":{\"region\":\"<7 bytes>\"},\"image\":{\"pullPolicy\":\"<12 bytes>\",\"repository\":\"<21 bytes>\",\"tag\":\"<3 bytes>\"},\"removeMe\":\"<16 bytes>\",\"replicaCount\":\"<1 bytes>\",\"sub\":{\"exported\":{\"answer\":\"<2 bytes>\"},\"global\":{\"region\":\"<7 bytes>\"},\"greeting\":\"<17 bytes>\",\"subOnly\":\"<31 bytes>\"},\"zeta\":\"<12 bytes>\"}",
+            "user": "{\"database\":{\"password\":\"<16 bytes>\"},\"image\":{\"tag\":\"<3 bytes>\"}}"
+          }
+        }
+      ]
+    },
+    {
+      "compared": [
+        {
+          "defaults": {
+            "from": "{\"extra\":\"<0 bytes>\",\"password\":\"<22 bytes>\"}",
+            "to": "{\"extra\":\"<0 bytes>\",\"password\":\"<22 bytes>\"}"
+          },
+          "from": 1,
+          "manifest": {
+            "from": "---\n# Source: failing/templates/secret.yaml\napiVersion: v1\ndata:\n  password: <19 bytes, before>\nkind: Secret\nmetadata:\n  name: epsilon-credentials\ntype: Opaque\n\n\n",
+            "to": "---\n# Source: failing/templates/secret.yaml\napiVersion: v1\ndata:\n  extra: <11 bytes>\n  password: <19 bytes, after>\nkind: Secret\nmetadata:\n  name: epsilon-credentials\ntype: Opaque\n\n\n"
+          },
+          "to": 2,
+          "values": {
+            "from": "{\"password\":\"<19 bytes, before>\"}",
+            "to": "{\"extra\":\"<11 bytes>\",\"password\":\"<19 bytes, after>\"}"
+          }
+        }
+      ],
+      "latest": {
+        "appVersion": "2.0",
+        "chart": "failing-0.2.0",
+        "lastDeployed": "2026-11-22T21:53:02.450885Z",
+        "name": "epsilon",
+        "problem": null,
+        "revision": 2,
+        "status": "failed"
+      },
+      "name": "epsilon",
+      "namespace": "fmt-a",
+      "revisions": [
+        {
+          "description": {
+            "hidden": false,
+            "text": "Install complete"
+          },
+          "line": {
+            "appVersion": "2.0",
+            "chart": "failing-0.2.0",
+            "description": {
+              "hidden": false,
+              "text": "Install complete"
+            },
+            "problem": null,
+            "revision": 1,
+            "rollbackOf": null,
+            "status": "deployed",
+            "updated": "2026-11-22T21:53:02.374405Z"
+          },
+          "manifest": {
+            "secrets": [
+              {
+                "document": 0,
+                "entries": [
+                  {
+                    "binary": false,
+                    "bytes": 19,
+                    "key": "password"
+                  }
+                ],
+                "items": [],
+                "line": 2,
+                "name": "epsilon-credentials",
+                "namespace": null
+              }
+            ],
+            "text": "---\n# Source: failing/templates/secret.yaml\napiVersion: v1\ndata:\n  password: <19 bytes>\nkind: Secret\nmetadata:\n  name: epsilon-credentials\ntype: Opaque\n\n\n",
+            "unread": []
+          },
+          "notes": {
+            "hidden": true,
+            "text": "Log in as admin with the password <hidden>.\n"
+          },
+          "overview": {
+            "header": {
+              "created": "2026-11-22T21:53:02.374405Z",
+              "generated": null,
+              "node": null,
+              "owner": null,
+              "printed": [
+                {
+                  "column": "Name",
+                  "value": "epsilon"
+                },
+                {
+                  "column": "Revision",
+                  "value": "2"
+                },
+                {
+                  "column": "Status",
+                  "value": "failed"
+                },
+                {
+                  "column": "Chart",
+                  "value": "failing-0.2.0"
+                },
+                {
+                  "column": "App Version",
+                  "value": "2.0"
+                },
+                {
+                  "column": "Problem",
+                  "value": ""
+                }
+              ],
+              "sentence": [],
+              "vitals": [
+                {
+                  "label": "Revision",
+                  "note": [],
+                  "value": {
+                    "text": "1",
+                    "type": "text"
+                  }
+                },
+                {
+                  "label": "Chart version",
+                  "note": [],
+                  "value": {
+                    "text": "0.2.0",
+                    "type": "text"
+                  }
+                },
+                {
+                  "label": "App version",
+                  "note": [],
+                  "value": {
+                    "text": "2.0",
+                    "type": "text"
+                  }
+                }
+              ]
+            },
+            "sections": [
+              {
+                "blocks": [
+                  {
+                    "columns": [
+                      "Kind",
+                      "Name",
+                      "Namespace"
+                    ],
+                    "rows": [
+                      [
+                        {
+                          "text": "Secret",
+                          "type": "text"
+                        },
+                        {
+                          "target": {
+                            "group": "",
+                            "kind": "Secret",
+                            "name": "epsilon-credentials",
+                            "namespace": "fmt-a",
+                            "version": "v1"
+                          },
+                          "text": "epsilon-credentials",
+                          "type": "link"
+                        },
+                        {
+                          "text": "fmt-a",
+                          "type": "text"
+                        }
+                      ]
+                    ],
+                    "type": "table"
+                  }
+                ],
+                "fold": "open",
+                "id": "helm.objects",
+                "summary": [
+                  {
+                    "text": "1 object",
+                    "type": "text"
+                  }
+                ],
+                "title": "Objects",
+                "tone": null
+              },
+              {
+                "blocks": [
+                  {
+                    "fields": [
+                      {
+                        "default": false,
+                        "label": "Name",
+                        "value": {
+                          "text": "failing",
+                          "type": "text"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Description",
+                        "value": {
+                          "text": "A chart written for Twigo's Helm decoder fixtures, whose upgrade the API server refuses",
+                          "type": "text"
+                        }
+                      }
+                    ],
+                    "type": "fields"
+                  }
+                ],
+                "fold": "folded",
+                "id": "helm.chart",
+                "summary": [
+                  {
+                    "text": "failing",
+                    "type": "text"
+                  }
+                ],
+                "title": "Chart",
+                "tone": null
+              },
+              {
+                "blocks": [
+                  {
+                    "fields": [
+                      {
+                        "default": false,
+                        "label": "First deployed",
+                        "value": {
+                          "at": "2026-11-22T21:53:02.374405Z",
+                          "type": "time"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Last deployed",
+                        "value": {
+                          "at": "2026-11-22T21:53:02.374405Z",
+                          "type": "time"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Apply method",
+                        "value": {
+                          "text": "Client-side apply",
+                          "type": "text"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Stored in",
+                        "value": {
+                          "target": {
+                            "group": "",
+                            "kind": "Secret",
+                            "name": "sh.helm.release.v1.epsilon.v1",
+                            "namespace": "fmt-a",
+                            "version": "v1"
+                          },
+                          "text": "sh.helm.release.v1.epsilon.v1",
+                          "type": "link"
+                        }
+                      }
+                    ],
+                    "type": "fields"
+                  }
+                ],
+                "fold": "folded",
+                "id": "helm.metadata",
+                "summary": [],
+                "title": "Metadata",
+                "tone": null
+              }
+            ]
+          },
+          "problem": null,
+          "revision": 1,
+          "values": {
+            "defaults": "{\"extra\":\"<0 bytes>\",\"password\":\"<22 bytes>\"}",
+            "user": "{\"password\":\"<19 bytes>\"}"
+          }
+        },
+        {
+          "description": {
+            "hidden": true,
+            "text": "Upgrade \"epsilon\" failed: cannot patch \"epsilon-credentials\" with kind Secret:  \"\" is invalid: patch: Invalid value: <hidden>: illegal base64 data at input byte 3"
+          },
+          "line": {
+            "appVersion": "2.0",
+            "chart": "failing-0.2.0",
+            "description": {
+              "hidden": true,
+              "text": "Upgrade \"epsilon\" failed: cannot patch \"epsilon-credentials\" with kind Secret:  \"\" is invalid: patch: Invalid value: <hidden>: illegal base64 data at input byte 3"
+            },
+            "problem": null,
+            "revision": 2,
+            "rollbackOf": null,
+            "status": "failed",
+            "updated": "2026-11-22T21:53:02.450885Z"
+          },
+          "manifest": {
+            "secrets": [
+              {
+                "document": 0,
+                "entries": [
+                  {
+                    "binary": false,
+                    "bytes": 11,
+                    "key": "extra"
+                  },
+                  {
+                    "binary": false,
+                    "bytes": 19,
+                    "key": "password"
+                  }
+                ],
+                "items": [],
+                "line": 2,
+                "name": "epsilon-credentials",
+                "namespace": null
+              }
+            ],
+            "text": "---\n# Source: failing/templates/secret.yaml\napiVersion: v1\ndata:\n  extra: <11 bytes>\n  password: <19 bytes>\nkind: Secret\nmetadata:\n  name: epsilon-credentials\ntype: Opaque\n\n\n",
+            "unread": []
+          },
+          "notes": {
+            "hidden": true,
+            "text": "Log in as admin with the password <hidden>.\n"
+          },
+          "overview": {
+            "header": {
+              "created": "2026-11-22T21:53:02.450885Z",
+              "generated": null,
+              "node": null,
+              "owner": null,
+              "printed": [
+                {
+                  "column": "Name",
+                  "value": "epsilon"
+                },
+                {
+                  "column": "Revision",
+                  "value": "2"
+                },
+                {
+                  "column": "Status",
+                  "value": "failed"
+                },
+                {
+                  "column": "Chart",
+                  "value": "failing-0.2.0"
+                },
+                {
+                  "column": "App Version",
+                  "value": "2.0"
+                },
+                {
+                  "column": "Problem",
+                  "value": ""
+                }
+              ],
+              "sentence": [
+                {
+                  "text": "Revision 2 failed",
+                  "type": "text"
+                }
+              ],
+              "vitals": [
+                {
+                  "label": "Revision",
+                  "note": [
+                    {
+                      "text": "r1 deployed",
+                      "type": "text"
+                    }
+                  ],
+                  "value": {
+                    "text": "2",
+                    "type": "text"
+                  }
+                },
+                {
+                  "label": "Chart version",
+                  "note": [],
+                  "value": {
+                    "text": "0.2.0",
+                    "type": "text"
+                  }
+                },
+                {
+                  "label": "App version",
+                  "note": [],
+                  "value": {
+                    "text": "2.0",
+                    "type": "text"
+                  }
+                }
+              ]
+            },
+            "sections": [
+              {
+                "blocks": [
+                  {
+                    "findings": [
+                      {
+                        "detail": [
+                          {
+                            "text": "Revision 1 is deployed.",
+                            "type": "text"
+                          }
+                        ],
+                        "logs": null,
+                        "message": null,
+                        "title": "Revision 2 failed",
+                        "tone": "danger"
+                      }
+                    ],
+                    "type": "diagnostics"
+                  }
+                ],
+                "fold": "open",
+                "id": "helm.diagnostics",
+                "summary": [],
+                "title": "Diagnostics",
+                "tone": "danger"
+              },
+              {
+                "blocks": [
+                  {
+                    "columns": [
+                      "Kind",
+                      "Name",
+                      "Namespace"
+                    ],
+                    "rows": [
+                      [
+                        {
+                          "text": "Secret",
+                          "type": "text"
+                        },
+                        {
+                          "target": {
+                            "group": "",
+                            "kind": "Secret",
+                            "name": "epsilon-credentials",
+                            "namespace": "fmt-a",
+                            "version": "v1"
+                          },
+                          "text": "epsilon-credentials",
+                          "type": "link"
+                        },
+                        {
+                          "text": "fmt-a",
+                          "type": "text"
+                        }
+                      ]
+                    ],
+                    "type": "table"
+                  }
+                ],
+                "fold": "open",
+                "id": "helm.objects",
+                "summary": [
+                  {
+                    "text": "1 object",
+                    "type": "text"
+                  }
+                ],
+                "title": "Objects",
+                "tone": null
+              },
+              {
+                "blocks": [
+                  {
+                    "fields": [
+                      {
+                        "default": false,
+                        "label": "Name",
+                        "value": {
+                          "text": "failing",
+                          "type": "text"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Description",
+                        "value": {
+                          "text": "A chart written for Twigo's Helm decoder fixtures, whose upgrade the API server refuses",
+                          "type": "text"
+                        }
+                      }
+                    ],
+                    "type": "fields"
+                  }
+                ],
+                "fold": "folded",
+                "id": "helm.chart",
+                "summary": [
+                  {
+                    "text": "failing",
+                    "type": "text"
+                  }
+                ],
+                "title": "Chart",
+                "tone": null
+              },
+              {
+                "blocks": [
+                  {
+                    "fields": [
+                      {
+                        "default": false,
+                        "label": "First deployed",
+                        "value": {
+                          "at": "2026-11-22T21:53:02.374405Z",
+                          "type": "time"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Last deployed",
+                        "value": {
+                          "at": "2026-11-22T21:53:02.450885Z",
+                          "type": "time"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Apply method",
+                        "value": {
+                          "text": "Client-side apply",
+                          "type": "text"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Stored in",
+                        "value": {
+                          "target": {
+                            "group": "",
+                            "kind": "Secret",
+                            "name": "sh.helm.release.v1.epsilon.v2",
+                            "namespace": "fmt-a",
+                            "version": "v1"
+                          },
+                          "text": "sh.helm.release.v1.epsilon.v2",
+                          "type": "link"
+                        }
+                      }
+                    ],
+                    "type": "fields"
+                  }
+                ],
+                "fold": "folded",
+                "id": "helm.metadata",
+                "summary": [],
+                "title": "Metadata",
+                "tone": null
+              }
+            ]
+          },
+          "problem": null,
+          "revision": 2,
+          "values": {
+            "defaults": "{\"extra\":\"<0 bytes>\",\"password\":\"<22 bytes>\"}",
+            "user": "{\"extra\":\"<11 bytes>\",\"password\":\"<19 bytes>\"}"
+          }
+        }
+      ]
+    },
+    {
+      "compared": [],
+      "latest": {
+        "appVersion": "v9",
+        "chart": "plain-2.3.4",
+        "lastDeployed": "2026-11-22T20:17:12.611076Z",
+        "name": "alpha",
+        "problem": null,
+        "revision": 1,
+        "status": "deployed"
+      },
+      "name": "alpha",
+      "namespace": "fmt-b",
+      "revisions": [
+        {
+          "description": {
+            "hidden": false,
+            "text": "Install complete"
+          },
+          "line": {
+            "appVersion": "v9",
+            "chart": "plain-2.3.4",
+            "description": {
+              "hidden": false,
+              "text": "Install complete"
+            },
+            "problem": null,
+            "revision": 1,
+            "rollbackOf": null,
+            "status": "deployed",
+            "updated": "2026-11-22T20:17:12.611076Z"
+          },
+          "manifest": {
+            "secrets": [],
+            "text": "---\n# Source: plain/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-plain\ndata:\n  message: \"hello\"\n  ports: \"80,443\"\n  deep: \"deep\"\n\n\n",
+            "unread": []
+          },
+          "notes": {
+            "hidden": false,
+            "text": ""
+          },
+          "overview": {
+            "header": {
+              "created": "2026-11-22T20:17:12.611076Z",
+              "generated": null,
+              "node": null,
+              "owner": null,
+              "printed": [
+                {
+                  "column": "Name",
+                  "value": "alpha"
+                },
+                {
+                  "column": "Revision",
+                  "value": "1"
+                },
+                {
+                  "column": "Status",
+                  "value": "deployed"
+                },
+                {
+                  "column": "Chart",
+                  "value": "plain-2.3.4"
+                },
+                {
+                  "column": "App Version",
+                  "value": "v9"
+                },
+                {
+                  "column": "Problem",
+                  "value": ""
+                }
+              ],
+              "sentence": [],
+              "vitals": [
+                {
+                  "label": "Revision",
+                  "note": [],
+                  "value": {
+                    "text": "1",
+                    "type": "text"
+                  }
+                },
+                {
+                  "label": "Chart version",
+                  "note": [],
+                  "value": {
+                    "text": "2.3.4",
+                    "type": "text"
+                  }
+                },
+                {
+                  "label": "App version",
+                  "note": [],
+                  "value": {
+                    "text": "v9",
+                    "type": "text"
+                  }
+                }
+              ]
+            },
+            "sections": [
+              {
+                "blocks": [
+                  {
+                    "columns": [
+                      "Kind",
+                      "Name",
+                      "Namespace"
+                    ],
+                    "rows": [
+                      [
+                        {
+                          "text": "ConfigMap",
+                          "type": "text"
+                        },
+                        {
+                          "target": {
+                            "group": "",
+                            "kind": "ConfigMap",
+                            "name": "alpha-plain",
+                            "namespace": "fmt-b",
+                            "version": "v1"
+                          },
+                          "text": "alpha-plain",
+                          "type": "link"
+                        },
+                        {
+                          "text": "fmt-b",
+                          "type": "text"
+                        }
+                      ]
+                    ],
+                    "type": "table"
+                  }
+                ],
+                "fold": "open",
+                "id": "helm.objects",
+                "summary": [
+                  {
+                    "text": "1 object",
+                    "type": "text"
+                  }
+                ],
+                "title": "Objects",
+                "tone": null
+              },
+              {
+                "blocks": [
+                  {
+                    "fields": [
+                      {
+                        "default": false,
+                        "label": "Name",
+                        "value": {
+                          "text": "plain",
+                          "type": "text"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Description",
+                        "value": {
+                          "text": "A chart of apiVersion v1, written for Twigo's Helm decoder fixtures, with no NOTES.txt",
+                          "type": "text"
+                        }
+                      }
+                    ],
+                    "type": "fields"
+                  }
+                ],
+                "fold": "folded",
+                "id": "helm.chart",
+                "summary": [
+                  {
+                    "text": "plain",
+                    "type": "text"
+                  }
+                ],
+                "title": "Chart",
+                "tone": null
+              },
+              {
+                "blocks": [
+                  {
+                    "fields": [
+                      {
+                        "default": false,
+                        "label": "First deployed",
+                        "value": {
+                          "at": "2026-11-22T20:17:12.611076Z",
+                          "type": "time"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Last deployed",
+                        "value": {
+                          "at": "2026-11-22T20:17:12.611076Z",
+                          "type": "time"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Apply method",
+                        "value": {
+                          "text": "Server-side apply",
+                          "type": "text"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Stored in",
+                        "value": {
+                          "target": {
+                            "group": "",
+                            "kind": "Secret",
+                            "name": "sh.helm.release.v1.alpha.v1",
+                            "namespace": "fmt-b",
+                            "version": "v1"
+                          },
+                          "text": "sh.helm.release.v1.alpha.v1",
+                          "type": "link"
+                        }
+                      }
+                    ],
+                    "type": "fields"
+                  }
+                ],
+                "fold": "folded",
+                "id": "helm.metadata",
+                "summary": [],
+                "title": "Metadata",
+                "tone": null
+              }
+            ]
+          },
+          "problem": null,
+          "revision": 1,
+          "values": {
+            "defaults": "{\"message\":\"<5 bytes>\",\"nested\":{\"level1\":{\"level2\":\"<4 bytes>\"}},\"ports\":[\"<2 bytes>\",\"<3 bytes>\"]}",
+            "user": "null"
+          }
+        }
+      ]
+    },
+    {
+      "compared": [
+        {
+          "defaults": {
+            "from": "{\"message\":\"<5 bytes>\",\"nested\":{\"level1\":{\"level2\":\"<4 bytes>\"}},\"ports\":[\"<2 bytes>\",\"<3 bytes>\"]}",
+            "to": "{\"message\":\"<5 bytes>\",\"nested\":{\"level1\":{\"level2\":\"<4 bytes>\"}},\"ports\":[\"<2 bytes>\",\"<3 bytes>\"]}"
+          },
+          "from": 1,
+          "manifest": {
+            "from": "---\n# Source: plain/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: beta-plain\ndata:\n  message: \"hi-from-v3\"\n  ports: \"80,443\"\n  deep: \"deep\"\n\n",
+            "to": "---\n# Source: plain/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: beta-plain\ndata:\n  message: \"second\"\n  ports: \"80,443\"\n  deep: \"deep\"\n\n"
+          },
+          "to": 2,
+          "values": {
+            "from": "{\"message\":\"<10 bytes, before>\"}",
+            "to": "{\"message\":\"<6 bytes, after>\"}"
+          }
+        }
+      ],
+      "latest": {
+        "appVersion": "v9",
+        "chart": "plain-2.3.4",
+        "lastDeployed": "2026-11-22T20:14:04.606991Z",
+        "name": "beta",
+        "problem": null,
+        "revision": 2,
+        "status": "uninstalled"
+      },
+      "name": "beta",
+      "namespace": "fmt-b",
+      "revisions": [
+        {
+          "description": {
+            "hidden": false,
+            "text": "Install complete"
+          },
+          "line": {
+            "appVersion": "v9",
+            "chart": "plain-2.3.4",
+            "description": {
+              "hidden": false,
+              "text": "Install complete"
+            },
+            "problem": null,
+            "revision": 1,
+            "rollbackOf": null,
+            "status": "superseded",
+            "updated": "2026-11-22T20:14:04.534311Z"
+          },
+          "manifest": {
+            "secrets": [],
+            "text": "---\n# Source: plain/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: beta-plain\ndata:\n  message: \"hi-from-v3\"\n  ports: \"80,443\"\n  deep: \"deep\"\n\n",
+            "unread": []
+          },
+          "notes": {
+            "hidden": false,
+            "text": ""
+          },
+          "overview": {
+            "header": {
+              "created": "2026-11-22T20:14:04.534311Z",
+              "generated": null,
+              "node": null,
+              "owner": null,
+              "printed": [
+                {
+                  "column": "Name",
+                  "value": "beta"
+                },
+                {
+                  "column": "Revision",
+                  "value": "2"
+                },
+                {
+                  "column": "Status",
+                  "value": "uninstalled"
+                },
+                {
+                  "column": "Chart",
+                  "value": "plain-2.3.4"
+                },
+                {
+                  "column": "App Version",
+                  "value": "v9"
+                },
+                {
+                  "column": "Problem",
+                  "value": ""
+                }
+              ],
+              "sentence": [],
+              "vitals": [
+                {
+                  "label": "Revision",
+                  "note": [],
+                  "value": {
+                    "text": "1",
+                    "type": "text"
+                  }
+                },
+                {
+                  "label": "Chart version",
+                  "note": [],
+                  "value": {
+                    "text": "2.3.4",
+                    "type": "text"
+                  }
+                },
+                {
+                  "label": "App version",
+                  "note": [],
+                  "value": {
+                    "text": "v9",
+                    "type": "text"
+                  }
+                }
+              ]
+            },
+            "sections": [
+              {
+                "blocks": [
+                  {
+                    "columns": [
+                      "Kind",
+                      "Name",
+                      "Namespace"
+                    ],
+                    "rows": [
+                      [
+                        {
+                          "text": "ConfigMap",
+                          "type": "text"
+                        },
+                        {
+                          "target": {
+                            "group": "",
+                            "kind": "ConfigMap",
+                            "name": "beta-plain",
+                            "namespace": "fmt-b",
+                            "version": "v1"
+                          },
+                          "text": "beta-plain",
+                          "type": "link"
+                        },
+                        {
+                          "text": "fmt-b",
+                          "type": "text"
+                        }
+                      ]
+                    ],
+                    "type": "table"
+                  }
+                ],
+                "fold": "open",
+                "id": "helm.objects",
+                "summary": [
+                  {
+                    "text": "1 object",
+                    "type": "text"
+                  }
+                ],
+                "title": "Objects",
+                "tone": null
+              },
+              {
+                "blocks": [
+                  {
+                    "fields": [
+                      {
+                        "default": false,
+                        "label": "Name",
+                        "value": {
+                          "text": "plain",
+                          "type": "text"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Description",
+                        "value": {
+                          "text": "A chart of apiVersion v1, written for Twigo's Helm decoder fixtures, with no NOTES.txt",
+                          "type": "text"
+                        }
+                      }
+                    ],
+                    "type": "fields"
+                  }
+                ],
+                "fold": "folded",
+                "id": "helm.chart",
+                "summary": [
+                  {
+                    "text": "plain",
+                    "type": "text"
+                  }
+                ],
+                "title": "Chart",
+                "tone": null
+              },
+              {
+                "blocks": [
+                  {
+                    "fields": [
+                      {
+                        "default": false,
+                        "label": "First deployed",
+                        "value": {
+                          "at": "2026-11-22T20:14:04.534311Z",
+                          "type": "time"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Last deployed",
+                        "value": {
+                          "at": "2026-11-22T20:14:04.534311Z",
+                          "type": "time"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Apply method",
+                        "value": {
+                          "text": "Client-side apply",
+                          "type": "text"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Stored in",
+                        "value": {
+                          "target": {
+                            "group": "",
+                            "kind": "Secret",
+                            "name": "sh.helm.release.v1.beta.v1",
+                            "namespace": "fmt-b",
+                            "version": "v1"
+                          },
+                          "text": "sh.helm.release.v1.beta.v1",
+                          "type": "link"
+                        }
+                      }
+                    ],
+                    "type": "fields"
+                  }
+                ],
+                "fold": "folded",
+                "id": "helm.metadata",
+                "summary": [],
+                "title": "Metadata",
+                "tone": null
+              }
+            ]
+          },
+          "problem": null,
+          "revision": 1,
+          "values": {
+            "defaults": "{\"message\":\"<5 bytes>\",\"nested\":{\"level1\":{\"level2\":\"<4 bytes>\"}},\"ports\":[\"<2 bytes>\",\"<3 bytes>\"]}",
+            "user": "{\"message\":\"<10 bytes>\"}"
+          }
+        },
+        {
+          "description": {
+            "hidden": false,
+            "text": "Uninstallation complete"
+          },
+          "line": {
+            "appVersion": "v9",
+            "chart": "plain-2.3.4",
+            "description": {
+              "hidden": false,
+              "text": "Uninstallation complete"
+            },
+            "problem": null,
+            "revision": 2,
+            "rollbackOf": null,
+            "status": "uninstalled",
+            "updated": "2026-11-22T20:14:04.606991Z"
+          },
+          "manifest": {
+            "secrets": [],
+            "text": "---\n# Source: plain/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: beta-plain\ndata:\n  message: \"second\"\n  ports: \"80,443\"\n  deep: \"deep\"\n\n",
+            "unread": []
+          },
+          "notes": {
+            "hidden": false,
+            "text": ""
+          },
+          "overview": {
+            "header": {
+              "created": "2026-11-22T20:14:04.606991Z",
+              "generated": null,
+              "node": null,
+              "owner": null,
+              "printed": [
+                {
+                  "column": "Name",
+                  "value": "beta"
+                },
+                {
+                  "column": "Revision",
+                  "value": "2"
+                },
+                {
+                  "column": "Status",
+                  "value": "uninstalled"
+                },
+                {
+                  "column": "Chart",
+                  "value": "plain-2.3.4"
+                },
+                {
+                  "column": "App Version",
+                  "value": "v9"
+                },
+                {
+                  "column": "Problem",
+                  "value": ""
+                }
+              ],
+              "sentence": [],
+              "vitals": [
+                {
+                  "label": "Revision",
+                  "note": [],
+                  "value": {
+                    "text": "2",
+                    "type": "text"
+                  }
+                },
+                {
+                  "label": "Chart version",
+                  "note": [],
+                  "value": {
+                    "text": "2.3.4",
+                    "type": "text"
+                  }
+                },
+                {
+                  "label": "App version",
+                  "note": [],
+                  "value": {
+                    "text": "v9",
+                    "type": "text"
+                  }
+                }
+              ]
+            },
+            "sections": [
+              {
+                "blocks": [
+                  {
+                    "columns": [
+                      "Kind",
+                      "Name",
+                      "Namespace"
+                    ],
+                    "rows": [
+                      [
+                        {
+                          "text": "ConfigMap",
+                          "type": "text"
+                        },
+                        {
+                          "target": {
+                            "group": "",
+                            "kind": "ConfigMap",
+                            "name": "beta-plain",
+                            "namespace": "fmt-b",
+                            "version": "v1"
+                          },
+                          "text": "beta-plain",
+                          "type": "link"
+                        },
+                        {
+                          "text": "fmt-b",
+                          "type": "text"
+                        }
+                      ]
+                    ],
+                    "type": "table"
+                  }
+                ],
+                "fold": "open",
+                "id": "helm.objects",
+                "summary": [
+                  {
+                    "text": "1 object",
+                    "type": "text"
+                  }
+                ],
+                "title": "Objects",
+                "tone": null
+              },
+              {
+                "blocks": [
+                  {
+                    "fields": [
+                      {
+                        "default": false,
+                        "label": "Name",
+                        "value": {
+                          "text": "plain",
+                          "type": "text"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Description",
+                        "value": {
+                          "text": "A chart of apiVersion v1, written for Twigo's Helm decoder fixtures, with no NOTES.txt",
+                          "type": "text"
+                        }
+                      }
+                    ],
+                    "type": "fields"
+                  }
+                ],
+                "fold": "folded",
+                "id": "helm.chart",
+                "summary": [
+                  {
+                    "text": "plain",
+                    "type": "text"
+                  }
+                ],
+                "title": "Chart",
+                "tone": null
+              },
+              {
+                "blocks": [
+                  {
+                    "fields": [
+                      {
+                        "default": false,
+                        "label": "First deployed",
+                        "value": {
+                          "at": "2026-11-22T20:14:04.534311Z",
+                          "type": "time"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Last deployed",
+                        "value": {
+                          "at": "2026-11-22T20:14:04.606991Z",
+                          "type": "time"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Apply method",
+                        "value": {
+                          "text": "Client-side apply",
+                          "type": "text"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Stored in",
+                        "value": {
+                          "target": {
+                            "group": "",
+                            "kind": "Secret",
+                            "name": "sh.helm.release.v1.beta.v2",
+                            "namespace": "fmt-b",
+                            "version": "v1"
+                          },
+                          "text": "sh.helm.release.v1.beta.v2",
+                          "type": "link"
+                        }
+                      }
+                    ],
+                    "type": "fields"
+                  }
+                ],
+                "fold": "folded",
+                "id": "helm.metadata",
+                "summary": [],
+                "title": "Metadata",
+                "tone": null
+              }
+            ]
+          },
+          "problem": null,
+          "revision": 2,
+          "values": {
+            "defaults": "{\"message\":\"<5 bytes>\",\"nested\":{\"level1\":{\"level2\":\"<4 bytes>\"}},\"ports\":[\"<2 bytes>\",\"<3 bytes>\"]}",
+            "user": "{\"message\":\"<6 bytes>\"}"
+          }
+        }
+      ]
+    },
+    {
+      "compared": [
+        {
+          "defaults": {
+            "from": "{\"message\":\"<5 bytes>\",\"nested\":{\"level1\":{\"level2\":\"<4 bytes>\"}},\"ports\":[\"<2 bytes>\",\"<3 bytes>\"]}",
+            "to": "{\"message\":\"<5 bytes>\",\"nested\":{\"level1\":{\"level2\":\"<4 bytes>\"}},\"ports\":[\"<2 bytes>\",\"<3 bytes>\"]}"
+          },
+          "from": 1,
+          "manifest": {
+            "from": "---\n# Source: plain/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: beta-plain\ndata:\n  message: \"hi-from-v3\"\n  ports: \"80,443\"\n  deep: \"deep\"\n\n",
+            "to": "---\n# Source: plain/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: beta-plain\ndata:\n  message: \"hi-from-v3\"\n  ports: \"80,443\"\n  deep: \"deep\"\n\n"
+          },
+          "to": 2,
+          "values": {
+            "from": "{\"message\":\"<10 bytes, before>\"}",
+            "to": "{\"message\":\"<13 bytes, after>\"}"
+          }
+        }
+      ],
+      "latest": {
+        "appVersion": "v9",
+        "chart": "plain-2.3.4",
+        "lastDeployed": "2026-11-22T20:20:00Z",
+        "name": "stuck",
+        "problem": null,
+        "revision": 2,
+        "status": "pending-upgrade"
+      },
+      "name": "stuck",
+      "namespace": "fmt-d",
+      "revisions": [
+        {
+          "description": {
+            "hidden": false,
+            "text": "Install complete"
+          },
+          "line": {
+            "appVersion": "v9",
+            "chart": "plain-2.3.4",
+            "description": {
+              "hidden": false,
+              "text": "Install complete"
+            },
+            "problem": null,
+            "revision": 1,
+            "rollbackOf": null,
+            "status": "deployed",
+            "updated": "2026-11-22T20:14:04.534311Z"
+          },
+          "manifest": {
+            "secrets": [],
+            "text": "---\n# Source: plain/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: beta-plain\ndata:\n  message: \"hi-from-v3\"\n  ports: \"80,443\"\n  deep: \"deep\"\n\n",
+            "unread": []
+          },
+          "notes": {
+            "hidden": false,
+            "text": ""
+          },
+          "overview": {
+            "header": {
+              "created": "2026-11-22T20:14:04.534311Z",
+              "generated": null,
+              "node": null,
+              "owner": null,
+              "printed": [
+                {
+                  "column": "Name",
+                  "value": "stuck"
+                },
+                {
+                  "column": "Revision",
+                  "value": "2"
+                },
+                {
+                  "column": "Status",
+                  "value": "pending-upgrade"
+                },
+                {
+                  "column": "Chart",
+                  "value": "plain-2.3.4"
+                },
+                {
+                  "column": "App Version",
+                  "value": "v9"
+                },
+                {
+                  "column": "Problem",
+                  "value": ""
+                }
+              ],
+              "sentence": [],
+              "vitals": [
+                {
+                  "label": "Revision",
+                  "note": [],
+                  "value": {
+                    "text": "1",
+                    "type": "text"
+                  }
+                },
+                {
+                  "label": "Chart version",
+                  "note": [],
+                  "value": {
+                    "text": "2.3.4",
+                    "type": "text"
+                  }
+                },
+                {
+                  "label": "App version",
+                  "note": [],
+                  "value": {
+                    "text": "v9",
+                    "type": "text"
+                  }
+                }
+              ]
+            },
+            "sections": [
+              {
+                "blocks": [
+                  {
+                    "columns": [
+                      "Kind",
+                      "Name",
+                      "Namespace"
+                    ],
+                    "rows": [
+                      [
+                        {
+                          "text": "ConfigMap",
+                          "type": "text"
+                        },
+                        {
+                          "target": {
+                            "group": "",
+                            "kind": "ConfigMap",
+                            "name": "beta-plain",
+                            "namespace": "fmt-d",
+                            "version": "v1"
+                          },
+                          "text": "beta-plain",
+                          "type": "link"
+                        },
+                        {
+                          "text": "fmt-d",
+                          "type": "text"
+                        }
+                      ]
+                    ],
+                    "type": "table"
+                  }
+                ],
+                "fold": "open",
+                "id": "helm.objects",
+                "summary": [
+                  {
+                    "text": "1 object",
+                    "type": "text"
+                  }
+                ],
+                "title": "Objects",
+                "tone": null
+              },
+              {
+                "blocks": [
+                  {
+                    "fields": [
+                      {
+                        "default": false,
+                        "label": "Name",
+                        "value": {
+                          "text": "plain",
+                          "type": "text"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Description",
+                        "value": {
+                          "text": "A chart of apiVersion v1, written for Twigo's Helm decoder fixtures, with no NOTES.txt",
+                          "type": "text"
+                        }
+                      }
+                    ],
+                    "type": "fields"
+                  }
+                ],
+                "fold": "folded",
+                "id": "helm.chart",
+                "summary": [
+                  {
+                    "text": "plain",
+                    "type": "text"
+                  }
+                ],
+                "title": "Chart",
+                "tone": null
+              },
+              {
+                "blocks": [
+                  {
+                    "fields": [
+                      {
+                        "default": false,
+                        "label": "First deployed",
+                        "value": {
+                          "at": "2026-11-22T20:14:04.534311Z",
+                          "type": "time"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Last deployed",
+                        "value": {
+                          "at": "2026-11-22T20:14:04.534311Z",
+                          "type": "time"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Apply method",
+                        "value": {
+                          "text": "Client-side apply",
+                          "type": "text"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Stored in",
+                        "value": {
+                          "target": {
+                            "group": "",
+                            "kind": "Secret",
+                            "name": "sh.helm.release.v1.stuck.v1",
+                            "namespace": "fmt-d",
+                            "version": "v1"
+                          },
+                          "text": "sh.helm.release.v1.stuck.v1",
+                          "type": "link"
+                        }
+                      }
+                    ],
+                    "type": "fields"
+                  }
+                ],
+                "fold": "folded",
+                "id": "helm.metadata",
+                "summary": [],
+                "title": "Metadata",
+                "tone": null
+              }
+            ]
+          },
+          "problem": null,
+          "revision": 1,
+          "values": {
+            "defaults": "{\"message\":\"<5 bytes>\",\"nested\":{\"level1\":{\"level2\":\"<4 bytes>\"}},\"ports\":[\"<2 bytes>\",\"<3 bytes>\"]}",
+            "user": "{\"message\":\"<10 bytes>\"}"
+          }
+        },
+        {
+          "description": {
+            "hidden": false,
+            "text": "Preparing upgrade"
+          },
+          "line": {
+            "appVersion": "v9",
+            "chart": "plain-2.3.4",
+            "description": {
+              "hidden": false,
+              "text": "Preparing upgrade"
+            },
+            "problem": null,
+            "revision": 2,
+            "rollbackOf": null,
+            "status": "pending-upgrade",
+            "updated": "2026-11-22T20:20:00Z"
+          },
+          "manifest": {
+            "secrets": [],
+            "text": "---\n# Source: plain/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: beta-plain\ndata:\n  message: \"hi-from-v3\"\n  ports: \"80,443\"\n  deep: \"deep\"\n\n",
+            "unread": []
+          },
+          "notes": {
+            "hidden": false,
+            "text": ""
+          },
+          "overview": {
+            "header": {
+              "created": "2026-11-22T20:20:00Z",
+              "generated": null,
+              "node": null,
+              "owner": null,
+              "printed": [
+                {
+                  "column": "Name",
+                  "value": "stuck"
+                },
+                {
+                  "column": "Revision",
+                  "value": "2"
+                },
+                {
+                  "column": "Status",
+                  "value": "pending-upgrade"
+                },
+                {
+                  "column": "Chart",
+                  "value": "plain-2.3.4"
+                },
+                {
+                  "column": "App Version",
+                  "value": "v9"
+                },
+                {
+                  "column": "Problem",
+                  "value": ""
+                }
+              ],
+              "sentence": [
+                {
+                  "text": "The upgrade of revision 2 has not ended",
+                  "type": "text"
+                }
+              ],
+              "vitals": [
+                {
+                  "label": "Revision",
+                  "note": [
+                    {
+                      "text": "r1 deployed",
+                      "type": "text"
+                    }
+                  ],
+                  "value": {
+                    "text": "2",
+                    "type": "text"
+                  }
+                },
+                {
+                  "label": "Chart version",
+                  "note": [],
+                  "value": {
+                    "text": "2.3.4",
+                    "type": "text"
+                  }
+                },
+                {
+                  "label": "App version",
+                  "note": [],
+                  "value": {
+                    "text": "v9",
+                    "type": "text"
+                  }
+                }
+              ]
+            },
+            "sections": [
+              {
+                "blocks": [
+                  {
+                    "findings": [
+                      {
+                        "detail": [
+                          {
+                            "text": "It started ",
+                            "type": "text"
+                          },
+                          {
+                            "at": "2026-11-22T20:20:00Z",
+                            "type": "ago"
+                          },
+                          {
+                            "text": ". ",
+                            "type": "text"
+                          },
+                          {
+                            "text": "Helm refuses to upgrade the release until it ends.",
+                            "type": "text"
+                          }
+                        ],
+                        "logs": null,
+                        "message": null,
+                        "title": "The upgrade of revision 2 has not ended",
+                        "tone": "warning"
+                      }
+                    ],
+                    "type": "diagnostics"
+                  }
+                ],
+                "fold": "open",
+                "id": "helm.diagnostics",
+                "summary": [],
+                "title": "Diagnostics",
+                "tone": "warning"
+              },
+              {
+                "blocks": [
+                  {
+                    "columns": [
+                      "Kind",
+                      "Name",
+                      "Namespace"
+                    ],
+                    "rows": [
+                      [
+                        {
+                          "text": "ConfigMap",
+                          "type": "text"
+                        },
+                        {
+                          "target": {
+                            "group": "",
+                            "kind": "ConfigMap",
+                            "name": "beta-plain",
+                            "namespace": "fmt-d",
+                            "version": "v1"
+                          },
+                          "text": "beta-plain",
+                          "type": "link"
+                        },
+                        {
+                          "text": "fmt-d",
+                          "type": "text"
+                        }
+                      ]
+                    ],
+                    "type": "table"
+                  }
+                ],
+                "fold": "open",
+                "id": "helm.objects",
+                "summary": [
+                  {
+                    "text": "1 object",
+                    "type": "text"
+                  }
+                ],
+                "title": "Objects",
+                "tone": null
+              },
+              {
+                "blocks": [
+                  {
+                    "fields": [
+                      {
+                        "default": false,
+                        "label": "Name",
+                        "value": {
+                          "text": "plain",
+                          "type": "text"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Description",
+                        "value": {
+                          "text": "A chart of apiVersion v1, written for Twigo's Helm decoder fixtures, with no NOTES.txt",
+                          "type": "text"
+                        }
+                      }
+                    ],
+                    "type": "fields"
+                  }
+                ],
+                "fold": "folded",
+                "id": "helm.chart",
+                "summary": [
+                  {
+                    "text": "plain",
+                    "type": "text"
+                  }
+                ],
+                "title": "Chart",
+                "tone": null
+              },
+              {
+                "blocks": [
+                  {
+                    "fields": [
+                      {
+                        "default": false,
+                        "label": "First deployed",
+                        "value": {
+                          "at": "2026-11-22T20:14:04.534311Z",
+                          "type": "time"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Last deployed",
+                        "value": {
+                          "at": "2026-11-22T20:20:00Z",
+                          "type": "time"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Apply method",
+                        "value": {
+                          "text": "Client-side apply",
+                          "type": "text"
+                        }
+                      },
+                      {
+                        "default": false,
+                        "label": "Stored in",
+                        "value": {
+                          "target": {
+                            "group": "",
+                            "kind": "Secret",
+                            "name": "sh.helm.release.v1.stuck.v2",
+                            "namespace": "fmt-d",
+                            "version": "v1"
+                          },
+                          "text": "sh.helm.release.v1.stuck.v2",
+                          "type": "link"
+                        }
+                      }
+                    ],
+                    "type": "fields"
+                  }
+                ],
+                "fold": "folded",
+                "id": "helm.metadata",
+                "summary": [],
+                "title": "Metadata",
+                "tone": null
+              }
+            ]
+          },
+          "problem": null,
+          "revision": 2,
+          "values": {
+            "defaults": "{\"message\":\"<5 bytes>\",\"nested\":{\"level1\":{\"level2\":\"<4 bytes>\"}},\"ports\":[\"<2 bytes>\",\"<3 bytes>\"]}",
+            "user": "{\"message\":\"<13 bytes>\"}"
+          }
+        }
+      ]
+    },
+    {
+      "compared": [],
+      "latest": {
+        "appVersion": null,
+        "chart": null,
+        "lastDeployed": null,
+        "name": "trunc",
+        "problem": "helm.truncated",
+        "revision": 1,
+        "status": "unreadable"
+      },
+      "name": "trunc",
+      "namespace": "fmt-d",
+      "revisions": [
+        {
+          "description": null,
+          "line": {
+            "appVersion": null,
+            "chart": null,
+            "description": null,
+            "problem": {
+              "code": "helm.truncated",
+              "kind": "invalidInput",
+              "message": "its release's gzip ends early"
+            },
+            "revision": 1,
+            "rollbackOf": null,
+            "status": "unreadable",
+            "updated": null
+          },
+          "manifest": null,
+          "notes": null,
+          "overview": null,
+          "problem": {
+            "code": "helm.truncated",
+            "kind": "invalidInput",
+            "message": "its release's gzip ends early"
+          },
+          "revision": 1,
+          "values": null
+        }
+      ]
+    }
+  ]
+}

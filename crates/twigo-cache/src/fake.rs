@@ -3,8 +3,9 @@
 //! list pages, watches resumed from a `resourceVersion` or streaming their
 //! initial events as each group answers them, gzip for what asks for it,
 //! `410 Gone` below a compacted version, refusals, probes, access reviews
-//! answered by what they ask, aggregated discovery with its ETags, and the
-//! Metrics API, which lists whole and cannot be watched.
+//! answered by what they ask, aggregated discovery with its ETags, the
+//! Metrics API, which lists whole and cannot be watched, and a `GET` of one
+//! object as it is put.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::Infallible;
@@ -108,6 +109,11 @@ pub struct State {
     /// The most Metrics API requests that waited at once.
     pub metrics_overlap: usize,
     metrics_waiting: usize,
+    /// Each `GET` of one object waits this long before it is answered.
+    pub gets_take: std::time::Duration,
+    /// The most `GET`s of one object that waited at once.
+    pub gets_overlap: usize,
+    gets_waiting: usize,
 }
 
 /// How a group answers a streaming list. Every answer that streams is gzipped
@@ -223,6 +229,8 @@ struct Target {
     group: String,
     resource: String,
     namespace: Option<String>,
+    /// The object a `GET` of one names.
+    name: Option<String>,
 }
 
 fn target(path: &str) -> Target {
@@ -236,49 +244,59 @@ fn target(path: &str) -> Target {
         None => ("", path.trim_start_matches("/api/v1/")),
     };
     let parts: Vec<&str> = collection.split('/').collect();
-    match parts[..] {
-        ["namespaces", namespace, resource] => Target {
-            group: group.to_owned(),
-            resource: resource.to_owned(),
-            namespace: Some(namespace.to_owned()),
-        },
-        [resource] => Target {
-            group: group.to_owned(),
-            resource: resource.to_owned(),
-            namespace: None,
-        },
+    let (namespace, resource, name) = match parts[..] {
+        ["namespaces", namespace, resource] => (Some(namespace), resource, None),
+        ["namespaces", namespace, resource, name] => (Some(namespace), resource, Some(name)),
+        [resource] => (None, resource, None),
+        [resource, name] => (None, resource, Some(name)),
         _ => panic!("the fake serves no {path}"),
+    };
+    Target {
+        group: group.to_owned(),
+        resource: resource.to_owned(),
+        namespace: namespace.map(str::to_owned),
+        name: name.map(str::to_owned),
     }
 }
 
-/// A request that waits for its answer: a Metrics API one, or an access review.
+/// What a request that waits for its answer is.
+#[derive(Clone, Copy)]
+enum Wait {
+    Metrics,
+    Review,
+    /// A `GET` of one object.
+    Get,
+}
+
+/// A request that waits for its answer.
 struct Waiting<'a> {
     fake: &'a Fake,
-    review: bool,
+    wait: Wait,
+}
+
+impl State {
+    fn waiting(&mut self, wait: Wait) -> (&mut usize, &mut usize) {
+        match wait {
+            Wait::Metrics => (&mut self.metrics_waiting, &mut self.metrics_overlap),
+            Wait::Review => (&mut self.reviews_waiting, &mut self.reviews_overlap),
+            Wait::Get => (&mut self.gets_waiting, &mut self.gets_overlap),
+        }
+    }
 }
 
 impl<'a> Waiting<'a> {
-    fn start(fake: &'a Fake, review: bool) -> Self {
+    fn start(fake: &'a Fake, wait: Wait) -> Self {
         let mut state = fake.state();
-        if review {
-            state.reviews_waiting += 1;
-            state.reviews_overlap = state.reviews_overlap.max(state.reviews_waiting);
-        } else {
-            state.metrics_waiting += 1;
-            state.metrics_overlap = state.metrics_overlap.max(state.metrics_waiting);
-        }
-        Self { fake, review }
+        let (waiting, overlap) = state.waiting(wait);
+        *waiting += 1;
+        *overlap = (*overlap).max(*waiting);
+        Self { fake, wait }
     }
 }
 
 impl Drop for Waiting<'_> {
     fn drop(&mut self) {
-        let mut state = self.fake.state();
-        if self.review {
-            state.reviews_waiting -= 1;
-        } else {
-            state.metrics_waiting -= 1;
-        }
+        *self.fake.state().waiting(self.wait).0 -= 1;
     }
 }
 
@@ -568,7 +586,7 @@ impl Fake {
             return std::future::pending().await;
         }
         if path.starts_with("/apis/metrics.k8s.io/") && !self.state().metrics_takes.is_zero() {
-            let _waiting = Waiting::start(self, false);
+            let _waiting = Waiting::start(self, Wait::Metrics);
             let takes = self.state().metrics_takes;
             tokio::time::sleep(takes).await;
             return Ok(self.respond(request));
@@ -592,6 +610,11 @@ impl Fake {
         }
         if path.ends_with("selfsubjectaccessreviews") {
             return Ok(self.review(request).await);
+        }
+        let takes = self.state().gets_take;
+        if !takes.is_zero() && names_one(path) {
+            let _waiting = Waiting::start(self, Wait::Get);
+            tokio::time::sleep(takes).await;
         }
         Ok(self.respond(request))
     }
@@ -621,7 +644,7 @@ impl Fake {
             state.reviews_take
         };
         if !takes.is_zero() {
-            let _waiting = Waiting::start(self, true);
+            let _waiting = Waiting::start(self, Wait::Review);
             tokio::time::sleep(takes).await;
         }
         let allowed = self.state().allowed.contains(&key);
@@ -683,6 +706,9 @@ impl Fake {
         }
         let target = target(&path);
         let gzip = accepts_gzip(&request_headers);
+        if let Some(name) = &target.name {
+            return state.one(&target, name, gzip);
+        }
         if target.group == crate::metrics::GROUP {
             return state.metrics(
                 &target,
@@ -981,9 +1007,24 @@ impl State {
             group: watch.group.clone(),
             resource: watch.resource.clone(),
             namespace: watch.namespace.clone(),
+            name: None,
         };
         for item in self.items(&target) {
             watch.send(line(&json!({ "type": "ADDED", "object": item })));
+        }
+    }
+
+    /// The object a `GET` names, as it was put.
+    fn one(&self, target: &Target, name: &str, gzip: bool) -> Response<Body> {
+        let key = (
+            target.group.clone(),
+            target.resource.clone(),
+            target.namespace.clone(),
+            name.to_owned(),
+        );
+        match self.objects.get(&key) {
+            Some(object) => full(StatusCode::OK, object, gzip),
+            None => status(StatusCode::NOT_FOUND, "NotFound"),
         }
     }
 
@@ -1019,12 +1060,18 @@ impl State {
                 group: watch.group.clone(),
                 resource: watch.resource.clone(),
                 namespace: watch.namespace.clone(),
+                name: None,
             };
             // A held list sends what it holds once released, changes
             // after.
             watch.held || !target.matches(group, resource, namespace) || watch.send(event.clone())
         });
     }
+}
+
+/// Whether `path` is that of one object of an API.
+fn names_one(path: &str) -> bool {
+    (path.starts_with("/api/v1/") || path.starts_with("/apis/")) && target(path).name.is_some()
 }
 
 fn internal_error() -> Value {

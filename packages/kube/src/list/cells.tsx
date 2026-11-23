@@ -1,8 +1,12 @@
 import type { Cell, Row } from "@twigo/protocol";
-import { cn, StatusDot, type Tone } from "@twigo/ui";
+import { cn, StatusLabel, type Tone } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
 import { ageRole, printedAge, printedAt, restartedRecently } from "../age";
 import { IN_FLIGHT, type ColumnRule } from "../columns";
+import { CutWord } from "../helm/CutWord";
+import { ProblemWord } from "../helm/ProblemWord";
+import { RequestFailed } from "../helm/RequestFailed";
+import { UNREADABLE } from "../helm/status";
 import { ObjectName } from "../ObjectName";
 import { Quantity } from "../Quantity";
 import { isTabular } from "../tabular";
@@ -58,12 +62,15 @@ export function CellView({
   tone: rowTone,
   alarmed,
   finished,
+  problem,
 }: {
   row: Row;
   column: ShownColumn;
   tone: Tone | undefined;
   alarmed: boolean;
   finished: boolean;
+  /** The code in the row's Problem column: why its object cannot be read, which its health column says in place of its word, or why a request for it failed, which a mark beside the word says. */
+  problem?: string | undefined;
 }) {
   const { rule } = column;
   if (rule.cell === "cpu" || rule.cell === "memory") {
@@ -88,6 +95,8 @@ export function CellView({
     case "name":
       return <ObjectName name={text} generated={row.generated} />;
     case "status": {
+      if (rule.health && problem !== undefined && text === UNREADABLE)
+        return <ProblemWord code={problem} />;
       const tone = rule.tone?.(text);
       const merged = column.merged && (
         <>
@@ -102,31 +111,35 @@ export function CellView({
           </span>{" "}
         </>
       );
-      if (!tone)
-        return (
-          <>
-            {merged}
-            {rule.recedes ? <span className="text-support">{text}</span> : text}
-          </>
-        );
-      return (
-        <span
-          className={cn(
-            "inline-flex items-center gap-1.5 align-top font-semibold",
-            tone === "error" && "text-error",
-            tone === "warn" && "text-warn-foreground",
-          )}
+      const shown = !tone ? (
+        <>
+          {merged}
+          {rule.recedes ? <span className="text-support">{text}</span> : text}
+        </>
+      ) : (
+        <StatusLabel
+          tone={tone}
+          pulse={IN_FLIGHT.test(text)}
+          className="max-w-full align-top font-semibold"
         >
-          <StatusDot tone={tone} pulse={IN_FLIGHT.test(text)} />
           {merged ? (
             <span>
               {merged}
               {text}
             </span>
+          ) : rule.cutInMiddle ? (
+            <CutWord text={text} />
           ) : (
             text
           )}
-        </span>
+        </StatusLabel>
+      );
+      return rule.health && problem !== undefined ? (
+        <RequestFailed code={problem} what="this release's latest revision">
+          {shown}
+        </RequestFailed>
+      ) : (
+        shown
       );
     }
     case "ratio":
@@ -161,6 +174,18 @@ export function CellView({
       );
     case "since":
       return <Since text={text} received={row.received} />;
+    case "chart": {
+      const [, name = text, version] =
+        /^(.*?)-(\d+\.\d+\.\d+.*)$/.exec(text) ?? [];
+      return version === undefined ? (
+        text
+      ) : (
+        <>
+          {name}
+          <span className="text-support">-{version}</span>
+        </>
+      );
+    }
     case "text": {
       const tabular = !rule.figures && isTabular(text);
       return rule.secondary || rule.identifier || tabular ? (

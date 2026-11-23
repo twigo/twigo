@@ -60,7 +60,7 @@ pub(crate) struct Planned {
     pub consequences: Vec<String>,
     pub affected: Vec<Affected>,
     /// None for what only Twigo does, such as a change of a context's mode.
-    pub kubectl: Option<String>,
+    pub command_line: Option<String>,
     pub doing: String,
     /// The object of the preview it was made from, with what `start_preview`
     /// answered that preview: a newer preview of it drops the plan, or
@@ -330,7 +330,7 @@ impl Bus {
             destructive: planned.destructive,
             consequences: planned.consequences.clone(),
             affected: planned.affected.clone(),
-            kubectl: planned.kubectl.clone(),
+            command_line: planned.command_line.clone(),
             doing: planned.doing.clone(),
         };
         window.entries.insert(

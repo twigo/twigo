@@ -102,7 +102,7 @@ export function editorSpace(uri: string): string | undefined {
  */
 export function sourceOf(uri: string): string {
   const diff = parseDiffUri(uri);
-  return diff && diff.kind !== "objects" ? diff.editor : uri;
+  return diff?.kind === "apply" || diff?.kind === "server" ? diff.editor : uri;
 }
 
 export const EDIT_KEYS: readonly string[] = [

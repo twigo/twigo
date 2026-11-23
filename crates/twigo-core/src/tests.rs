@@ -471,9 +471,10 @@ async fn a_window_reaches_only_its_own_lists_and_a_reload_drops_them() {
         },
         format: RowFormat::Table,
         namespaces: Vec::new(),
-        field_selector: None,
+        selectors: Selectors::default(),
     });
     let late = Batcher::spawn(
+        "list",
         late.await.unwrap(),
         Spec::new("kind-test", &pods(&space)).unwrap(),
         None,
