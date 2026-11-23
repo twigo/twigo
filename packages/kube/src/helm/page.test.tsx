@@ -17,11 +17,19 @@ import {
 } from "../../test/workbench";
 import { DWELL_MS } from "../Details";
 import { diffUri, helmUri } from "../uri";
+import type { Glyph } from "./reveals";
 import { problemWords } from "./status";
 
 vi.mock("./MaskedText", () => ({
-  default: ({ text }: { text: string }) => (
-    <div data-testid="masked-text" data-text={text} />
+  default: ({ text, glyphs }: { text: string; glyphs: readonly Glyph[] }) => (
+    <div
+      data-testid="masked-text"
+      data-text={text}
+      data-revealed={glyphs
+        .filter(({ revealed }) => revealed)
+        .map(({ line, to, label }) => `${String(line)}-${String(to)} ${label}`)
+        .join(", ")}
+    />
   ),
 }));
 
@@ -285,7 +293,7 @@ test("the Values bar is the YAML view's: what is hidden at its left, and Reveal 
   expect(bar()?.parentElement?.className).toContain("pr-2 pl-3");
 });
 
-test("the Manifest's bar counts every hidden place, an unread document too, and Reveal All asks once for the whole manifest, which is the view's text until Hide All", async () => {
+test("the Manifest's bar counts every hidden place, an unread document too, and Reveal All asks once for the whole manifest, which is the view's text on the revealed fill until Hide All", async () => {
   const sent: unknown[] = [];
   const workbench = await mountKube(withUnreadDocument(sent));
   act(() => {
@@ -295,7 +303,9 @@ test("the Manifest's bar counts every hidden place, an unread document too, and 
   fireEvent.click(screen.getByRole("tab", { name: "Manifest" }));
   await settle(6);
   const text = () => screen.getByTestId("masked-text").dataset.text ?? "";
+  const revealed = () => screen.getByTestId("masked-text").dataset.revealed;
   const masked = text();
+  expect(revealed()).toBe("");
   expect(page("alpha").textContent).toContain("4 values hidden");
   fireEvent.click(screen.getByRole("button", { name: "Reveal All" }));
   await settle(3);
@@ -315,6 +325,9 @@ test("the Manifest's bar counts every hidden place, an unread document too, and 
   ]);
   expect(text()).toContain('password: "user-password-r2"');
   expect(text()).not.toContain("bytes>");
+  expect(revealed()).toBe(
+    `1-${String(text().split("\n").length)} Hide the manifest`,
+  );
   expect(page("alpha").textContent).toContain("No value is hidden");
   expect(
     within(page("alpha")).queryByRole("button", { name: "Reveal All" }),
@@ -322,6 +335,7 @@ test("the Manifest's bar counts every hidden place, an unread document too, and 
   fireEvent.click(screen.getByRole("button", { name: "Hide All" }));
   await settle(3);
   expect(text()).toBe(masked);
+  expect(revealed()).toBe("");
   expect(page("alpha").textContent).toContain("4 values hidden");
 });
 

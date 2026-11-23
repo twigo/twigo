@@ -214,6 +214,28 @@ function itemRange(
   return [start, limit];
 }
 
+/** What Reveal All asks of a manifest: the whole of it, whose answer is the view's text until Hide All. */
+export const WHOLE_MANIFEST: HelmPart = { kind: "manifest" };
+
+/** A manifest that Reveal All showed whole, which is revealed from its first line to its last with the one eye that hides it, as the whole values are. */
+export function manifestRevealed(text: string): {
+  text: string;
+  glyphs: readonly Glyph[];
+} {
+  return {
+    text,
+    glyphs: [
+      {
+        line: 1,
+        to: text.split("\n").length,
+        part: WHOLE_MANIFEST,
+        revealed: true,
+        label: "Hide the manifest",
+      },
+    ],
+  };
+}
+
 /**
  * A manifest with what was revealed put in place, and the eyes of its lines.
  * A Secret's key is the line `key: <N bytes>` in the document the core gives

@@ -60,9 +60,11 @@ import {
   hiddenCount,
   hiddenWords,
   manifestOf,
+  manifestRevealed,
   partKey,
   spliced,
   valueGlyphs,
+  WHOLE_MANIFEST,
   type Glyph,
   type Shown,
 } from "./reveals";
@@ -1047,9 +1049,6 @@ function ValuesView({
   );
 }
 
-/** What Reveal All asks of a manifest: the whole of it, whose answer is the view's text until Hide All. */
-const WHOLE_MANIFEST: HelmPart = { kind: "manifest" };
-
 function ManifestView({
   uri,
   manifest,
@@ -1065,7 +1064,7 @@ function ManifestView({
 }) {
   const all = shown.get(partKey(WHOLE_MANIFEST));
   const { text, glyphs } = useMemo(
-    () => (all ? { text: all.value, glyphs: [] } : manifestOf(manifest, shown)),
+    () => (all ? manifestRevealed(all.value) : manifestOf(manifest, shown)),
     [all, manifest, shown],
   );
   const hidden = all
