@@ -1,4 +1,4 @@
-# A Helm release's secret-grade parts leave Rust masked, scrubbed or one place at a time
+# A Helm release's secret-grade parts leave Rust masked, scrubbed or through a Reveal
 
 Decided 2026-11-22 with the owner (ARCHITECTURE 3.6, 6.4).
 
@@ -19,8 +19,9 @@ Helm, k9s, Freelens, Headlamp and Rancher show values and manifests in clear; Ar
   Rust compares the real values, and a masked value that differs from its counterpart reads `<N bytes, changed>` on both sides; values pair by path, a manifest's Secrets by namespace and name, a Secret whose document writes no namespace, or an empty one, in its release's.
 - **The manifest: its Secrets only.**
   Every `kind: Secret`, at a document's root or inside `items` at any depth, is masked as an open Secret is, and every other document goes as it stands.
+  A Reveal shows one key of one Secret, one document Twigo could not read, or the whole manifest as `helm get manifest` prints it, every Secret and unread document at once, behind one confirmation.
 - **Held in Rust until a Reveal.**
-  The decoded page holds each secret-grade part in `twigo_policy::redact::Held`, which has no `Serialize` and prints only its size, and gives it out only through the maskers or a Reveal of one place.
+  The decoded page holds each secret-grade part in `twigo_policy::redact::Held`, which has no `Serialize` and prints only its size, and gives it out only through the maskers or a Reveal.
 
 ## Why
 

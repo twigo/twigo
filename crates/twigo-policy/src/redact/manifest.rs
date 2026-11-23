@@ -34,7 +34,7 @@ pub struct Head {
     pub kind: String,
     pub name: String,
     /// None where its document writes none or an empty one, and Helm
-    /// creates it in the release's.
+    /// creates it in the release's where its kind is namespaced.
     pub namespace: Option<String>,
 }
 

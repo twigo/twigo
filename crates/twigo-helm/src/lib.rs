@@ -5,7 +5,7 @@
 //! [`summary`] reads what a list row and a history line need, [`page`] what
 //! a release's editor shows: its values, manifest, notes and description
 //! are secret-grade, held in Rust and given out only masked, scrubbed or
-//! through [`Page::revealed`], one place at a time.
+//! through [`Page::revealed`].
 
 mod decode;
 mod describe;

@@ -1,7 +1,7 @@
 //! A revision as its release's editor shows it. Its secret-grade parts, the
 //! values, the chart's defaults, the manifest, the notes and the
-//! description, stay [`Held`] and leave only masked or scrubbed, or one
-//! place at a time through [`Page::revealed`].
+//! description, stay [`Held`] and leave only masked or scrubbed, or
+//! through [`Page::revealed`].
 
 use std::collections::BTreeMap;
 
