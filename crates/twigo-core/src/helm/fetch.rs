@@ -24,6 +24,10 @@ use twigo_kube::client::Clients;
 /// The seam of one revision's decode, as `TWIGO_PANIC` names it.
 pub(crate) const DECODE: &str = "helm decode";
 
+/// How many revisions a list or a History fetches at once, as the metrics
+/// poller keeps to four requests (ARCHITECTURE 3.6).
+pub(super) const AT_ONCE: usize = 4;
+
 /// The name Helm gives the Secret of a release's revision
 /// ([`makeKey`](https://github.com/helm/helm/blob/v4.3.2/pkg/storage/storage.go#L327-L329)).
 pub(crate) fn secret_name(release: &str, revision: u32) -> String {

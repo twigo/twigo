@@ -33,14 +33,11 @@ use twigo_ipc::{
 };
 use twigo_panic::contain;
 
-use super::fetch::{self, Failed};
+use super::fetch::{self, AT_ONCE, Failed};
 use super::releases::{Decoded, Failing, Known, Stamp, UNREADABLE, cells, printed};
 
 /// The seam of an open release, as `TWIGO_PANIC` names it.
 pub(crate) const ITEM: &str = "helm release";
-
-/// How many revisions History fetches at once, as the list does.
-const AT_ONCE: usize = 4;
 
 /// The space's discovery, once the context's follower is at hand.
 pub(crate) type Discovery = BoxFuture<'static, Resources>;

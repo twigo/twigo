@@ -34,11 +34,7 @@ use twigo_cache::table::{Cell, Column, ColumnKind, Row};
 use twigo_helm::Summary;
 use twigo_ipc::{ErrorCode, IpcError, Printed};
 
-use super::fetch::{self, Failed};
-
-/// How many release Secrets a list fetches at once, as the metrics poller
-/// keeps to four requests (ARCHITECTURE 3.6).
-const AT_ONCE: usize = 4;
+use super::fetch::{self, AT_ONCE, Failed};
 
 pub(super) struct Releases {
     secrets: Subscription<Row>,
