@@ -369,10 +369,9 @@ export function ReleasePage({
       uri={uri}
       release={release}
       snapshot={snapshot}
+      overview={shownOverview}
       shown={shown}
-      notes={notesText}
       notesHidden={snapshot.notes?.hidden === true && !notes}
-      description={descriptionText}
       descriptionHidden={snapshot.description?.hidden === true && !description}
       revealed={{
         notes: notes !== undefined,
@@ -534,10 +533,9 @@ function Body({
   uri,
   release,
   snapshot,
+  overview,
   shown,
-  notes,
   notesHidden,
-  description,
   descriptionHidden,
   revealed,
   services,
@@ -555,10 +553,10 @@ function Body({
   uri: string;
   release: ReleaseInput;
   snapshot: ReleaseSnapshot;
+  /** The page's Overview: the core's with the description and the notes. */
+  overview: Document | undefined;
   shown: ReadonlyMap<string, Shown>;
-  notes: string;
   notesHidden: boolean;
-  description: string;
   descriptionHidden: boolean;
   revealed: { notes: boolean; description: boolean };
   services: ListServices;
@@ -571,13 +569,6 @@ function Body({
   markedBar: (marked: readonly number[]) => ActionGroups;
 }) {
   const { releases: states, overviews, pages } = services;
-  const overview = snapshot.overview;
-  if (view === "values" || view === "manifest") {
-    const values = snapshot.values;
-    const manifest = snapshot.manifest;
-    if (view === "values" && values === undefined) return <Loading />;
-    if (view === "manifest" && manifest === undefined) return <Loading />;
-  }
   switch (view) {
     case "values":
       return snapshot.values ? (
@@ -589,7 +580,9 @@ function Body({
           onGlyph={onGlyph}
           onText={onText}
         />
-      ) : null;
+      ) : (
+        <Loading />
+      );
     case "manifest":
       return snapshot.manifest ? (
         <ManifestView
@@ -599,7 +592,9 @@ function Body({
           onGlyph={onGlyph}
           onText={onText}
         />
-      ) : null;
+      ) : (
+        <Loading />
+      );
     case "history":
       return snapshot.history ? (
         <div className="relative h-full min-h-48">
@@ -621,7 +616,6 @@ function Body({
       break;
   }
   if (overview === undefined) return <Loading />;
-  const document = pageOverview(overview, notes, description);
   const slots = {
     "helm.diagnostics": (
       <RevealControl
@@ -652,7 +646,7 @@ function Body({
   };
   return (
     <Overview
-      overview={document}
+      overview={overview}
       space={release.space}
       states={overviews}
       kind={`${HELM_RELEASES.group}/${HELM_RELEASES.resource}`}
