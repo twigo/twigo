@@ -300,9 +300,10 @@ pub fn backoff() -> ExponentialBackoff {
     paced(Duration::from_millis(500), RETRY_WITHIN / 2)
 }
 
-/// The pause before a part whose first list RBAC refused tries again: the
-/// hub's own lifetime of RBAC's no, `REFUSED_FOR`.
-fn refusal_pause() -> Duration {
+/// The pause before what RBAC refused is asked again, as a part whose first
+/// list it refused waits: the hub's own lifetime of RBAC's no,
+/// `REFUSED_FOR`, 30–60 s.
+pub fn refusal_pause() -> Duration {
     paced(REFUSED_FOR, REFUSED_FOR)
         .next()
         .expect("the backoff has no maximum of attempts")

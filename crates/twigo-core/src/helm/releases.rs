@@ -26,7 +26,7 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tokio::time::Instant;
 use twigo_cache::batcher::Source;
-use twigo_cache::hub::{Delta, Hub, Shown, Subscription, backoff};
+use twigo_cache::hub::{Delta, Hub, Shown, Subscription, backoff, refusal_pause};
 use twigo_cache::meta::Meta;
 use twigo_cache::store::RowKey;
 use twigo_cache::table::{Cell, Column, ColumnKind, Row};
@@ -250,9 +250,12 @@ impl Failing {
     /// `error` of the request for `stamp`; after `last`, the pause grows.
     pub(super) fn after(last: Option<Failing>, stamp: Stamp, error: IpcError) -> Self {
         let mut backoff = last.map_or_else(backoff, |last| last.backoff);
-        let pause = backoff
-            .next()
-            .expect("the backoff has no maximum of attempts");
+        let pause = match error.code {
+            ErrorCode::ServerForbidden | ErrorCode::ServerUnauthorized => refusal_pause(),
+            _ => backoff
+                .next()
+                .expect("the backoff has no maximum of attempts"),
+        };
         Self {
             stamp,
             error,
