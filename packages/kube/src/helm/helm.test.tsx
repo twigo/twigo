@@ -113,7 +113,7 @@ test("a release's page says what Helm wrote of a failed revision, whole only aft
   expect(dialog.textContent).toContain(
     "Reveal the description of release epsilon (revision 2) in payments from prod-eu?",
   );
-  fireEvent.click(screen.getByRole("button", { name: "Reveal value" }));
+  fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
   await settle(4);
   expect(document.body.textContent).toContain("ZXBzaWxvbi1w");
   expect(document.body.textContent).not.toContain("<hidden>");

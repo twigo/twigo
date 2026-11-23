@@ -96,9 +96,9 @@ test("mask:tree shows the values as rows of key paths with an eye on each masked
   );
   await settle(3);
   expect(screen.getByRole("dialog").textContent).toContain(
-    "Reveal database.password of the values of release alpha (revision 2)",
+    "Reveal database.password of release alpha (revision 2)",
   );
-  fireEvent.click(screen.getByRole("button", { name: "Reveal value" }));
+  fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
   await settle(4);
   expect(tree.textContent).toContain("user-password-r2");
   expect(tree.textContent).not.toContain("<16 bytes>");
@@ -143,7 +143,7 @@ test("Reveal All Values and Hide All Values are commands of the page, enabled wh
     workbench.commands.execute("helm.values.revealAll", lookup()),
   );
   await settle(3);
-  fireEvent.click(screen.getByRole("button", { name: "Reveal value" }));
+  fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
   await settle(4);
   const tree = screen.getByRole("tree", { name: "Values" });
   expect(tree.textContent).toContain("user-password-r2");

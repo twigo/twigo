@@ -74,7 +74,7 @@ async function revealNotes(scope: HTMLElement) {
     within(scope).getByRole("button", { name: "Reveal the notes" }),
   );
   await settle(3);
-  fireEvent.click(screen.getByRole("button", { name: "Reveal value" }));
+  fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
   await settle(4);
 }
 

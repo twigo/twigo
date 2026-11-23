@@ -9,6 +9,7 @@ import type {
   ReleaseParts,
 } from "../generated";
 import { ENDS_MS } from "./edits";
+import { revealWords } from "./helm";
 import { createMockBackend, type MockScenario } from "./index";
 
 beforeEach(() => {
@@ -373,19 +374,25 @@ const user = (path: (string | number)[]): HelmPart => ({
   path,
 });
 
-test("a Reveal names the place and the release, and shows a command only where helm prints exactly that", async () => {
+test("a Reveal says what the core's plan says and shows a command only where helm prints exactly that part", async () => {
   const { backend, id } = await open(null, ALL);
   const whole = await plan(backend, id, 2, user([]));
-  expect(whole.question).toBe(
-    "Reveal all user-supplied values of release alpha (revision 2) in payments from prod-eu?",
-  );
-  expect(whole.commandLine).toBe(
-    "helm get values alpha -n payments --kube-context prod-eu --revision 2 -o json",
-  );
+  expect(whole).toMatchObject({
+    question:
+      "Reveal the values of release alpha (revision 2) in payments from prod-eu?",
+    confirm: "Reveal",
+    consequences: [
+      "It shows until you hide it, close the release or show another revision.",
+    ],
+    doing: "Revealing the values",
+    commandLine:
+      "helm get values alpha -n payments --kube-context prod-eu --revision 2 -o json",
+  });
   const leaf = await plan(backend, id, 2, user(["database", "password"]));
   expect(leaf.question).toBe(
-    "Reveal database.password of the values of release alpha (revision 2) in payments from prod-eu?",
+    "Reveal database.password of release alpha (revision 2) in payments from prod-eu?",
   );
+  expect(leaf.doing).toBe("Revealing database.password");
   expect(leaf.commandLine).toBe(
     'helm get all alpha -n payments --kube-context prod-eu --revision 2 --template \'{{index .Release.Config "database" "password"}}\'',
   );
@@ -397,18 +404,62 @@ test("a Reveal names the place and the release, and shows a command only where h
     defaults: true,
     path: [],
   });
+  expect(defaults.question).toBe(
+    "Reveal the chart's defaults of release alpha (revision 2) in payments from prod-eu?",
+  );
   expect(defaults.commandLine).toBeNull();
+  const defaulted = await plan(backend, id, 2, {
+    kind: "values",
+    defaults: true,
+    path: ["image", "tag"],
+  });
+  expect(defaulted.question).toBe(
+    "Reveal the default image.tag of release alpha (revision 2) in payments from prod-eu?",
+  );
+  expect(defaulted.commandLine).toBeNull();
   const secret = await plan(backend, id, 2, {
     kind: "secret",
     document: 0,
     items: [],
     key: "password",
   });
+  expect(secret.question).toBe(
+    "Reveal password of secret alpha-db in the manifest of release alpha (revision 2) in payments from prod-eu?",
+  );
+  expect(secret.doing).toBe(
+    "Revealing password of secret alpha-db in the manifest",
+  );
   expect(secret.commandLine).toBeNull();
-  expect(secret.question).toContain("Secret alpha-db");
+  const notes = await plan(backend, id, 2, { kind: "notes" });
+  expect(notes.question).toBe(
+    "Reveal the notes of release alpha (revision 2) in payments from prod-eu?",
+  );
+  expect(notes.commandLine).toBeNull();
+});
+
+test("a Reveal prints a command for a string or a boolean leaf of the values and for no other, since helm's template prints a number or null otherwise than Twigo shows it", () => {
+  const release = { space: "prod-eu", namespace: "payments", name: "alpha" };
+  const line = (path: (string | number)[], value: string) =>
+    revealWords("prod-eu", release, 1, user(path), undefined, value)
+      .commandLine;
+  expect(line(["extra", 0], '"one"')).toBe(
+    "helm get all alpha -n payments --kube-context prod-eu --revision 1 --template '{{index .Release.Config \"extra\" 0}}'",
+  );
+  expect(line(["tls"], "true")).toContain("--template");
+  expect(line(["replicaCount"], "2")).toBeNull();
+  expect(line(["removeMe"], "null")).toBeNull();
   expect(
-    (await plan(backend, id, 2, { kind: "notes" })).commandLine,
-  ).toBeNull();
+    revealWords(
+      "prod-eu",
+      release,
+      1,
+      { kind: "document", document: 3 },
+      undefined,
+      "",
+    ).question,
+  ).toBe(
+    "Reveal document 3 of the manifest of release alpha (revision 1) in payments from prod-eu?",
+  );
 });
 
 test("a Reveal answers the value it names, and is refused once the editor shows another revision", async () => {

@@ -1810,22 +1810,23 @@ export class MockBus {
 
   #revealHelm(id: number, revision: number, part: HelmPart): Planned {
     const { release, context } = this.host.release(id);
-    const { binary } = release.reveal(revision, part);
+    const { value, binary } = release.reveal(revision, part);
     const { question, doing, commandLine } = revealWords(
       context,
       release.ref,
       revision,
       part,
       release.revision(revision),
+      value,
     );
     return {
       plan: {
         context,
         question,
-        confirm: "Reveal value",
+        confirm: "Reveal",
         destructive: false,
         consequences: [
-          `It shows until you hide it, close the release or it moves to another revision${binary ? ", as base64" : ""}.`,
+          `It shows until you hide it, close the release or show another revision${binary ? ", as base64" : ""}.`,
         ],
         affected: [],
         commandLine,
@@ -1833,8 +1834,7 @@ export class MockBus {
       },
       risk: { kind: "reveal" },
       run: (tell) => {
-        const { value, binary: isBinary } = release.reveal(revision, part);
-        tell({ state: "revealed", value, binary: isBinary });
+        tell({ state: "revealed", ...release.reveal(revision, part) });
       },
     };
   }
