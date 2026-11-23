@@ -103,14 +103,16 @@ pub struct ReleaseBatch {
     /// it keeps none, as after `--history-max` pruned the ones before.
     pub previous: Option<u32>,
     /// Why the shown revision cannot be read; its parts are null then. What
-    /// its Secret holds says it until the Secret changes: `helm.not-a-release`,
-    /// `helm.truncated`, `helm.too-large`, `answer.undecodable` for a Secret
-    /// the server sent in a shape Twigo cannot read, `internal.panic`, and
-    /// `helm.revision-gone` for a revision Helm no longer keeps. Any other
-    /// code is a request that failed, such as `server.forbidden`,
-    /// `server.unavailable` or `connect.refused`, which says nothing of the
-    /// revision and stays only while it lasts: Rust asks again after the
-    /// hub's backoff and at every relist.
+    /// its Secret holds says it until the Secret changes, in exactly these
+    /// codes: `helm.not-a-release`, `helm.truncated`, `helm.too-large`,
+    /// `internal.panic` for a decode that panicked, and `helm.revision-gone`
+    /// for a revision Helm no longer keeps. Any other code is a request that
+    /// failed, such as `server.forbidden`, `server.unavailable`,
+    /// `connect.refused` or `answer.undecodable` for an answer Twigo could
+    /// not read, which says nothing of the revision and stays only while it
+    /// fails for that version of the Secret: Rust asks again after the hub's
+    /// backoff, a refusal after the hub's pause for RBAC's no, and at every
+    /// relist.
     pub problem: Option<IpcError>,
     /// Described as an object's is: a header whose `printed` are the release
     /// row's cells and whose `created` is the revision's `last_deployed`, then
