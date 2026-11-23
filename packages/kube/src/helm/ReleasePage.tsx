@@ -66,6 +66,7 @@ import {
   type Shown,
 } from "./reveals";
 import type { Plate, ReleaseTab, TextState } from "./states";
+import { problemWords } from "./status";
 import { TextBar } from "./TextBar";
 import { ValuesTree } from "./ValuesTree";
 import { useRelease } from "./useRelease";
@@ -558,28 +559,41 @@ export function ReleasePage({
               releases={{ where: release.namespace }}
             />
           ) : !exists ? (
-            <EmptyState icon={CircleAlert} title="This release is gone">
+            <EmptyState
+              icon={CircleAlert}
+              title="This release is gone"
+              className="py-16"
+            >
               Helm no longer keeps any revision of {release.name} in{" "}
               {release.namespace}.
+            </EmptyState>
+          ) : problem?.code === "helm.revision-gone" ? (
+            <EmptyState
+              icon={CircleAlert}
+              title={`Revision ${String(revision ?? "")} is no longer kept`}
+              className="py-16"
+            >
+              <ErrorMessage error={problem} />
+              {snapshot.latest !== undefined && (
+                <p>
+                  <LinkButton
+                    onClick={() => {
+                      onOpenRevision(snapshot.latest ?? 0);
+                    }}
+                  >
+                    Open revision {snapshot.latest}
+                  </LinkButton>
+                </p>
+              )}
             </EmptyState>
           ) : problem ? (
             <EmptyState
               icon={CircleAlert}
-              title={problemTitle(problem.code, revision)}
+              variant="error"
+              title="This revision cannot be read"
+              className="py-16"
             >
-              <ErrorMessage error={problem} />
-              {snapshot.latest !== undefined &&
-                problem.code === "helm.revision-gone" && (
-                  <p>
-                    <LinkButton
-                      onClick={() => {
-                        onOpenRevision(snapshot.latest ?? 0);
-                      }}
-                    >
-                      Open revision {snapshot.latest}
-                    </LinkButton>
-                  </p>
-                )}
+              <p>{problemWords(problem.code).why}</p>
             </EmptyState>
           ) : layout === "page" ? (
             <Page body={body} snapshot={snapshot} />
@@ -590,12 +604,6 @@ export function ReleasePage({
       </div>
     </div>
   );
-}
-
-function problemTitle(code: string, revision: number | undefined): string {
-  if (code === "helm.revision-gone")
-    return `Revision ${String(revision ?? "")} is no longer kept`;
-  return "This revision cannot be read";
 }
 
 /** The page variant: every part in the order `helm get all` prints, each a section. */

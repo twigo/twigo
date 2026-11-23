@@ -17,6 +17,7 @@ import {
 } from "../../test/workbench";
 import { DWELL_MS } from "../Details";
 import { diffUri, helmUri } from "../uri";
+import { problemWords } from "./status";
 
 vi.mock("./MaskedText", () => ({
   default: () => <div data-testid="masked-text" />,
@@ -297,6 +298,18 @@ test("the Manifest's bar counts every hidden place, an unread document too, and 
   fireEvent.click(screen.getByRole("button", { name: "Hide All" }));
   await settle(3);
   expect(page("alpha").textContent).toContain("4 values hidden");
+});
+
+test("a release whose revision cannot be read is a stopped page: the words the list gives for its code, the icon in the error tone, and the block's own padding", async () => {
+  await open(release("trunc", "auth"));
+  const title = within(page("trunc")).getByText("This revision cannot be read");
+  const state = title.parentElement;
+  expect(state?.textContent).toContain(problemWords("helm.truncated").why);
+  expect(state?.className).toContain("text-error");
+  expect(state?.className).toContain("py-16");
+  expect(state?.querySelector("svg")?.getAttribute("class")).toContain(
+    "opacity-70",
+  );
 });
 
 test("a release in a namespace whose Secrets the person may not list says so, naming them, where one they may list shows whole", async () => {
