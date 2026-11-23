@@ -126,8 +126,8 @@ async fn an_open_release_shows_its_latest_revision_fetched_once_and_each_part_as
             .contains("kind: ConfigMap")
     );
     assert_eq!(rig.gets(2), 1, "the page is held while the editor is open");
-    let (shown, _) = rig.opened.showing().now().expect("a page is held");
-    assert_eq!(shown, 2);
+    let shown = rig.opened.showing().now().expect("a page is held");
+    assert_eq!(shown.revision, 2);
 }
 
 #[tokio::test(start_paused = true)]
@@ -378,26 +378,41 @@ async fn a_relist_asks_a_failed_revision_again_at_once() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn an_overview_keeps_its_header_through_a_status_change() {
+async fn an_overview_waits_through_a_status_change_for_the_page_it_brings() {
     let fake = Fake::default();
     revision(&fake, 1, "pending-install");
     let mut rig = Rig::open(fake, None, OVERVIEW).await;
     rig.until("the overview", |shown| {
-        shown.printed().contains(&"Chart=demo-1.1.0".to_owned())
+        shown
+            .overview
+            .as_ref()
+            .is_some_and(|overview| !overview.header.sentence.is_empty())
     })
     .await;
 
     rig.fake.state().gets_take = Duration::from_secs(1);
     revision(&rig.fake, 1, "deployed");
     let written = tokio::time::Instant::now();
-    let blank = rig
-        .overviews_until("Status=deployed", "Chart=demo-1.1.0")
-        .await;
-    assert!(blank.is_empty(), "{blank:?}");
+    let opened = &rig.opened;
+    let overview = loop {
+        let batch = rig.watched.next(|seq| opened.ack(seq)).await;
+        if let Some(overview) = batch.overview {
+            break overview;
+        }
+    };
+    assert!(written.elapsed() >= Duration::from_secs(1));
+    let printed: Vec<String> = overview
+        .header
+        .printed
+        .iter()
+        .map(|cell| format!("{}={}", cell.column, cell.value))
+        .collect();
     assert!(
-        written.elapsed() < Duration::from_secs(1),
-        "the label's status shows while the page is fetched again"
+        printed.contains(&"Status=deployed".to_owned())
+            && printed.contains(&"Chart=demo-1.1.0".to_owned()),
+        "{printed:?}"
     );
+    assert!(overview.header.sentence.is_empty());
 }
 
 #[tokio::test(start_paused = true)]

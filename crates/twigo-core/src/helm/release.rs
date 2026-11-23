@@ -6,9 +6,11 @@
 //! dropped with the editor; History decodes each revision once per uid and
 //! `resourceVersion` while it is shown, keeping only its line. A revision's
 //! page and line stay while its Secret, written again, is decoded anew, the
-//! status the label's meanwhile. A request that fails is said while it does
-//! and asked again after the hub's backoff and at every relist. Batches go
-//! with flow control, as an open object's do (3.5).
+//! status the label's meanwhile, and no overview goes until the new page
+//! lands; a page of another Secret at the same revision goes at once. A
+//! request that fails is said while it fails for that version of the
+//! Secret, and asked again as the list asks. Batches go with flow control,
+//! as an open object's do (3.5).
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
@@ -50,8 +52,16 @@ pub(crate) struct Opened {
 struct Control {
     pending: Mutex<Pending>,
     wake: Notify,
-    /// The revision the editor shows and its page, which a Reveal reads.
-    shown: Mutex<Option<(u32, Arc<Page>)>>,
+    shown: Mutex<Option<ShownPage>>,
+}
+
+/// The page an open release shows, which a Reveal reads.
+#[derive(Clone)]
+pub(crate) struct ShownPage {
+    pub revision: u32,
+    /// The uid of the Secret it was decoded from.
+    pub secret: Option<Box<str>>,
+    pub page: Arc<Page>,
 }
 
 /// What the webview asked for since the task last looked.
@@ -138,8 +148,8 @@ impl Drop for Opened {
 pub(crate) struct Showing(Arc<Control>);
 
 impl Showing {
-    /// The revision shown and its page, none while it shows no page.
-    pub(crate) fn now(&self) -> Option<(u32, Arc<Page>)> {
+    /// The page shown, none while it shows no page.
+    pub(crate) fn now(&self) -> Option<ShownPage> {
         self.0.shown.lock().expect("release lock").clone()
     }
 }
@@ -372,10 +382,22 @@ async fn run(
 
         let latest = revisions.keys().next_back().copied();
         let wanted = pinned.or(latest);
-        match wanted.map(|revision| (revision, revisions.get(&revision))) {
+        let wanted_held = wanted.and_then(|revision| revisions.get(&revision));
+        match wanted.map(|revision| (revision, wanted_held)) {
             Some((revision, Some(held))) => {
-                if page_failed.as_ref().is_some_and(|(at, _)| *at != revision) {
+                if page_failed.as_ref().is_some_and(|(at, failing)| {
+                    *at != revision || !failing.same_secret(&held.stamp)
+                }) {
                     page_failed = None;
+                }
+                if shown.as_ref().is_some_and(|shown| {
+                    shown.revision == revision
+                        && shown
+                            .stamp
+                            .as_ref()
+                            .is_some_and(|stamp| !stamp.same_secret(&held.stamp))
+                }) {
+                    shown = None;
                 }
                 let current = shown.as_ref().is_some_and(|shown| {
                     shown.revision == revision && shown.stamp.as_ref() == Some(&held.stamp)
@@ -415,12 +437,33 @@ async fn run(
                 page_failed = None;
             }
         }
+        // A failure of the request for the wanted revision's Secret as it
+        // stands, which withdraws the page shown.
+        let page_failing = page_failed
+            .as_ref()
+            .map(|(_, failing)| failing)
+            .filter(|failing| wanted_held.is_some_and(|held| failing.was_for(&held.stamp)));
+        // The page shown is an earlier version of the wanted revision's
+        // Secret, whose rewrite is decoded again.
+        let rewritten = shown
+            .as_ref()
+            .zip(wanted_held)
+            .is_some_and(|(shown, held)| {
+                Some(shown.revision) == wanted
+                    && shown
+                        .stamp
+                        .as_ref()
+                        .is_some_and(|stamp| *stamp != held.stamp)
+            });
         let page = shown
             .as_ref()
-            .filter(|_| page_failed.is_none())
-            .and_then(|shown| shown.page.as_ref().ok().map(|page| (shown.revision, page)));
-        *control.shown.lock().expect("release lock") =
-            page.map(|(revision, page)| (revision, Arc::clone(page)));
+            .filter(|_| page_failing.is_none())
+            .and_then(|shown| shown.page.as_ref().ok().map(|page| (shown, page)));
+        *control.shown.lock().expect("release lock") = page.map(|(shown, page)| ShownPage {
+            revision: shown.revision,
+            secret: shown.stamp.as_ref().and_then(Stamp::uid).map(Into::into),
+            page: Arc::clone(page),
+        });
         let page = page.map(|(_, page)| page);
 
         // The newest revision's summary, which the overview's header prints
@@ -428,6 +471,11 @@ async fn run(
         // revision, else decoded on its own.
         let newest_row =
             latest.and_then(|latest| revisions.get(&latest).map(|held| (latest, held)));
+        if newest_failed.as_ref().is_some_and(|failing| {
+            newest_row.is_none_or(|(_, held)| !failing.same_secret(&held.stamp))
+        }) {
+            newest_failed = None;
+        }
         let known = match newest_row {
             None => Known::default(),
             Some((latest, held)) if wanted == Some(latest) => {
@@ -436,8 +484,7 @@ async fn run(
                     let summary = shown.page.as_ref().map(|page| page.summary());
                     (shown.revision == latest).then(|| (stamp, summary.map_err(|error| error.code)))
                 });
-                let failed = page_failed.as_ref().map(|(_, failing)| failing);
-                Known::of(&held.stamp, paged, failed)
+                Known::of(&held.stamp, paged, page_failing)
             }
             Some((_, held)) => {
                 let decoded = newest
@@ -462,7 +509,11 @@ async fn run(
                     .get(revision)
                     .is_some_and(|held| stamp.same_secret(&held.stamp))
             });
-            lines_failed.retain(|revision, _| revisions.contains_key(revision));
+            lines_failed.retain(|revision, failing| {
+                revisions
+                    .get(revision)
+                    .is_some_and(|held| failing.same_secret(&held.stamp))
+            });
             for (&revision, held) in &revisions {
                 let read = lines
                     .get(&revision)
@@ -520,6 +571,7 @@ async fn run(
                 .map(|(&revision, held)| {
                     let failed = lines_failed
                         .get(&revision)
+                        .filter(|failing| failing.was_for(&held.stamp))
                         .map(|failing| failing.error().clone());
                     match lines.get(&revision) {
                         Some((stamp, line)) if *stamp == held.stamp => line.clone(),
@@ -541,8 +593,8 @@ async fn run(
                 None => shown.as_ref().map(|shown| shown.revision),
             },
             latest,
-            problem: match &page_failed {
-                Some((_, failing)) => Some(failing.error().clone()),
+            problem: match page_failing {
+                Some(failing) => Some(failing.error().clone()),
                 None => shown
                     .as_ref()
                     .and_then(|shown| shown.page.as_ref().err().cloned()),
@@ -551,8 +603,11 @@ async fn run(
             history,
         };
         let header_changed = sent.as_ref().is_none_or(|sent| sent.header != now.header);
-        let overview_due =
-            parts.overview && page.is_some() && header_read && (dirty.page || header_changed);
+        let overview_due = parts.overview
+            && page.is_some()
+            && !rewritten
+            && header_read
+            && (dirty.page || header_changed);
         let values_due = parts.values && page.is_some() && dirty.values;
         let manifest_due = parts.manifest && page.is_some() && dirty.manifest;
         let history_due = now.history.is_some()

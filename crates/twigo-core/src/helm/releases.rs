@@ -10,9 +10,10 @@
 //! Problem. Helm writes a
 //! revision's Secret again when its status changes: its last summary stays
 //! until the new one lands, the status the label's meanwhile. A request that
-//! fails says nothing of the revision: its code is in Problem while it fails,
-//! beside the label's status, and it is asked again after the hub's backoff
-//! and at every relist.
+//! fails says nothing of the revision: its code is in Problem beside the
+//! label's status while it fails for that version of the Secret, and it is
+//! asked again after the hub's backoff, or RBAC's no after the hub's pause
+//! for one, and at every relist.
 //!
 //! The decodes need no wake of their own: the batcher drains its source at
 //! every flush while nothing is unacknowledged, and a summary that lands is
@@ -231,14 +232,20 @@ impl Stamp {
     pub(super) fn same_secret(&self, other: &Stamp) -> bool {
         self.uid.is_some() && self.uid == other.uid
     }
+
+    pub(super) fn uid(&self) -> Option<&str> {
+        self.uid.as_deref()
+    }
 }
 
 /// A revision's summary, or the code that keeps it from being read.
 pub(super) type Decoded = Result<Summary, ErrorCode>;
 
 /// A request for a version of a revision's Secret that failed, which says
-/// nothing of the revision: it is asked again once the hub's backoff has
-/// passed, or at once after a relist.
+/// nothing of the revision and shows only on that version: it is asked
+/// again once the hub's backoff has passed, or RBAC's no has had the time
+/// the hub gives it to pass, or at once after a relist, and goes once
+/// another Secret holds the revision.
 pub(super) struct Failing {
     stamp: Stamp,
     error: IpcError,
@@ -266,7 +273,17 @@ impl Failing {
 
     /// Whether `stamp` waits for the pause before it is asked again.
     pub(super) fn waits(&self, stamp: &Stamp) -> bool {
-        self.stamp == *stamp && !self.due()
+        self.was_for(stamp) && !self.due()
+    }
+
+    /// Whether it is the failure of the request for `stamp`.
+    pub(super) fn was_for(&self, stamp: &Stamp) -> bool {
+        self.stamp == *stamp
+    }
+
+    /// Whether `stamp` is a version of the Secret it was for.
+    pub(super) fn same_secret(&self, stamp: &Stamp) -> bool {
+        self.stamp.same_secret(stamp)
     }
 
     pub(super) fn due(&self) -> bool {
@@ -317,7 +334,9 @@ impl<'a> Known<'a> {
         Known {
             summary,
             unreadable,
-            failing: failed.map(|failed| failed.error().code),
+            failing: failed
+                .filter(|failed| failed.was_for(stamp))
+                .map(|failed| failed.error().code),
         }
     }
 
@@ -347,7 +366,7 @@ struct Held {
     decoded: HashMap<Release, (Stamp, Decoded)>,
     /// The version of each release's newest revision being fetched.
     asked: HashMap<Release, Stamp>,
-    /// Each release whose newest revision's request failed.
+    /// Each release whose newest revision's Secret had a request fail.
     failed: HashMap<Release, Failing>,
 }
 
@@ -363,11 +382,20 @@ impl Held {
             .retain(|release, _| releases.contains_key(release));
         self.asked
             .retain(|release, _| releases.contains_key(release));
-        self.failed
-            .retain(|release, _| releases.contains_key(release));
+        self.forget_other_secrets();
         for failing in self.failed.values_mut() {
             failing.relisted();
         }
+    }
+
+    /// Drops each failed request whose release's newest revision is no
+    /// longer held in the Secret it was for.
+    fn forget_other_secrets(&mut self) {
+        let releases = &self.releases;
+        self.failed.retain(|release, failing| {
+            newest(releases, release)
+                .is_some_and(|secret| failing.same_secret(&Stamp::of(&secret.meta)))
+        });
     }
 
     fn rows(&self) -> Vec<Arc<Row>> {
@@ -384,6 +412,7 @@ impl Held {
         for secret in upserted {
             touched.insert(self.place(secret));
         }
+        self.forget_other_secrets();
         touched
     }
 
@@ -413,12 +442,8 @@ impl Held {
         Some(release)
     }
 
-    /// The newest revision's Secret of a release, when it is a revision.
     fn newest(&self, release: &Release) -> Option<&Arc<Row>> {
-        match self.releases.get(release)?.last_key_value()? {
-            (Some(_), secret) => Some(secret),
-            (None, _) => None,
-        }
+        newest(&self.releases, release)
     }
 
     /// Keeps what a fetch of the release's newest revision as it stands
@@ -510,6 +535,17 @@ impl Held {
             },
             cells,
         }))
+    }
+}
+
+/// The newest revision's Secret of a release, when it is a revision.
+fn newest<'a>(
+    releases: &'a HashMap<Release, BTreeMap<Option<u32>, Arc<Row>>>,
+    release: &Release,
+) -> Option<&'a Arc<Row>> {
+    match releases.get(release)?.last_key_value()? {
+        (Some(_), secret) => Some(secret),
+        (None, _) => None,
     }
 }
 

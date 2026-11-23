@@ -15,7 +15,7 @@ use twigo_ipc::{
     ReleaseBatch, ReleaseListQuery,
 };
 
-pub(crate) use release::{Opened, Showing};
+pub(crate) use release::{Opened, Showing, ShownPage};
 use releases::Releases;
 
 /// The seam of a list of releases, as `TWIGO_PANIC` names it.

@@ -3,8 +3,6 @@
 //! runs, read then from the Secret as last listed or from the revision's
 //! page the editor holds, and nothing is sent to the cluster.
 
-use std::sync::Arc;
-
 use twigo_helm::Page;
 use twigo_ipc::{ErrorCode, HelmPart, IpcError, SubscriptionId, ValueStep};
 use twigo_policy::friction::Risk;
@@ -13,7 +11,7 @@ use twigo_policy::redact::{secret_value, values};
 use super::shell_line;
 use crate::Core;
 use crate::bus::{self, Finished, Planned};
-use crate::helm::Showing;
+use crate::helm::{Showing, ShownPage};
 
 pub(crate) fn reveal(
     core: &Core,
@@ -85,7 +83,7 @@ pub(crate) fn reveal(
 }
 
 /// Plans with the revision the release shows, and refuses at the plan and
-/// at the run once it shows another.
+/// at the run once it shows another, or another Secret holds it.
 pub(crate) fn reveal_helm(
     core: &Core,
     window: &str,
@@ -102,7 +100,7 @@ pub(crate) fn reveal_helm(
         )
     })?;
     let connection = core.policy.connection(&context);
-    let page = shown(&showing, revision)?;
+    let ShownPage { page, secret, .. } = shown(&showing, revision)?;
     let (value, binary) = page.revealed(&part)?;
     let words = Words::of(&part, &page);
     let release_words = format!("release {name} (revision {revision}) in {namespace}");
@@ -172,7 +170,11 @@ pub(crate) fn reveal_helm(
                 let showing = core
                     .releases
                     .with(&window, release, |opened| opened.showing())?;
-                let (value, binary) = shown(&showing, revision)?.revealed(&part)?;
+                let now = shown(&showing, revision)?;
+                if now.secret != secret {
+                    return Err(changed(revision));
+                }
+                let (value, binary) = now.page.revealed(&part)?;
                 Ok(Finished::Revealed { value, binary })
             })
         })),
@@ -180,14 +182,20 @@ pub(crate) fn reveal_helm(
 }
 
 /// The page of `revision`, refused unless the release shows it.
-fn shown(showing: &Showing, revision: u32) -> Result<Arc<Page>, IpcError> {
-    match showing.now() {
-        Some((shown, page)) if shown == revision => Ok(page),
-        _ => Err(IpcError::new(
-            ErrorCode::ActionObjectChanged,
-            format!("the release no longer shows revision {revision}, so Twigo revealed nothing"),
-        )),
-    }
+fn shown(showing: &Showing, revision: u32) -> Result<ShownPage, IpcError> {
+    showing
+        .now()
+        .filter(|shown| shown.revision == revision)
+        .ok_or_else(|| changed(revision))
+}
+
+fn changed(revision: u32) -> IpcError {
+    IpcError::new(
+        ErrorCode::ActionObjectChanged,
+        format!(
+            "the release no longer shows the revision {revision} Twigo read, so it revealed nothing"
+        ),
+    )
 }
 
 /// How a plan names a part: in its question, and in the audit log's
