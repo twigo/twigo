@@ -3,7 +3,8 @@
 //! answer or a batch of the Helm commands before a Reveal, in clear, as
 //! base64 in any of its three alignments, or as a raw release (`H4sI`, the
 //! base64 of a gzip header); then each one a Reveal can show, revealed
-//! through the bus, which shows that the search finds what it looks for.
+//! through the bus, alone and with the rest of the manifest's, which shows
+//! that the search finds what it looks for.
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -121,6 +122,20 @@ impl Place {
             Place::Description => HelmPart::Description,
             Place::Hook | Place::File => return None,
         })
+    }
+
+    /// Whether the whole manifest's Reveal shows it.
+    fn in_manifest(self) -> bool {
+        matches!(
+            self,
+            Place::Data
+                | Place::StringData
+                | Place::Listed
+                | Place::NotBase64
+                | Place::Unparsed
+                | Place::Notes
+                | Place::Description
+        )
     }
 }
 
@@ -265,7 +280,8 @@ async fn no_canary_leaves_rust_before_a_reveal_and_each_reveal_answers_its_own()
                     })
             })
             .await;
-        for part in PLACES.iter().filter_map(|place| place.reveal()) {
+        let parts = PLACES.iter().filter_map(|place| place.reveal());
+        for part in parts.chain([HelmPart::Manifest]) {
             let request = PlanRequest::RevealHelm {
                 release: id,
                 revision: version,
@@ -367,6 +383,25 @@ async fn no_canary_leaves_rust_before_a_reveal_and_each_reveal_answers_its_own()
                 _ => assert!(revealed == canary, "{} of revision {version}", place.name()),
             }
             assert!(found(value, &canary), "the search finds {}", place.name());
+        }
+        let request = PlanRequest::RevealHelm {
+            release: id,
+            revision: version,
+            part: HelmPart::Manifest,
+        };
+        let plan = core.command_plan("main", request).await.unwrap();
+        let told = over.run(&plan).await;
+        let [OperationEvent::Revealed { value, binary }] = told.as_slice() else {
+            panic!("the manifest of revision {version} was not revealed");
+        };
+        assert!(!binary);
+        for place in PLACES {
+            assert_eq!(
+                found(value, &place.canary(version)),
+                place.in_manifest(),
+                "{} of revision {version} in the whole manifest",
+                place.name()
+            );
         }
     }
     let audit = std::fs::read_to_string(dir.path().join("audit.jsonl")).unwrap();

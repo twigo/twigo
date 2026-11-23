@@ -117,6 +117,14 @@ pub fn document(manifest: &Held<String>, document: u32) -> Result<String, IpcErr
         })
 }
 
+/// The whole manifest as `helm get manifest` prints it, its Secrets and the
+/// documents Twigo could not read in clear, with the line feed its `Fprintln`
+/// adds
+/// ([get_manifest.go](https://github.com/helm/helm/blob/v4.3.2/pkg/cmd/get_manifest.go#L62)).
+pub fn whole(manifest: &Held<String>) -> String {
+    format!("{}\n", manifest.0)
+}
+
 /// A document as Helm's `SplitManifests` gives it, by its place in the
 /// manifest: from its first character after the white space that leads it
 /// to its last before the white space that ends it.

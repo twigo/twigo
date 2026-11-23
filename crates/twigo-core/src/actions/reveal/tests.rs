@@ -20,20 +20,28 @@ fn key(key: &str) -> ValueStep {
     ValueStep::Key(key.to_owned())
 }
 
+/// The manifest of revision `version` of `a/db`: the chart's ConfigMap, a
+/// Secret and two documents Twigo cannot read, one with its source and one
+/// without.
+fn manifest(version: u32) -> String {
+    testing::release("a", "db", version, "deployed")["manifest"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+        + "---\n# Source: demo/templates/secret.yaml\napiVersion: v1\nkind: Secret\nmetadata:\n  name: db-auth\nstringData:\n  token: tok-en\n"
+        + "---\n# Source: demo/templates/broken.yaml\nkind: Secret\nstringData: {broken: one\n"
+        + "---\nkind: Secret\nstringData: {broken: two\n"
+}
+
 /// Revision `version` of `a/db`, with a string, a number and a list among
-/// the person's values, and a Secret and two documents Twigo cannot read,
-/// one with its source and one without, in its manifest.
+/// the person's values, and [`manifest`].
 fn revision(fake: &Fake, version: u32, status: &str) {
     let mut release = testing::release("a", "db", version, status);
     release["config"] = json!({
         "auth": { "password": format!("pass-{version}"), "port": 5432 },
         "hosts": ["one", "two"],
     });
-    let manifest = release["manifest"].as_str().unwrap().to_owned()
-        + "---\n# Source: demo/templates/secret.yaml\napiVersion: v1\nkind: Secret\nmetadata:\n  name: db-auth\nstringData:\n  token: tok-en\n"
-        + "---\n# Source: demo/templates/broken.yaml\nkind: Secret\nstringData: {broken: one\n"
-        + "---\nkind: Secret\nstringData: {broken: two\n";
-    release["manifest"] = json!(manifest);
+    release["manifest"] = json!(manifest(version));
     testing::put(fake, &release, status);
 }
 
@@ -53,6 +61,7 @@ async fn a_reveal_names_its_place_and_prints_helm_s_command_only_where_it_prints
         defaults: false,
         path: vec![key("auth"), key("password")],
     };
+    let whole = format!("{}\n", manifest(2));
     let cases = [
         (
             leaf.clone(),
@@ -139,6 +148,13 @@ async fn a_reveal_names_its_place_and_prints_helm_s_command_only_where_it_prints
             "manifest document 3",
             None,
             "kind: Secret\nstringData: {broken: two",
+        ),
+        (
+            HelmPart::Manifest,
+            "Reveal all of the manifest's Secrets of release db (revision 2) in a from kind-test?",
+            "manifest",
+            Some("helm get manifest db -n a --kube-context kind-test --revision 2"),
+            whole.as_str(),
         ),
         (
             HelmPart::Notes,

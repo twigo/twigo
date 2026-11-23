@@ -1,5 +1,6 @@
-//! The Reveal of a Helm release's values: the `helm` line of its plan, run
-//! here with the `helm` on `PATH`, prints what the Reveal shows.
+//! The Reveal of a Helm release's values and of its whole manifest: the
+//! `helm` line of its plan, run here with the `helm` on `PATH`, prints what
+//! the Reveal shows.
 
 use std::path::Path;
 use std::process::Command;
@@ -36,7 +37,7 @@ fn helm(dir: &Path, kubeconfig: &Path, run: &[&str]) -> String {
 
 #[tokio::test]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG and helm on PATH"]
-async fn the_helm_line_of_a_reveal_prints_the_values_it_shows() {
+async fn the_helm_line_of_a_reveal_prints_what_it_shows() {
     let cluster = Cluster::connect().await;
     let namespace = cluster.namespace("helm").await;
     let dir = tempfile::tempdir().unwrap();
@@ -138,6 +139,23 @@ async fn the_helm_line_of_a_reveal_prints_the_values_it_shows() {
     };
     let plan = core.command_plan("main", number).await.unwrap();
     assert_eq!(plan.command_line, None, "helm prints a number as a float");
+
+    let manifest = PlanRequest::RevealHelm {
+        release: id,
+        revision: 1,
+        part: HelmPart::Manifest,
+    };
+    let plan = core.command_plan("main", manifest).await.unwrap();
+    let told = run(&core, &plan, None).await.unwrap();
+    let [OperationEvent::Revealed { value, .. }] = told.as_slice() else {
+        panic!("{told:?}");
+    };
+    assert!(
+        value.contains("reveal-me"),
+        "the manifest's Secret in clear"
+    );
+    let printed = helm(dir.path(), &kubeconfig, &["sh", "-c", line(&plan)]);
+    assert_eq!(&printed, value, "{}", line(&plan));
 
     core.helm_release_close("main", id).unwrap();
     cluster.delete(&namespace).await;

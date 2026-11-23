@@ -209,6 +209,7 @@ impl Page {
                 key,
             } => manifest::secret(&self.manifest, *document, items, key),
             HelmPart::Document { document } => text(manifest::document(&self.manifest, *document)),
+            HelmPart::Manifest => text(Ok(manifest::whole(&self.manifest))),
             HelmPart::Notes => {
                 text(revealed_text(&self.notes).ok_or_else(|| {
                     IpcError::new(ErrorCode::HelmNoValue, "the revision has no notes")

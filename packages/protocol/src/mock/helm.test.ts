@@ -431,6 +431,17 @@ test("a Reveal says what the core's plan says and shows a command only where hel
     "Revealing password of secret alpha-db in the manifest",
   );
   expect(secret.commandLine).toBeNull();
+  const manifest = await plan(backend, id, 2, { kind: "manifest" });
+  expect(manifest).toMatchObject({
+    question:
+      "Reveal all of the manifest's Secrets of release alpha (revision 2) in payments from prod-eu?",
+    consequences: [
+      "It shows until you hide it, close the release or show another revision.",
+    ],
+    doing: "Revealing all of the manifest's Secrets",
+    commandLine:
+      "helm get manifest alpha -n payments --kube-context prod-eu --revision 2",
+  });
   const notes = await plan(backend, id, 2, { kind: "notes" });
   expect(notes.question).toBe(
     "Reveal the notes of release alpha (revision 2) in payments from prod-eu?",

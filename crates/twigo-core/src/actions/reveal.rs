@@ -121,10 +121,11 @@ pub(crate) fn reveal_helm(
         let template;
         match verb {
             "values" => line.extend(["-o", "json"]),
-            _ => {
+            "all" => {
                 template = format!("{{{{index .Release.Config {}}}}}", index_of(&part));
                 line.extend(["--template", &template]);
             }
+            _ => {}
         }
         shell_line(&line)
     };
@@ -136,6 +137,7 @@ pub(crate) fn reveal_helm(
         HelmPart::Values {
             defaults: false, ..
         } if prints_as_go_does(&value) => Some(get("all")?),
+        HelmPart::Manifest => Some(get("manifest")?),
         _ => None,
     };
     let (this, window) = (core.this.clone(), window.to_owned());
@@ -252,6 +254,10 @@ impl Words {
                 };
                 (what, format!("manifest document {document}"))
             }
+            HelmPart::Manifest => (
+                "all of the manifest's Secrets".to_owned(),
+                "manifest".to_owned(),
+            ),
             HelmPart::Notes => ("the notes".to_owned(), "notes".to_owned()),
             HelmPart::Description => ("the description".to_owned(), "description".to_owned()),
         };

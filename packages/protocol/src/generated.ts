@@ -805,7 +805,7 @@ export type HelmPart = { "kind": "values",
 /**
  * The chart's defaults, not the person's values.
  */
-defaults: boolean, path: Array<ValueStep>, } | { "kind": "secret", document: number, items: Array<number>, key: string, } | { "kind": "document", document: number, } | { "kind": "notes" } | { "kind": "description" };
+defaults: boolean, path: Array<ValueStep>, } | { "kind": "secret", document: number, items: Array<number>, key: string, } | { "kind": "document", document: number, } | { "kind": "manifest" } | { "kind": "notes" } | { "kind": "description" };
 
 /**
  * How many times the redaction hid each kind of thing in the log.

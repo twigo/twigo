@@ -242,8 +242,11 @@ export function revealWords(
   shown: Revision | undefined,
   value: string,
 ): { question: string; doing: string; commandLine: string | null } {
-  const get = (verb: string, rest: string) =>
-    `helm get ${verb} ${name} -n ${namespace} --kube-context ${context} --revision ${String(revision)} ${rest}`;
+  const get = (verb: string, ...rest: string[]) =>
+    [
+      `helm get ${verb} ${name} -n ${namespace} --kube-context ${context} --revision ${String(revision)}`,
+      ...rest,
+    ].join(" ");
   const what = ((): string => {
     switch (part.kind) {
       case "values":
@@ -270,6 +273,8 @@ export function revealWords(
           ? `document ${String(part.document + 1)} in the manifest`
           : `the document ${source} in the manifest`;
       }
+      case "manifest":
+        return "all of the manifest's Secrets";
       case "notes":
         return "the notes";
       case "description":
@@ -277,18 +282,20 @@ export function revealWords(
     }
   })();
   const commandLine =
-    part.kind !== "values" || part.defaults
-      ? null
-      : part.path.length === 0
-        ? get("values", "-o json")
-        : printsAsGoDoes(value)
-          ? get(
-              "all",
-              `--template '{{index .Release.Config ${part.path
-                .map((step) => JSON.stringify(step))
-                .join(" ")}}}'`,
-            )
-          : null;
+    part.kind === "manifest"
+      ? get("manifest")
+      : part.kind !== "values" || part.defaults
+        ? null
+        : part.path.length === 0
+          ? get("values", "-o json")
+          : printsAsGoDoes(value)
+            ? get(
+                "all",
+                `--template '{{index .Release.Config ${part.path
+                  .map((step) => JSON.stringify(step))
+                  .join(" ")}}}'`,
+              )
+            : null;
   return {
     question: `Reveal ${what} of release ${name} (revision ${String(revision)}) in ${namespace} from ${context}?`,
     doing: `Revealing ${what}`,

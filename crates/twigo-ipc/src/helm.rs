@@ -282,6 +282,9 @@ pub enum HelmPart {
     Document {
         document: u32,
     },
+    /// The whole manifest as `helm get manifest` prints it: every Secret's
+    /// keys and every document Twigo could not read, in one text.
+    Manifest,
     Notes,
     Description,
 }

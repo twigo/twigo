@@ -254,7 +254,7 @@ fn places(page: &Page) -> Vec<HelmPart> {
             document: unread.document,
         });
     }
-    parts.extend([HelmPart::Notes, HelmPart::Description]);
+    parts.extend([HelmPart::Manifest, HelmPart::Notes, HelmPart::Description]);
     parts
 }
 
@@ -340,7 +340,7 @@ fn the_mock_answers_with_the_recorded_releases_and_none_of_their_secrets() {
                     HelmPart::Notes => Some(page.notes().hidden),
                     HelmPart::Description => Some(page.description().hidden),
                     HelmPart::Secret { .. } | HelmPart::Document { .. } => Some(true),
-                    HelmPart::Values { .. } => None,
+                    HelmPart::Values { .. } | HelmPart::Manifest => None,
                 };
                 if scrubbed == Some(true) {
                     secrets.push(value.clone());

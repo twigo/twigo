@@ -468,6 +468,13 @@
       },
       {
         "part": {
+          "kind": "manifest"
+        },
+        "value": "---\n# Source: demo/templates/secret.yaml\napiVersion: v1\nkind: Secret\nmetadata:\n  name: alpha-db\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\ntype: Opaque\nstringData:\n  host: \"db.example\"\n  password: \"user-password-r1\"\ndata:\n  token: \"dG9rZW4tZm9yLWFscGhh\"\n\n---\n# Source: demo/charts/sub/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-sub\ndata:\n  greeting: \"hello from parent\"\n  subOnly: \n  region: \"us-east\"\n\n---\n# Source: demo/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-config\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\ndata:\n  replicas: \"2\"\n  image: \"registry.example/demo:1.1\"\n  region: \"us-east\"\n  fromSub: \"42\"\n  app.toml: |\n    [server]\n    listen = \"0.0.0.0:8080\"\n    \n\n---\n# Source: demo/templates/service.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: alpha-svc\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\nspec:\n  selector:\n    app.kubernetes.io/instance: alpha\n  ports:\n    - name: http\n      port: 80\n      targetPort: 8080\n\n\n",
+        "binary": false
+      },
+      {
+        "part": {
           "kind": "notes"
         },
         "value": "Thank you for installing demo.\n\nRelease alpha is at revision 1 in fmt-a.\nThe image is registry.example/demo:1.1.\n",
@@ -835,6 +842,13 @@
       },
       {
         "part": {
+          "kind": "manifest"
+        },
+        "value": "---\n# Source: demo/templates/secret.yaml\napiVersion: v1\nkind: Secret\nmetadata:\n  name: alpha-db\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\ntype: Opaque\nstringData:\n  host: \"db.example\"\n  password: \"user-password-r2\"\ndata:\n  token: \"dG9rZW4tZm9yLWFscGhh\"\n\n---\n# Source: demo/charts/sub/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-sub\ndata:\n  greeting: \"hello from parent\"\n  subOnly: \"a default only the subchart has\"\n  region: \"eu-west\"\n\n---\n# Source: demo/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-config\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\ndata:\n  replicas: \"1\"\n  image: \"registry.example/demo:1.2\"\n  region: \"eu-west\"\n  fromSub: \"42\"\n  app.toml: |\n    [server]\n    listen = \"0.0.0.0:8080\"\n    \n\n---\n# Source: demo/templates/service.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: alpha-svc\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\nspec:\n  selector:\n    app.kubernetes.io/instance: alpha\n  ports:\n    - name: http\n      port: 80\n      targetPort: 8080\n\n\n",
+        "binary": false
+      },
+      {
+        "part": {
           "kind": "notes"
         },
         "value": "Thank you for installing demo.\n\nRelease alpha is at revision 2 in fmt-a.\nThe image is registry.example/demo:1.2.\n",
@@ -910,6 +924,13 @@
           "key": "password"
         },
         "value": "epsilon-password-r1",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "manifest"
+        },
+        "value": "---\n# Source: failing/templates/secret.yaml\napiVersion: v1\nkind: Secret\nmetadata:\n  name: epsilon-credentials\ntype: Opaque\ndata:\n  password: \"ZXBzaWxvbi1wYXNzd29yZC1yMQ==\"\n\n\n",
         "binary": false
       },
       {
@@ -1008,6 +1029,13 @@
           "key": "password"
         },
         "value": "epsilon-password-r2",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "manifest"
+        },
+        "value": "---\n# Source: failing/templates/secret.yaml\napiVersion: v1\nkind: Secret\nmetadata:\n  name: epsilon-credentials\ntype: Opaque\ndata:\n  password: \"ZXBzaWxvbi1wYXNzd29yZC1yMg==\"\n  extra: \"not base64!\"\n\n\n",
         "binary": false
       },
       {
@@ -1126,6 +1154,13 @@
           ]
         },
         "value": "443",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "manifest"
+        },
+        "value": "---\n# Source: plain/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-plain\ndata:\n  message: \"hello\"\n  ports: \"80,443\"\n  deep: \"deep\"\n\n\n",
         "binary": false
       },
       {
@@ -1252,6 +1287,13 @@
       },
       {
         "part": {
+          "kind": "manifest"
+        },
+        "value": "---\n# Source: plain/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: beta-plain\ndata:\n  message: \"hi-from-v3\"\n  ports: \"80,443\"\n  deep: \"deep\"\n\n",
+        "binary": false
+      },
+      {
+        "part": {
           "kind": "description"
         },
         "value": "Install complete",
@@ -1368,6 +1410,13 @@
           ]
         },
         "value": "443",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "manifest"
+        },
+        "value": "---\n# Source: plain/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: beta-plain\ndata:\n  message: \"second\"\n  ports: \"80,443\"\n  deep: \"deep\"\n\n",
         "binary": false
       },
       {
@@ -1494,6 +1543,13 @@
       },
       {
         "part": {
+          "kind": "manifest"
+        },
+        "value": "---\n# Source: plain/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: beta-plain\ndata:\n  message: \"hi-from-v3\"\n  ports: \"80,443\"\n  deep: \"deep\"\n\n",
+        "binary": false
+      },
+      {
+        "part": {
           "kind": "description"
         },
         "value": "Install complete",
@@ -1610,6 +1666,13 @@
           ]
         },
         "value": "443",
+        "binary": false
+      },
+      {
+        "part": {
+          "kind": "manifest"
+        },
+        "value": "---\n# Source: plain/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: beta-plain\ndata:\n  message: \"hi-from-v3\"\n  ports: \"80,443\"\n  deep: \"deep\"\n\n",
         "binary": false
       },
       {
