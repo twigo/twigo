@@ -168,8 +168,8 @@ impl Page {
     }
 
     /// The manifest as `helm get manifest` prints it, its Secrets masked.
-    pub fn manifest(&self) -> ReleaseManifest {
-        self.masked.clone()
+    pub fn manifest(&self) -> &ReleaseManifest {
+        &self.masked
     }
 
     /// The hooks as `helm get hooks` prints them, their Secrets masked;

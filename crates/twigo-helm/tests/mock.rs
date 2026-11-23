@@ -163,7 +163,7 @@ fn mocked(namespace: &str, name: &str, read: &[Read]) -> Mocked {
                 notes: Some(page.notes()),
                 description: Some(page.description()),
                 values: Some(page.values()),
-                manifest: Some(page.manifest()),
+                manifest: Some(page.manifest().clone()),
                 line: line(page.summary(), Some(page.description())),
             },
             Err(error) => Revision {

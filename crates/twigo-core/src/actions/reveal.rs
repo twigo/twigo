@@ -223,10 +223,9 @@ impl Words {
                 let secret = page
                     .manifest()
                     .secrets
-                    .into_iter()
+                    .iter()
                     .find(|secret| secret.document == *document && secret.items == *items)
-                    .map(|secret| secret.name)
-                    .unwrap_or_default();
+                    .map_or("", |secret| secret.name.as_str());
                 (
                     format!("{key} of secret {secret} in the manifest"),
                     format!("manifest secrets/{secret} key {key}"),
@@ -236,9 +235,9 @@ impl Words {
                 let source = page
                     .manifest()
                     .unread
-                    .into_iter()
+                    .iter()
                     .find(|unread| unread.document == *document)
-                    .and_then(|unread| unread.source);
+                    .and_then(|unread| unread.source.as_deref());
                 let what = match source {
                     Some(source) => format!("the document {source} in the manifest"),
                     None => format!("document {} in the manifest", u64::from(*document) + 1),

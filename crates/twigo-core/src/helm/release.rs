@@ -601,7 +601,9 @@ async fn run(
             notes,
             description,
             values: page.filter(|_| values_due).map(|page| page.values()),
-            manifest: page.filter(|_| manifest_due).map(|page| page.manifest()),
+            manifest: page
+                .filter(|_| manifest_due)
+                .map(|page| page.manifest().clone()),
             history: now.history.clone().filter(|_| history_due),
         };
         dirty.page &= !overview_due;
