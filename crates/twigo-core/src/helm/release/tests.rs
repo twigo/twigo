@@ -1005,3 +1005,40 @@ async fn a_pin_to_the_page_shown_while_a_newer_one_is_fetched_keeps_it() {
     assert_eq!(rig.opened.shown().map(|page| page.revision), Some(1));
     assert_eq!(rig.gets(1), 1);
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_reinstalled_revision_s_line_never_shows_the_old_install() {
+    let fake = Fake::default();
+    revision(&fake, 1, "deployed");
+    let mut rig = Rig::open(fake, None, ALL).await;
+    let line_1 = |shown: &Shown| {
+        shown
+            .history
+            .as_ref()
+            .and_then(|lines| lines.iter().find(|line| line.revision == 1).cloned())
+    };
+    rig.until("line 1", |shown| {
+        line_1(shown).is_some_and(|line| line.chart.as_deref() == Some("demo-1.1.0"))
+    })
+    .await;
+
+    rig.fake.state().gets_take = Duration::from_secs(1);
+    let mut again = testing::release("a", "app", 1, "pending-install");
+    again["chart"]["metadata"]["version"] = json!("9.9.9");
+    testing::reinstall(&rig.fake, &again, "pending-install");
+    let mut wrong = Vec::new();
+    for _ in 0..300 {
+        rig.drain_for(Duration::from_millis(10)).await;
+        if let Some(line) = line_1(&rig.watched.shown)
+            && line.status == "pending-install"
+            && line.chart.as_deref() == Some("demo-1.1.0")
+        {
+            wrong.push(line.chart.clone());
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:?}");
+    assert_eq!(
+        line_1(&rig.watched.shown).and_then(|line| line.chart),
+        Some("demo-9.9.9".to_owned())
+    );
+}

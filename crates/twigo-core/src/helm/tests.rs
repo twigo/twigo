@@ -845,3 +845,28 @@ async fn a_row_that_falls_back_from_a_revision_deleted_while_fetched_keeps_its_c
     assert_eq!(rig.seen.text("a", "app", "Revision"), "1");
     assert_eq!(testing::gets(&rig.fake, "a", "app", 1), 1);
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_new_revision_s_row_never_shows_the_last_one_s_chart() {
+    let mut rig = Rig::over(&["a"], |fake| {
+        revision(fake, "a", "app", 1, "deployed");
+    })
+    .await;
+    rig.until("revision 1's chart", |seen| {
+        seen.text("a", "app", "Chart") == "demo-1.1.0"
+    })
+    .await;
+
+    rig.fake.state().gets_take = Duration::from_secs(1);
+    revision(&rig.fake, "a", "app", 2, "deployed");
+    let mut wrong = Vec::new();
+    while rig.seen.text("a", "app", "Chart") != "demo-1.2.0" {
+        let batch = rig.next().await;
+        rig.seen.apply(batch);
+        if rig.seen.text("a", "app", "Revision") == "2" && rig.seen.charted("a", "app") {
+            wrong.push(rig.seen.text("a", "app", "Chart"));
+        }
+    }
+    wrong.retain(|chart| chart != "demo-1.2.0");
+    assert!(wrong.is_empty(), "revision 2 showed {wrong:?}");
+}
