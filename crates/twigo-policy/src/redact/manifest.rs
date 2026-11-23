@@ -13,7 +13,7 @@ use serde_json::Value;
 use twigo_ipc::{DataEntry, ErrorCode, IpcError, ManifestSecret, ReleaseManifest, UnreadDocument};
 
 use super::{
-    Entry, Field, Held, decode_base64, entries, mask_secret_with, secret_values, value_of,
+    Entry, Field, Held, decode_base64, entries, mask_secret_with, secret_values, text, value_of,
 };
 
 /// What [`masked`] gives.
@@ -61,9 +61,10 @@ pub fn masked(manifest: &Held<String>) -> Masked {
 
 /// Two revisions' manifests masked so that a value of a Secret that differs
 /// from the same key of its counterpart, the Secret of the same name and
-/// namespace on the other side, reads `<N bytes, changed>` on both. A Secret
-/// whose document writes no namespace is in its revision's release's
-/// `namespace`, where Helm creates it.
+/// namespace on the other side, reads `<N bytes, changed>` on both, and so
+/// does a `data` or `stringData` masked whole that differs from its
+/// counterpart's. A Secret whose document writes no namespace, or an empty
+/// one, is in its revision's release's `namespace`, where Helm creates it.
 pub fn compared(from: (&Held<String>, &str), to: (&Held<String>, &str)) -> (String, String) {
     let (from_read, to_read) = (read_all(&from.0.0), read_all(&to.0.0));
     let (from_values, to_values) = (stored(&from_read, from.1), stored(&to_read, to.1));
@@ -271,46 +272,76 @@ fn within_mut<'v>(value: &'v mut Value, path: &[u32]) -> Option<&'v mut Value> {
 /// name.
 type Name = (String, String);
 
-/// The bytes each key of each Secret holds as the server would store them,
-/// for a comparison.
-type Stored = BTreeMap<Name, Keys>;
+/// What each Secret holds, for a comparison.
+type Stored = BTreeMap<Name, Holds>;
 
-/// A Secret's keys with the bytes the server would store, `stringData`'s
-/// over `data`'s.
-type Keys = BTreeMap<String, Vec<u8>>;
+/// What a Secret holds as the server would store it: each key's value,
+/// `stringData`'s over `data`'s, and each of `data` and `stringData` that
+/// is present, by its text where it is no map.
+#[derive(Default)]
+struct Holds {
+    keys: BTreeMap<String, Kept>,
+    whole: BTreeMap<&'static str, Option<String>>,
+}
 
+/// A key's value as the server would store it: its bytes, or for a `data`
+/// value that is no base64 its text, which the server refuses, so that it
+/// equals nothing the server stores.
+#[derive(PartialEq, Eq)]
+enum Kept {
+    Stored(Vec<u8>),
+    Refused(String),
+}
+
+/// A Secret's namespace and name, as cli-runtime's `SetNamespace` places
+/// it: a namespace not written, or written empty, is the release's
+/// ([visitor.go](https://github.com/kubernetes/cli-runtime/blob/v0.37.2/pkg/resource/visitor.go#L644-L658)).
 fn name(secret: &Value, namespace: &str) -> Name {
     let metadata = &secret["metadata"];
     (
         metadata["namespace"]
             .as_str()
+            .filter(|written| !written.is_empty())
             .unwrap_or(namespace)
             .to_owned(),
         metadata["name"].as_str().unwrap_or_default().to_owned(),
     )
 }
 
-fn keys(secret: &Value) -> Keys {
-    entries(secret)
-        .map(|entry| (entry.key.to_owned(), bytes(&entry)))
-        .collect()
+fn holds(secret: &Value) -> Holds {
+    let keys = entries(secret)
+        .map(|entry| (entry.key.to_owned(), kept(&entry)))
+        .collect();
+    let whole = [Field::Data, Field::StringData]
+        .into_iter()
+        .filter(|field| !secret[field.name()].is_null())
+        .map(|field| {
+            let value = &secret[field.name()];
+            (
+                field.name(),
+                (!value.is_object()).then(|| text(value).into_owned()),
+            )
+        })
+        .collect();
+    Holds { keys, whole }
 }
 
-fn bytes(entry: &Entry<'_>) -> Vec<u8> {
+fn kept(entry: &Entry<'_>) -> Kept {
     let text = entry.text();
     match entry.field {
-        Field::StringData => text.as_bytes().to_vec(),
-        Field::Data => decode_base64(text.as_bytes()).unwrap_or_else(|| text.as_bytes().to_vec()),
+        Field::StringData => Kept::Stored(text.as_bytes().to_vec()),
+        Field::Data => decode_base64(text.as_bytes())
+            .map_or_else(|| Kept::Refused(text.into_owned()), Kept::Stored),
     }
 }
 
 fn stored(read: &[(Document<'_>, Read)], namespace: &str) -> Stored {
     let mut stored = Stored::new();
     for secret in read.iter().flat_map(|(_, read)| read.secrets()) {
-        stored
-            .entry(name(secret, namespace))
-            .or_default()
-            .extend(keys(secret));
+        let Holds { keys, whole } = holds(secret);
+        let both = stored.entry(name(secret, namespace)).or_default();
+        both.keys.extend(keys);
+        both.whole.extend(whole);
     }
     stored
 }
@@ -404,12 +435,20 @@ fn rewritten(
         each(place, secret);
         let theirs =
             counterparts.and_then(|(stored, namespace)| stored.get(&name(secret, namespace)));
-        let ours = keys(secret);
-        mask_secret_with(secret, |entry| {
-            theirs
-                .and_then(|keys| keys.get(entry.key))
-                .is_some_and(|other| ours.get(entry.key) != Some(other))
-        });
+        let ours = holds(secret).keys;
+        mask_secret_with(
+            secret,
+            |entry| {
+                theirs
+                    .and_then(|theirs| theirs.keys.get(entry.key))
+                    .is_some_and(|other| ours.get(entry.key) != Some(other))
+            },
+            |field, value| {
+                theirs
+                    .and_then(|theirs| theirs.whole.get(field.name()))
+                    .is_some_and(|other| other.as_deref() != Some(&*text(value)))
+            },
+        );
     }
     let yaml = serde_saphyr::to_string(&value).ok()?;
     Some(yaml.trim_end().to_owned())
@@ -737,6 +776,62 @@ stringData: {broken: pw-unread
         }
         let (before, _) = compared((&from, "default"), (&to, "default"));
         assert!(!before.contains("changed"), "{before}");
+        let empty = held(
+            "---\n# Source: a.yaml\nkind: Secret\nmetadata: {name: db, namespace: \"\"}\nstringData: {password: old-password}\n",
+        );
+        let (before, after) = compared((&empty, "payments"), (&to, "payments"));
+        for side in [&before, &after] {
+            assert!(side.contains("password: <12 bytes, changed>"), "{side}");
+        }
+    }
+
+    #[test]
+    fn a_data_value_that_is_no_base64_equals_no_value_the_server_stores() {
+        let secret = |data: &str| {
+            held(&format!(
+                "---\n# Source: a.yaml\nkind: Secret\nmetadata: {{name: db}}\ndata: {{{data}}}\n"
+            ))
+        };
+        let (from, to) = (
+            secret("password: aHVudGVyMg=="),
+            secret("password: hunter2"),
+        );
+        let (before, after) = compared((&from, "default"), (&to, "default"));
+        for side in [&before, &after] {
+            assert!(side.contains("password: <7 bytes, changed>"), "{side}");
+        }
+        let (before, after) = compared((&to, "default"), (&to, "default"));
+        assert!(
+            !before.contains("changed") && !after.contains("changed"),
+            "{before}"
+        );
+    }
+
+    #[test]
+    fn a_data_or_string_data_that_is_no_map_is_marked_where_it_changed() {
+        let secret = |string_data: &str| {
+            held(&format!(
+                "---\n# Source: a.yaml\nkind: Secret\nmetadata: {{name: db}}\nstringData: {string_data}\n"
+            ))
+        };
+        let (old, new) = (secret("old-password"), secret("new-password"));
+        let (before, after) = compared((&old, "default"), (&new, "default"));
+        for side in [&before, &after] {
+            assert!(side.contains("stringData: <12 bytes, changed>"), "{side}");
+        }
+        let (before, after) = compared((&old, "default"), (&old, "default"));
+        assert!(
+            !before.contains("changed") && !after.contains("changed"),
+            "{before}"
+        );
+        let (before, _) = compared(
+            (&old, "default"),
+            (&secret("{password: old-password}"), "default"),
+        );
+        assert!(
+            before.contains("stringData: <12 bytes, changed>"),
+            "{before}"
+        );
     }
 
     #[test]

@@ -55,31 +55,34 @@ pub fn holds_helm_release(object: &Value) -> bool {
 /// A Secret with each value replaced by its size and the last-applied
 /// annotation dropped.
 fn mask_secret(secret: &mut Value) {
-    mask_secret_with(secret, |_| false);
+    mask_secret_with(secret, |_| false, |_, _| false);
 }
 
-/// [`mask_secret`], each value that `changed` picks reading
+/// [`mask_secret`], each value that `changed` picks, and each `data` or
+/// `stringData` masked whole that `changed_whole` picks, reading
 /// `<N bytes, changed>`.
-fn mask_secret_with(secret: &mut Value, changed: impl Fn(&Entry<'_>) -> bool) {
+fn mask_secret_with(
+    secret: &mut Value,
+    changed: impl Fn(&Entry<'_>) -> bool,
+    changed_whole: impl Fn(Field, &Value) -> bool,
+) {
     let masks: Vec<(Field, String, String)> = entries(secret)
         .map(|entry| {
-            let bytes = entry.bytes();
-            let mask = if changed(&entry) {
-                format!("<{bytes} bytes, changed>")
-            } else {
-                mask(bytes)
-            };
+            let mask = marked(entry.bytes(), changed(&entry));
             (entry.field, entry.key.to_owned(), mask)
         })
         .collect();
     for (field, key, mask) in masks {
         secret[field.name()][key] = Value::String(mask);
     }
-    let whole: Vec<(Field, u64)> = loose(secret)
-        .map(|(field, value)| (field, text(value).len() as u64))
+    let whole: Vec<(Field, String)> = loose(secret)
+        .map(|(field, value)| {
+            let bytes = text(value).len() as u64;
+            (field, marked(bytes, changed_whole(field, value)))
+        })
         .collect();
-    for (field, bytes) in whole {
-        secret[field.name()] = Value::String(mask(bytes));
+    for (field, mask) in whole {
+        secret[field.name()] = Value::String(mask);
     }
     if let Some(annotations) = secret
         .get_mut("metadata")
@@ -92,6 +95,14 @@ fn mask_secret_with(secret: &mut Value, changed: impl Fn(&Entry<'_>) -> bool) {
 
 fn mask(bytes: u64) -> String {
     format!("<{bytes} bytes>")
+}
+
+fn marked(bytes: u64, changed: bool) -> String {
+    if changed {
+        format!("<{bytes} bytes, changed>")
+    } else {
+        mask(bytes)
+    }
 }
 
 /// Where a Secret keeps a value.
@@ -166,7 +177,12 @@ const GO_BASE64: GeneralPurpose = GeneralPurpose::new(
 pub fn decode_base64(text: &[u8]) -> Option<Vec<u8>> {
     let line_break = |byte: &u8| matches!(byte, b'\r' | b'\n');
     let text = if text.iter().any(line_break) {
-        Cow::Owned(text.iter().copied().filter(|byte| !line_break(byte)).collect())
+        Cow::Owned(
+            text.iter()
+                .copied()
+                .filter(|byte| !line_break(byte))
+                .collect(),
+        )
     } else {
         Cow::Borrowed(text)
     };
@@ -261,11 +277,13 @@ fn value_of(secret: &Value, key: &str) -> Result<(String, bool), IpcError> {
     if entry.field == Field::StringData {
         return Ok((text.into_owned(), false));
     }
-    Ok(match decode_base64(text.as_bytes()).map(String::from_utf8) {
-        Some(Ok(decoded)) => (decoded, false),
-        Some(Err(_)) => (text.into_owned(), true),
-        None => (text.into_owned(), false),
-    })
+    Ok(
+        match decode_base64(text.as_bytes()).map(String::from_utf8) {
+            Some(Ok(decoded)) => (decoded, false),
+            Some(Err(_)) => (text.into_owned(), true),
+            None => (text.into_owned(), false),
+        },
+    )
 }
 
 /// `text` with each of `names` that stands in it as a whole token replaced by
