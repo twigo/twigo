@@ -58,13 +58,15 @@ pub fn masked(manifest: &Held<String>) -> Masked {
 }
 
 /// Two revisions' manifests masked so that a value of a Secret that differs
-/// from the same key of its counterpart, the Secret of the same namespace
-/// and name on the other side, reads `<N bytes, changed>` on both.
-pub fn compared(from: &Held<String>, to: &Held<String>) -> (String, String) {
-    let (from_read, to_read) = (read_all(&from.0), read_all(&to.0));
-    let (from_values, to_values) = (stored(&from_read), stored(&to_read));
-    let before = written(&from.0, from_read, Some(&to_values)).text;
-    let after = written(&to.0, to_read, Some(&from_values)).text;
+/// from the same key of its counterpart, the Secret of the same name and
+/// namespace on the other side, reads `<N bytes, changed>` on both. A Secret
+/// whose document writes no namespace is in its revision's release's
+/// `namespace`, where Helm creates it.
+pub fn compared(from: (&Held<String>, &str), to: (&Held<String>, &str)) -> (String, String) {
+    let (from_read, to_read) = (read_all(&from.0.0), read_all(&to.0.0));
+    let (from_values, to_values) = (stored(&from_read, from.1), stored(&to_read, to.1));
+    let before = written(&from.0.0, from_read, Some((&to_values, from.1))).text;
+    let after = written(&to.0.0, to_read, Some((&from_values, to.1))).text;
     (before, after)
 }
 
@@ -263,19 +265,33 @@ fn within_mut<'v>(value: &'v mut Value, path: &[u32]) -> Option<&'v mut Value> {
     })
 }
 
-/// A Secret by the namespace and name its document gives it.
-type Name = (Option<String>, String);
+/// A Secret by its namespace, its document's or else `namespace`, and its
+/// name.
+type Name = (String, String);
 
 /// The bytes each key of each Secret holds as the server would store them,
-/// `stringData` over `data`, for a comparison.
-type Stored = BTreeMap<Name, BTreeMap<String, Vec<u8>>>;
+/// for a comparison.
+type Stored = BTreeMap<Name, Keys>;
 
-fn name(secret: &Value) -> Name {
+/// A Secret's keys with the bytes the server would store, `stringData`'s
+/// over `data`'s.
+type Keys = BTreeMap<String, Vec<u8>>;
+
+fn name(secret: &Value, namespace: &str) -> Name {
     let metadata = &secret["metadata"];
     (
-        metadata["namespace"].as_str().map(str::to_owned),
+        metadata["namespace"]
+            .as_str()
+            .unwrap_or(namespace)
+            .to_owned(),
         metadata["name"].as_str().unwrap_or_default().to_owned(),
     )
+}
+
+fn keys(secret: &Value) -> Keys {
+    entries(secret)
+        .map(|entry| (entry.key.to_owned(), bytes(&entry)))
+        .collect()
 }
 
 fn bytes(entry: &Entry<'_>) -> Vec<u8> {
@@ -286,25 +302,26 @@ fn bytes(entry: &Entry<'_>) -> Vec<u8> {
     }
 }
 
-fn stored(read: &[(Document<'_>, Read)]) -> Stored {
+fn stored(read: &[(Document<'_>, Read)], namespace: &str) -> Stored {
     let mut stored = Stored::new();
     for secret in read.iter().flat_map(|(_, read)| read.secrets()) {
-        let keys = stored.entry(name(secret)).or_default();
-        for entry in entries(secret) {
-            keys.insert(entry.key.to_owned(), bytes(&entry));
-        }
+        stored
+            .entry(name(secret, namespace))
+            .or_default()
+            .extend(keys(secret));
     }
     stored
 }
 
 /// The manifest written again: each document that holds a Secret from its
-/// value masked, and in a comparison marked where `counterparts` differ;
-/// each document Twigo could not read as its `# Source:` line and a line
-/// that says so; every other one as it stands.
+/// value masked, and in a comparison marked where `counterparts`, named
+/// with the release's namespace, differ; each document Twigo could not read
+/// as its `# Source:` line and a line that says so; every other one as it
+/// stands.
 fn written(
     manifest: &str,
     read: Vec<(Document<'_>, Read)>,
-    counterparts: Option<&Stored>,
+    counterparts: Option<(&Stored, &str)>,
 ) -> ReleaseManifest {
     let mut text = String::with_capacity(manifest.len() + 1);
     let mut lines = 1;
@@ -326,11 +343,12 @@ fn written(
                 secrets: places,
             } if !places.is_empty() => {
                 let rewritten = rewritten(value, &places, counterparts, |place, secret| {
+                    let metadata = &secret["metadata"];
                     secrets.push(ManifestSecret {
                         document: index as u32,
                         items: place.to_vec(),
-                        name: name(secret).1,
-                        namespace: name(secret).0,
+                        name: metadata["name"].as_str().unwrap_or_default().to_owned(),
+                        namespace: metadata["namespace"].as_str().map(str::to_owned),
                         line,
                         entries: data_entries(secret),
                     });
@@ -374,7 +392,7 @@ fn written(
 fn rewritten(
     mut value: Value,
     places: &[Vec<u32>],
-    counterparts: Option<&Stored>,
+    counterparts: Option<(&Stored, &str)>,
     mut each: impl FnMut(&[u32], &Value),
 ) -> Option<String> {
     for place in places {
@@ -382,11 +400,13 @@ fn rewritten(
             continue;
         };
         each(place, secret);
-        let theirs = counterparts.and_then(|stored| stored.get(&name(secret)));
+        let theirs =
+            counterparts.and_then(|(stored, namespace)| stored.get(&name(secret, namespace)));
+        let ours = keys(secret);
         mask_secret_with(secret, |entry| {
             theirs
                 .and_then(|keys| keys.get(entry.key))
-                .is_some_and(|other| *other != bytes(entry))
+                .is_some_and(|other| ours.get(entry.key) != Some(other))
         });
     }
     let yaml = serde_saphyr::to_string(&value).ok()?;
@@ -614,7 +634,7 @@ stringData: {broken: pw-unread
         let to = held(
             "---\n# Source: c.yaml\nkind: List\nitems:\n- kind: Secret\n  metadata: {name: db}\n  data: {same: b25l, changed: bmV3, added: eQ==}\n  stringData: {moved: m}\n---\n# Source: b.yaml\nkind: Secret\nmetadata: {name: db, namespace: other}\nstringData: {changed: old}\n",
         );
-        let (before, after) = compared(&from, &to);
+        let (before, after) = compared((&from, "default"), (&to, "default"));
         assert!(before.contains("changed: <3 bytes, changed>\n  gone: <1 bytes>\n  moved: <1 bytes>\n  same: <3 bytes>\n"), "{before}");
         assert!(
             after.contains(
@@ -662,7 +682,7 @@ stringData: {broken: pw-unread
         let to = held(
             "---\n# Source: a.yaml\nkind: Secret\nmetadata: {name: db}\ndata: {password: aHVudGVyMg==, key.der: MIIBCgKCAQEA/w==}\n",
         );
-        let (before, after) = compared(&from, &to);
+        let (before, after) = compared((&from, "default"), (&to, "default"));
         assert!(
             !before.contains("changed") && !after.contains("changed"),
             "{before}"
@@ -685,6 +705,43 @@ stringData: {broken: pw-unread
         assert_eq!(
             secret(&from, 0, &[], "password").unwrap(),
             ("hunter2".to_owned(), false)
+        );
+    }
+
+    #[test]
+    fn a_secret_whose_namespace_is_written_in_one_revision_is_its_counterpart_in_the_other() {
+        let from = held(
+            "---\n# Source: a.yaml\nkind: Secret\nmetadata: {name: db}\nstringData: {password: old-password}\n",
+        );
+        let to = held(
+            "---\n# Source: a.yaml\nkind: Secret\nmetadata: {name: db, namespace: payments}\nstringData: {password: new-password}\n",
+        );
+        let (before, after) = compared((&from, "payments"), (&to, "payments"));
+        for side in [&before, &after] {
+            assert!(side.contains("password: <12 bytes, changed>"), "{side}");
+        }
+        let (before, _) = compared((&from, "default"), (&to, "default"));
+        assert!(!before.contains("changed"), "{before}");
+    }
+
+    #[test]
+    fn a_key_in_both_data_and_string_data_compares_as_the_server_stores_it() {
+        let both = held(
+            "---\n# Source: a.yaml\nkind: Secret\nmetadata: {name: db}\ndata: {k: aGk=}\nstringData: {k: there}\n",
+        );
+        let (before, after) = compared((&both, "default"), (&both, "default"));
+        assert!(
+            !before.contains("changed") && !after.contains("changed"),
+            "{before}"
+        );
+        let other = held(
+            "---\n# Source: a.yaml\nkind: Secret\nmetadata: {name: db}\nstringData: {k: elsewhere}\n",
+        );
+        let (before, _) = compared((&both, "default"), (&other, "default"));
+        assert!(
+            before.contains("data:\n  k: <2 bytes, changed>\n")
+                && before.contains("stringData:\n  k: <5 bytes, changed>\n"),
+            "{before}"
         );
     }
 

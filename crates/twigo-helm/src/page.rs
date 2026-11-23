@@ -227,7 +227,10 @@ pub fn compared(from: &Page, to: &Page, part: ComparedPart) -> ComparedRevisions
     let (from, to) = match part {
         ComparedPart::Values => values::compared(&from.user, &to.user),
         ComparedPart::Defaults => values::compared(&from.defaults, &to.defaults),
-        ComparedPart::Manifest => manifest::compared(&from.manifest, &to.manifest),
+        ComparedPart::Manifest => manifest::compared(
+            (&from.manifest, from.summary.namespace()),
+            (&to.manifest, to.summary.namespace()),
+        ),
     };
     ComparedRevisions { from, to }
 }
