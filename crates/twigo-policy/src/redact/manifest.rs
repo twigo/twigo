@@ -29,7 +29,6 @@ pub struct Masked {
 }
 
 /// An object of a manifest, as its document names it.
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Head {
     pub api_version: String,
     pub kind: String,
