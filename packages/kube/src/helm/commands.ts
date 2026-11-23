@@ -22,6 +22,7 @@ import {
   HELM_REVISION,
   HELM_TAB,
 } from "./keys";
+import { HELM_RESOURCE } from "./status";
 
 /** Where a command of a release applies, as a when-expression. */
 const HELM = "resource.group == helm.sh";
@@ -44,6 +45,12 @@ const REVISION = v.object({
 const PAIR = v.object({ ...RELEASE.entries, from: v.number(), to: v.number() });
 
 type Release = v.InferOutput<typeof RELEASE>;
+
+/** A release as the commands that act on an object take it: its kind, its resource and where it lives. */
+export function releaseSubject({ space, namespace, name }: Release) {
+  const { gvr, kind, namespaced } = HELM_RESOURCE;
+  return { space, gvr, kind, namespaced, namespace, name };
+}
 
 /**
  * The verb of the command that prints each view of a release. The chart's
@@ -243,6 +250,14 @@ export function registerHelm(
       enablement: `${HELM} && ${HELM_PREVIOUS}`,
     },
   );
+
+  menus.append("helm/release", {
+    command: "helm.release.open",
+    group: "navigation",
+  });
+  for (const command of ["k8s.resource.copyName", "helm.release.copyCommand"]) {
+    menus.append("helm/release", { command, group: "2_copy" });
+  }
 
   /** Reveal and Hide on the page a person is looking at, the eye's verbs: in the palette, and in the More menu where they apply to the whole text. */
   const eye = (

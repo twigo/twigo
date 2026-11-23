@@ -77,6 +77,72 @@ test("helm:sidebar is a third container whose rows read the list's batches, a cl
   });
 });
 
+const clipboard = () => {
+  const writeText = vi.fn((_text: string) => Promise.resolve());
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  return writeText;
+};
+
+async function helmRows() {
+  variant("helm:sidebar");
+  const workbench = await mountKube(createMockBackend("ready"));
+  fireEvent.mouseDown(screen.getByRole("tab", { name: "Helm" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Helm" }));
+  await settle(6);
+  const grid = screen.getByRole("grid", { name: "Helm releases" });
+  const rows = within(grid).getAllByRole("row");
+  const row = (name: string) => {
+    const found = rows.find((each) => each.textContent?.startsWith(name));
+    if (!found) throw new Error(`no row ${name}`);
+    return found;
+  };
+  return { workbench, rows, row };
+}
+
+test("helm:sidebar's rows are a forward's: a failed or unreadable release is a band, a waiting or unreadable one says its word, and the line takes the row's width", async () => {
+  const { row } = await helmRows();
+  expect(row("epsilon").dataset.tone).toBe("error");
+  expect(row("trunc").dataset.tone).toBe("error");
+  expect(row("stuck").dataset.tone).toBe("warn");
+  expect(row("alpha").dataset.tone).toBeUndefined();
+  expect(row("stuck").textContent).toContain("pending-upgrade");
+  expect(row("trunc").textContent).toContain("Truncated");
+  expect(row("epsilon").textContent).not.toContain("failed");
+  const line = row("beta").querySelector('[role="gridcell"] .inline-flex');
+  expect(line?.className).toContain("w-full");
+});
+
+test("helm:sidebar's row menu offers Open Release, Copy Name and Copy helm Command, which act on the row it opened on", async () => {
+  const writeText = clipboard();
+  const { workbench, row } = await helmRows();
+  const opened = vi.spyOn(workbench.editors, "open");
+  const menu = async (name: string, item: string) => {
+    fireEvent.pointerEnter(row(name));
+    const trigger = within(row(name)).getByRole("button", {
+      name: "Row actions",
+    });
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    await settle(1);
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: new RegExp(`^${item}`) }),
+    );
+    await settle(2);
+  };
+  await menu("beta", "Copy Name");
+  expect(writeText).toHaveBeenLastCalledWith("beta");
+  await menu("stuck", "Copy helm Command");
+  expect(writeText).toHaveBeenLastCalledWith(
+    "helm status stuck --namespace auth --kube-context prod-eu",
+  );
+  await menu("epsilon", "Open Release");
+  expect(opened).toHaveBeenLastCalledWith(
+    helmUri({ space: "prod-eu", namespace: "payments", name: "epsilon" }),
+  );
+});
+
 async function sidebar(scenario: "rbacNamespaces" | "rbacTypedNamespaces") {
   variant("helm:sidebar");
   const workbench = await mountKube(createMockBackend(scenario));

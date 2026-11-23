@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ShipWheel } from "lucide-react";
 import {
   HELM_RELEASES,
@@ -11,7 +11,6 @@ import {
 import {
   DataGrid,
   EmptyState,
-  StatusDot,
   type GridColumn,
   type GridItem,
 } from "@twigo/ui";
@@ -20,28 +19,32 @@ import {
   useListRegistration,
   useWorkbench,
 } from "@twigo/workbench";
-import { rowTone } from "../columns";
+import { problemOf, rowTone } from "../columns";
 import { useListView } from "../list/useListView";
 import { namespaceWords, whereWords } from "../list/scope";
 import { helmUri } from "../uri";
 import { ViewStatus } from "../ViewStatus";
-import { IN_FLIGHT_RELEASE, isQuiet } from "./status";
+import { releaseSubject } from "./commands";
+import { ReleaseLine } from "./ReleaseLine";
 
 const COLUMNS: readonly GridColumn[] = [
-  { id: "release", title: "Release", width: 200, grow: true },
+  { id: "release", title: "Release", width: 120, grow: true },
 ];
 
 /**
  * The space's Helm releases in the side bar, one column of rows as the
- * port-forwards' view draws its own (ARCHITECTURE 4.1): a dot of the status, the
- * name, the chart and its version in the support role, and the namespace in the
- * quiet role while the scope is every namespace. It reads the list's own
- * batches. A click shows the release's editor as a preview that keeps the focus
- * where it was, and a double click keeps it.
+ * port-forwards' view draws its own (ARCHITECTURE 4.1), each a `ReleaseLine`
+ * with its menu over the row's end. It reads the list's own batches. A click
+ * shows the release's editor as a preview that keeps the focus where it was,
+ * and a double click keeps it.
  */
 export function HelmView({ space }: { space: string }) {
-  const { backend, spaces, editors } = useWorkbench();
+  const workbench = useWorkbench();
+  const { backend, spaces, editors, keys, menus } = workbench;
   useChanges(spaces.changes);
+  useChanges(menus.changes);
+  useChanges(keys.changes);
+  const [selected, select] = useState<string>();
   const namespaces = spaces.state(space).namespaces;
   const query: ListQuery = useMemo(
     () => ({
@@ -85,8 +88,24 @@ export function HelmView({ space }: { space: string }) {
   const item = (index: number): GridItem<Row, never> | undefined => {
     const id = ids[index - snapshot.start];
     const row = id === undefined ? undefined : snapshot.rows.get(id);
-    return row ? { type: "row", id: row.id, data: row } : undefined;
+    if (!row) return undefined;
+    const tone = rowTone(HELM_RELEASES, "Status", snapshot.columns, row);
+    return {
+      type: "row",
+      id: row.id,
+      data: row,
+      ...((tone === "error" || tone === "warn") && { tone }),
+    };
   };
+  const chosen =
+    selected === undefined ? undefined : snapshot.rows.get(selected);
+  const base = keys.lookup(null);
+  const lookup = (key: string) =>
+    key === "resource.selected"
+      ? true
+      : key === "resource.group"
+        ? HELM_RELEASES.group
+        : base(key);
   if (REFUSED.has(snapshot.status.state)) {
     return (
       <ViewStatus
@@ -139,37 +158,39 @@ export function HelmView({ space }: { space: string }) {
       onRange={(start, end) => {
         setWindow(Math.max(0, start - 20), end + 20);
       }}
-      selected={undefined}
-      onSelect={() => undefined}
+      selected={selected}
+      onSelect={(id) => {
+        select(id);
+      }}
       onActivate={(_, row) => {
         open(row, false);
       }}
       onOpen={(_, row) => {
         open(row, true);
       }}
+      menu={workbench.actions(
+        "helm/release",
+        lookup,
+        chosen &&
+          releaseSubject({
+            space,
+            namespace: idNamespace(chosen),
+            name: text(chosen, "Name"),
+          }),
+      )}
+      overlayMenu
       loading={!SHOWS_ROWS.has(snapshot.status.state)}
-      cell={(row) => {
-        const tone = rowTone(HELM_RELEASES, "Status", snapshot.columns, row);
-        const status = text(row, "Status");
-        const chart = text(row, "Chart");
-        return (
-          <span className="flex min-w-0 items-center gap-2">
-            <StatusDot
-              tone={tone ?? (isQuiet(status) ? "idle" : "ok")}
-              pulse={IN_FLIGHT_RELEASE.test(status)}
-            />
-            <span className="shrink-0 text-content">{text(row, "Name")}</span>
-            {chart !== "" && (
-              <span className="truncate text-support">{chart}</span>
-            )}
-            {many && (
-              <span className="ml-auto truncate pl-2 text-quiet">
-                {text(row, "Namespace")}
-              </span>
-            )}
-          </span>
-        );
-      }}
+      cell={(row) => (
+        <ReleaseLine
+          name={text(row, "Name")}
+          chart={text(row, "Chart")}
+          namespace={idNamespace(row)}
+          says={many}
+          status={text(row, "Status")}
+          problem={problemOf(HELM_RELEASES, snapshot.columns, row)}
+          tone={rowTone(HELM_RELEASES, "Status", snapshot.columns, row)}
+        />
+      )}
       register={registerGrid}
     />
   );

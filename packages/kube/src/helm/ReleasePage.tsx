@@ -46,7 +46,7 @@ import type { ListServices } from "../services";
 import type { ReleaseInput } from "../uri";
 import { ViewStatus } from "../ViewStatus";
 import { HistoryList } from "./HistoryList";
-import { printsCommand } from "./commands";
+import { printsCommand, releaseSubject } from "./commands";
 import {
   HELM_NO_COMMAND,
   HELM_PREVIOUS,
@@ -323,14 +323,7 @@ export function ReleasePage({
   const filtered = useFiltered(services.pages, uri) && filterable;
   const under = text?.glyphs.find((each) => each.line === text.line);
   const latest = useRef({ text, under, show, hide, epoch });
-  const subject = JSON.stringify({
-    space: release.space,
-    gvr: HELM_RELEASES,
-    kind: "HelmRelease",
-    namespaced: true,
-    namespace: release.namespace,
-    name: release.name,
-  });
+  const subject = JSON.stringify(releaseSubject(release));
   useEffect(() => {
     if (!element) return;
     const scope = keys.scope(element);
