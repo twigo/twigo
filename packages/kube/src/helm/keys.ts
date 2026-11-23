@@ -1,5 +1,5 @@
 /** The context keys a release's page sets, which its commands read. */
-/** The view the page shows: one of its tabs, `page`, or `defaults` for the chart's defaults. */
+/** The view the page shows: one of its tabs, or `defaults` for the chart's defaults. */
 export const HELM_TAB = "helm.tab";
 export const HELM_REVISION = "helm.revision";
 /** The highest revision Helm keeps below the one shown, empty where it keeps none. */

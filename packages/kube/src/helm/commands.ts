@@ -55,17 +55,13 @@ export function releaseSubject({ space, namespace, name }: Release) {
 
 /**
  * The verb of the command that prints each view of a release. The chart's
- * defaults, the hooks' table and the objects' table have none: `get values`
- * prints the person's values only, `get hooks` the hooks' manifests, and no
- * command lists a manifest's objects.
+ * defaults have none: `get values` prints the person's values only.
  */
 const VERBS: Readonly<Record<string, string>> = {
   overview: "status",
   values: "get values",
   manifest: "get manifest",
-  notes: "get notes",
   history: "history",
-  page: "get all",
 };
 
 export function printsCommand(view: string): boolean {
@@ -75,8 +71,8 @@ export function printsCommand(view: string): boolean {
 /**
  * The command that prints the view a person is looking at, with the context
  * and namespace of the release (ARCHITECTURE 4.3): `helm status` for the
- * overview, `get values`, `get manifest`, `get notes`, `history`, and `get
- * all` for the page that holds them all; none for a view no command prints.
+ * overview, `get values`, `get manifest` and `history`; none for a view no
+ * command prints.
  */
 export function helmCommand(
   release: Release,

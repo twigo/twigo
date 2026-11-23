@@ -280,21 +280,15 @@ test("Copy helm Command prints what helm prints for the view shown, with the con
     "helm get values api --namespace payments --kube-context prod-eu --revision 4",
   );
   expect(at("manifest", 4)).toContain("helm get manifest api");
-  expect(at("page", 4)).toContain("helm get all api");
   expect(at("history", 4)).toBe(
     "helm history api --namespace payments --kube-context prod-eu",
   );
-  expect(at("notes", 4)).toBe(
-    "helm get notes api --namespace payments --kube-context prod-eu --revision 4",
-  );
 });
 
-test("no command is copied for a view that none prints: the chart's defaults, the hooks and the objects", () => {
+test("no command is copied for a view that none prints: the chart's defaults", () => {
   const release = { space: "prod-eu", namespace: "payments", name: "api" };
-  for (const view of ["defaults", "hooks", "objects"]) {
-    expect(helmCommand(release, "prod-eu", view, 4)).toBeUndefined();
-    expect(printsCommand(view)).toBe(false);
-  }
+  expect(helmCommand(release, "prod-eu", "defaults", 4)).toBeUndefined();
+  expect(printsCommand("defaults")).toBe(false);
   expect(printsCommand("values")).toBe(true);
 });
 

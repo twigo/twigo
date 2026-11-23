@@ -495,34 +495,6 @@ test("a release editor that Twigo stopped says so with Report… and Reopen, whi
   expect(page("alpha").textContent).toContain("Chart version");
 });
 
-const titles = (name: string) =>
-  [...page(name).querySelectorAll("button[aria-expanded]")].map(
-    (button) => button.textContent,
-  );
-
-test("under tabs:split the Overview leaves out what Hooks and Objects hold, which each draws apart", async () => {
-  window.history.replaceState({}, "", "/?variant=tabs:split");
-  await open(release("alpha"));
-  const named = (...words: string[]) =>
-    titles("alpha").filter((title) =>
-      words.some((word) => title.startsWith(word)),
-    );
-  expect(named("Chart", "Metadata", "Hooks", "Objects")).toEqual([
-    "Chartdemo",
-    "Metadata",
-  ]);
-  fireEvent.click(screen.getByRole("tab", { name: "Hooks" }));
-  await settle(4);
-  expect(named("Chart", "Metadata", "Hooks", "Objects")).toEqual([
-    "Hooks2 hooks",
-  ]);
-  fireEvent.click(screen.getByRole("tab", { name: "Objects" }));
-  await settle(4);
-  expect(named("Chart", "Metadata", "Hooks", "Objects")).toEqual([
-    "Objects4 objects",
-  ]);
-});
-
 async function filter(name: string, text: string) {
   fireEvent.keyDown(screen.getByRole("tab", { name: "Overview" }), {
     code: "Slash",
