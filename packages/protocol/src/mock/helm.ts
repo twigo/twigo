@@ -32,11 +32,11 @@ import type { MockKind, MockRow } from "./kinds";
 interface Revision {
   readonly revision: number;
   readonly problem: Wire | null;
-  readonly overview?: Overview;
-  readonly notes?: Scrubbed;
-  readonly description?: Scrubbed;
-  readonly values?: ReleaseValues;
-  readonly manifest?: ReleaseManifest;
+  readonly overview: Overview | null;
+  readonly notes: Scrubbed | null;
+  readonly description: Scrubbed | null;
+  readonly values: ReleaseValues | null;
+  readonly manifest: ReleaseManifest | null;
   readonly line: RevisionLine;
 }
 
@@ -173,8 +173,18 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 
+const NO_PARTS = {
+  problem: null,
+  overview: null,
+  notes: null,
+  description: null,
+  values: null,
+  manifest: null,
+  history: null,
+} as const;
+
 const gone = (revision: number) =>
-  wire("helm.revision-gone", `revision ${String(revision)} is no longer kept`);
+  `revision ${String(revision)} is no longer kept`;
 
 /**
  * Two revisions masked and paired, as `helm_compare` answers: the recorded
@@ -193,7 +203,7 @@ export function compare({
   for (const [at, revision] of revisions.entries()) {
     const number = at === 0 ? from : to;
     if (!revision) {
-      throw new IpcError("helm.revision-gone", gone(number).message);
+      throw new IpcError("helm.revision-gone", gone(number));
     }
     if (revision.problem) {
       throw new IpcError(revision.problem.code, revision.problem.message);
@@ -204,7 +214,7 @@ export function compare({
       (each.from === from && each.to === to) ||
       (each.from === to && each.to === from),
   );
-  if (!pair) throw new IpcError("helm.revision-gone", gone(to).message);
+  if (!pair) throw new IpcError("helm.revision-gone", gone(to));
   const sides = pair[part];
   return pair.from === from ? sides : { from: sides.to, to: sides.from };
 }
@@ -355,9 +365,7 @@ export class MockRelease {
   }
 
   revision(revision: number | null): Revision | undefined {
-    return this.#release?.revisions.find(
-      (each) => each.revision === (revision ?? this.shown),
-    );
+    return this.#release?.revisions.find((each) => each.revision === revision);
   }
 
   setView({
@@ -425,13 +433,7 @@ export class MockRelease {
       revision: this.shown,
       latest: this.#release?.latest.revision ?? null,
       previous: this.#previous(),
-      problem: null,
-      overview: null,
-      notes: null,
-      description: null,
-      values: null,
-      manifest: null,
-      history: null,
+      ...NO_PARTS,
     });
   }
 
@@ -446,13 +448,7 @@ export class MockRelease {
         revision: null,
         latest: null,
         previous: null,
-        problem: null,
-        overview: null,
-        notes: null,
-        description: null,
-        values: null,
-        manifest: null,
-        history: null,
+        ...NO_PARTS,
       });
       return;
     }
@@ -460,9 +456,8 @@ export class MockRelease {
     const revision = this.revision(shown);
     const problem =
       release && shown !== null && !revision
-        ? wire("helm.revision-gone", gone(shown).message)
+        ? wire("helm.revision-gone", gone(shown))
         : (revision?.problem ?? null);
-    const readable = revision?.problem === null ? revision : undefined;
     this.#onMessage({
       seq: ++this.#seq,
       status: this.#status,
@@ -471,11 +466,11 @@ export class MockRelease {
       latest: release?.latest.revision ?? null,
       previous: this.#previous(),
       problem,
-      overview: changed.overview ? (readable?.overview ?? null) : null,
-      notes: changed.overview ? (readable?.notes ?? null) : null,
-      description: changed.overview ? (readable?.description ?? null) : null,
-      values: changed.values ? (readable?.values ?? null) : null,
-      manifest: changed.manifest ? (readable?.manifest ?? null) : null,
+      overview: changed.overview ? (revision?.overview ?? null) : null,
+      notes: changed.overview ? (revision?.notes ?? null) : null,
+      description: changed.overview ? (revision?.description ?? null) : null,
+      values: changed.values ? (revision?.values ?? null) : null,
+      manifest: changed.manifest ? (revision?.manifest ?? null) : null,
       history:
         release && changed.history
           ? [...release.revisions]
