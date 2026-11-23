@@ -10,6 +10,10 @@ import { createMockBackend } from "@twigo/protocol/mock";
 import { mountKube, settle, withScreenSize } from "../../test/workbench";
 import { helmUri } from "../uri";
 
+vi.mock("./MaskedText", () => ({
+  default: () => <div data-testid="masked-text" />,
+}));
+
 withScreenSize(1280);
 
 beforeEach(() => {

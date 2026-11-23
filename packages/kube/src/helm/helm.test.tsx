@@ -19,6 +19,10 @@ import { helmCommand, printsCommand } from "./commands";
 import { isQuiet, statusTone } from "./status";
 import { ReleaseStates } from "./states";
 
+vi.mock("../edit/DiffView", () => ({
+  default: () => <div data-testid="diff" />,
+}));
+
 withScreenSize(1280);
 
 beforeEach(() => {
