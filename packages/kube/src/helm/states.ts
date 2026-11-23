@@ -26,7 +26,7 @@ export interface TextState {
 }
 
 /** What the commands Reveal and Hide do on a page. */
-export interface PageActions {
+interface PageActions {
   reveal(): void;
   hide(): void;
   revealAll(): void;

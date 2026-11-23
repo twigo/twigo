@@ -187,7 +187,7 @@ function foundTone(overview: Document | undefined) {
   return tone ? TONE[tone] : undefined;
 }
 
-export interface ReleasePageProps {
+interface ReleasePageProps {
   /** What the page's state is kept by: the editor's URI, or the list's for its inspector. */
   readonly uri: string;
   readonly release: ReleaseInput;
