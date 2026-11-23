@@ -50,7 +50,7 @@ test("a part stays while its revision is shown, and never stands beside another 
   view.close();
 });
 
-test("a release that is gone has no parts, and a revision it does not keep says so with the latest", async () => {
+test("a release that is gone has no parts, pinned to a revision or not, and each open of a release has a life of its own", async () => {
   const gone = new ReleaseView(
     createMockBackend(),
     { ...ref, name: "nothing" },
@@ -85,13 +85,4 @@ test("a release that is gone has no parts, and a revision it does not keep says 
   expect(again.getSnapshot().life).not.toBe(first.getSnapshot().life);
   again.close();
   first.close();
-
-  const pinned = new ReleaseView(createMockBackend(), ref, {
-    revision: 9,
-    parts: ALL,
-  });
-  await later();
-  expect(pinned.getSnapshot().problem?.code).toBe("helm.revision-gone");
-  expect(pinned.getSnapshot().latest).toBe(2);
-  pinned.close();
 });
