@@ -16,7 +16,8 @@ import {
   useListRegistration,
 } from "@twigo/workbench";
 import { Age } from "../object/values";
-import { IN_FLIGHT_RELEASE, problemWords, isQuiet, statusTone } from "./status";
+import { ProblemWord } from "./ProblemWord";
+import { IN_FLIGHT_RELEASE, isQuiet, statusTone } from "./status";
 import type { ReleaseStates } from "./states";
 
 const COLUMNS: readonly GridColumn[] = [
@@ -144,18 +145,7 @@ function StatusWord({
   line: RevisionLine;
   latest: number | undefined;
 }) {
-  if (line.problem) {
-    const { word, why } = problemWords(line.problem.code);
-    return (
-      <span
-        title={why}
-        className="inline-flex items-center gap-1.5 align-top font-semibold text-error"
-      >
-        <StatusDot tone="error" />
-        {word}
-      </span>
-    );
-  }
+  if (line.problem) return <ProblemWord code={line.problem.code} />;
   const tone = statusTone(line.status);
   if (tone) {
     return (

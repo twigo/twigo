@@ -4,7 +4,8 @@ import { cn, StatusDot, type Tone } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
 import { ageRole, printedAge, printedAt, restartedRecently } from "../age";
 import { IN_FLIGHT, type ColumnRule } from "../columns";
-import { problemWords, requestFailedWhy, UNREADABLE } from "../helm/status";
+import { ProblemWord } from "../helm/ProblemWord";
+import { requestFailedWhy, UNREADABLE } from "../helm/status";
 import { ObjectName } from "../ObjectName";
 import { Quantity } from "../Quantity";
 import { isTabular } from "../tabular";
@@ -93,18 +94,8 @@ export function CellView({
     case "name":
       return <ObjectName name={text} generated={row.generated} />;
     case "status": {
-      if (rule.health && problem !== undefined && text === UNREADABLE) {
-        const { word, why } = problemWords(problem);
-        return (
-          <span
-            title={why}
-            className="inline-flex items-center gap-1.5 align-top font-semibold text-error"
-          >
-            <StatusDot tone="error" />
-            {word}
-          </span>
-        );
-      }
+      if (rule.health && problem !== undefined && text === UNREADABLE)
+        return <ProblemWord code={problem} />;
       const tone = rule.tone?.(text);
       const merged = column.merged && (
         <>
