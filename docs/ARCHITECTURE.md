@@ -1022,7 +1022,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
     The revisions marked in History hold while the release moves to a new revision and go with the editor, or when the release goes and comes back (`ReleaseSnapshot.life`).
     A marked revision that Helm prunes is unmarked, since History draws and offers the marks of the revisions it lists only.
     A key of a Secret that is not UTF-8 is written as its base64 with a `# base64` comment.
-  - History lists the revisions newest first with `helm history`'s columns; the revision the cluster runs is marked where it is not the latest, and a revision that cannot be read says why in place of its status.
+  - History lists the revisions newest first with `helm history`'s columns; the revision the cluster runs is marked where it is not the latest, and a revision that cannot be read says why in place of its status, while one whose request failed keeps the label's status with the warning mark that the list's row has (4.4).
     Open Revision opens `helm://…?revision=N` in a tab of its own; Compare with Previous and Compare with Current open the diff editor over the two revisions' values, whose bar switches to the defaults and the manifests; two marked rows offer Compare Values, Compare Defaults and Compare Manifests.
     Compare with Previous, in History and in the page's header, compares with the highest revision Helm keeps below, the batch's `previous` in the header, and is not offered where Helm keeps none, as on the oldest revision left after `--history-max`.
     Both sides show their masks, and a value that changed reads `<12 bytes, changed>` on both, which says it changed and nothing more.
