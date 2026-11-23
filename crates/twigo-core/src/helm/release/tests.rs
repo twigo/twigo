@@ -318,6 +318,32 @@ async fn previous_is_the_highest_revision_helm_keeps_below_the_one_shown() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_page_asked_before_another_revision_is_pinned_never_shows() {
+    let fake = Fake::default();
+    revision(&fake, 1, "superseded");
+    revision(&fake, 2, "deployed");
+    fake.state().gets_take = Duration::from_secs(1);
+    let mut rig = Rig::open(fake, None, OVERVIEW).await;
+    while rig.fake.state().gets_overlap == 0 {
+        rig.drain_for(Duration::from_millis(10)).await;
+    }
+
+    rig.opened.set_view(Some(1), OVERVIEW);
+    rig.until("revision 1", |shown| {
+        notes(shown) == Some("Revision 1 of app")
+    })
+    .await;
+    rig.drain_for(Duration::from_secs(2)).await;
+    let said: Vec<_> = rig
+        .watched
+        .sent
+        .iter()
+        .filter_map(|batch| batch.revision)
+        .collect();
+    assert!(!said.contains(&2), "{said:?}");
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_pinned_revision_that_helm_prunes_says_so() {
     let fake = Fake::default();
     revision(&fake, 1, "superseded");
