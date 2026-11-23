@@ -163,7 +163,8 @@ impl Entry<'_> {
 }
 
 impl<'a> Entry<'a> {
-    /// The value's text, as [`text`] reads it.
+    /// The value's text: a string's, none for null, and the JSON of any
+    /// other value.
     pub fn text(&self) -> Cow<'a, str> {
         text(self.value)
     }
