@@ -155,3 +155,9 @@ Findings that belong to no step yet.
 - Helm releases (`packages/workbench/src/variants.ts`, ARCHITECTURE 4.3, 4.4):
   - The variants `helm:explorer`, `tabs:four` and `mask:token` are the default and the recommended; `?variant=` reads the others through `variants()` at the sites marked `@todo`, and the owner's choice removes the rest and the file.
   - `tabs:page` has no page filter, since its Overview is one section of a longer page.
+  - Not built in this step, which reads releases only:
+    - The live state of the objects a release created: the Objects view lists what the manifest holds, and nothing reads those objects in the cluster.
+    - A link from an object's page to the release that created it.
+    - A `helm ` prefix in quick access that takes a release's name.
+    - Run in Terminal for a release's helm command, which Copy helm Command only copies.
+    - Hiding Helm's storage Secrets (`sh.helm.release.v1.*`) in the Secrets list, where they show as any Secret does.
