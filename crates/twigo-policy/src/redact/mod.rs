@@ -6,7 +6,9 @@
 use std::borrow::Cow;
 
 use base64::Engine;
-use base64::engine::general_purpose::STANDARD;
+use base64::alphabet;
+use base64::engine::GeneralPurpose;
+use base64::engine::general_purpose::PAD;
 use serde_json::Value;
 use twigo_ipc::{ErrorCode, IpcError};
 
@@ -73,6 +75,12 @@ fn mask_secret_with(secret: &mut Value, changed: impl Fn(&Entry<'_>) -> bool) {
     for (field, key, mask) in masks {
         secret[field.name()][key] = Value::String(mask);
     }
+    let whole: Vec<(Field, u64)> = loose(secret)
+        .map(|(field, value)| (field, text(value).len() as u64))
+        .collect();
+    for (field, bytes) in whole {
+        secret[field.name()] = Value::String(mask(bytes));
+    }
     if let Some(annotations) = secret
         .get_mut("metadata")
         .and_then(|metadata| metadata.get_mut("annotations"))
@@ -114,36 +122,69 @@ pub struct Entry<'a> {
 
 impl Entry<'_> {
     /// Its size in bytes. A value of `data` counts the bytes its base64
-    /// stands for, from its length and padding, never decoded: one that is
-    /// no base64, which the API server never serves and only a release's
-    /// manifest can hold, shows the size its length would decode to.
+    /// stands for, from its length, never decoded; one that is no base64,
+    /// which the API server never serves and only a release's manifest can
+    /// hold, counts its text, as its Reveal shows it.
     pub fn bytes(&self) -> u64 {
         let text = self.text();
         match self.field {
-            Field::Data => {
-                let padding = text
-                    .bytes()
-                    .rev()
-                    .take(2)
-                    .filter(|&byte| byte == b'=')
-                    .count();
-                ((text.len() - padding) * 3 / 4) as u64
-            }
+            Field::Data => decoded_len(&text).unwrap_or(text.len()) as u64,
             Field::StringData => text.len() as u64,
         }
     }
 }
 
 impl<'a> Entry<'a> {
-    /// The value's text: a string's, none for null, and the JSON of any
-    /// other value, which only a release's manifest can hold.
+    /// The value's text, as [`text`] reads it.
     pub fn text(&self) -> Cow<'a, str> {
-        match self.value {
-            Value::String(text) => Cow::Borrowed(text),
-            Value::Null => Cow::Borrowed(""),
-            other => Cow::Owned(other.to_string()),
+        text(self.value)
+    }
+}
+
+/// A value's text: a string's, none for null, and the JSON of any other
+/// value, which only a release's manifest can hold.
+fn text(value: &Value) -> Cow<'_, str> {
+    match value {
+        Value::String(text) => Cow::Borrowed(text),
+        Value::Null => Cow::Borrowed(""),
+        other => Cow::Owned(other.to_string()),
+    }
+}
+
+/// Go's `base64.StdEncoding`, which the API server decodes a Secret's
+/// `data` with: padding wanted, the bits after the last byte unchecked.
+const GO_BASE64: GeneralPurpose = GeneralPurpose::new(
+    &alphabet::STANDARD,
+    PAD.with_decode_allow_trailing_bits(true),
+);
+
+/// The bytes a value of `data` stands for, as the API server decodes it;
+/// None for text it refuses. Go's decoder skips `\r` and `\n` wherever they
+/// stand, as in a value written over several lines
+/// ([base64.go](https://github.com/golang/go/blob/go1.27.1/src/encoding/base64/base64.go#L307-L401)).
+fn decoded(text: &str) -> Option<Vec<u8>> {
+    let text = if text.contains(['\r', '\n']) {
+        Cow::Owned(text.replace(['\r', '\n'], ""))
+    } else {
+        Cow::Borrowed(text)
+    };
+    GO_BASE64.decode(text.as_bytes()).ok()
+}
+
+/// How many bytes [`decoded`] gives of `text`, from its symbols and
+/// padding, with nothing allocated; None where it gives none.
+fn decoded_len(text: &str) -> Option<usize> {
+    let (mut symbols, mut padding) = (0, 0);
+    for byte in text.bytes() {
+        match byte {
+            b'\r' | b'\n' => {}
+            b'=' => padding += 1,
+            _ if padding > 0 => return None,
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'+' | b'/' => symbols += 1,
+            _ => return None,
         }
     }
+    ((symbols + padding) % 4 == 0 && padding <= 2).then_some(symbols * 3 / 4)
 }
 
 /// A Secret's values: those of `data`, then those of `stringData`, each in
@@ -158,6 +199,27 @@ pub fn entries(secret: &Value) -> impl Iterator<Item = Entry<'_>> {
                 .flatten()
                 .map(move |(key, value)| Entry { field, key, value })
         })
+}
+
+/// A `data` or `stringData` that is neither a map nor null, which only a
+/// release's manifest can hold, and which a mask hides whole.
+fn loose(secret: &Value) -> impl Iterator<Item = (Field, &Value)> {
+    [Field::Data, Field::StringData]
+        .into_iter()
+        .filter_map(move |field| {
+            secret
+                .get(field.name())
+                .filter(|value| !value.is_object() && !value.is_null())
+                .map(|value| (field, value))
+        })
+}
+
+/// What a Secret holds: each value of `data` and `stringData`, and either
+/// one whole where it is not a map.
+fn contents(secret: &Value) -> impl Iterator<Item = (Field, &Value)> {
+    entries(secret)
+        .map(|entry| (entry.field, entry.value))
+        .chain(loose(secret))
 }
 
 /// Whether `text` reads as what [`for_view`] puts in place of a Secret's
@@ -197,13 +259,11 @@ fn value_of(secret: &Value, key: &str) -> Result<(String, bool), IpcError> {
     if entry.field == Field::StringData {
         return Ok((text.into_owned(), false));
     }
-    Ok(
-        match STANDARD.decode(text.as_bytes()).map(String::from_utf8) {
-            Ok(Ok(decoded)) => (decoded, false),
-            Ok(Err(_)) => (text.into_owned(), true),
-            Err(_) => (text.into_owned(), false),
-        },
-    )
+    Ok(match decoded(&text).map(String::from_utf8) {
+        Some(Ok(decoded)) => (decoded, false),
+        Some(Err(_)) => (text.into_owned(), true),
+        None => (text.into_owned(), false),
+    })
 }
 
 /// `text` with each of `names` that stands in it as a whole token replaced by
@@ -307,7 +367,7 @@ mod tests {
         let shown = for_view(json!({
             "apiVersion": "v1",
             "kind": "Secret",
-            "data": { "one": "aA==", "two": "aGk=", "three": "aGkh", "empty": "", "bad": "not base64!" },
+            "data": { "one": "aA==", "two": "aGk=", "three": "aGkh", "empty": "", "bad": "not base64!", "lines": "aHVu\ndGVyMg==\n" },
         }));
         assert_eq!(
             shown["data"],
@@ -316,9 +376,34 @@ mod tests {
                 "two": "<2 bytes>",
                 "three": "<3 bytes>",
                 "empty": "<0 bytes>",
-                "bad": "<8 bytes>",
+                "bad": "<11 bytes>",
+                "lines": "<7 bytes>",
             })
         );
+    }
+
+    #[test]
+    fn a_value_of_data_reads_as_the_api_server_decodes_it() {
+        let secret = json!({
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "data": { "lines": "aHVu\r\ndGVyMg==\n", "loose": "aGl=", "short": "aGk" },
+        });
+        assert_eq!(
+            secret_value(&secret, "lines").unwrap(),
+            ("hunter2".to_owned(), false)
+        );
+        assert_eq!(
+            secret_value(&secret, "loose").unwrap(),
+            ("hi".to_owned(), false),
+            "Go leaves the bits after the last byte unchecked"
+        );
+        assert_eq!(
+            secret_value(&secret, "short").unwrap(),
+            ("aGk".to_owned(), false),
+            "Go wants the padding"
+        );
+        assert_eq!(for_view(secret)["data"]["short"], "<3 bytes>");
     }
 
     #[test]

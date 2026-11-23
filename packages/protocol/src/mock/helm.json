@@ -850,7 +850,7 @@
           "from": 1,
           "manifest": {
             "from": "---\n# Source: failing/templates/secret.yaml\napiVersion: v1\ndata:\n  password: <19 bytes, changed>\nkind: Secret\nmetadata:\n  name: epsilon-credentials\ntype: Opaque\n\n\n",
-            "to": "---\n# Source: failing/templates/secret.yaml\napiVersion: v1\ndata:\n  extra: <8 bytes>\n  password: <19 bytes, changed>\nkind: Secret\nmetadata:\n  name: epsilon-credentials\ntype: Opaque\n\n\n"
+            "to": "---\n# Source: failing/templates/secret.yaml\napiVersion: v1\ndata:\n  extra: <11 bytes>\n  password: <19 bytes, changed>\nkind: Secret\nmetadata:\n  name: epsilon-credentials\ntype: Opaque\n\n\n"
           },
           "to": 2,
           "values": {
@@ -1141,7 +1141,7 @@
                 "entries": [
                   {
                     "binary": false,
-                    "bytes": 8,
+                    "bytes": 11,
                     "key": "extra"
                   },
                   {
@@ -1156,7 +1156,7 @@
                 "namespace": null
               }
             ],
-            "text": "---\n# Source: failing/templates/secret.yaml\napiVersion: v1\ndata:\n  extra: <8 bytes>\n  password: <19 bytes>\nkind: Secret\nmetadata:\n  name: epsilon-credentials\ntype: Opaque\n\n\n",
+            "text": "---\n# Source: failing/templates/secret.yaml\napiVersion: v1\ndata:\n  extra: <11 bytes>\n  password: <19 bytes>\nkind: Secret\nmetadata:\n  name: epsilon-credentials\ntype: Opaque\n\n\n",
             "unread": []
           },
           "notes": {

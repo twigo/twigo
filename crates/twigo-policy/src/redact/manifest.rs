@@ -9,12 +9,10 @@
 
 use std::collections::BTreeMap;
 
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD;
 use serde_json::Value;
 use twigo_ipc::{DataEntry, ErrorCode, IpcError, ManifestSecret, ReleaseManifest, UnreadDocument};
 
-use super::{Entry, Field, Held, entries, mask_secret_with, secret_values, value_of};
+use super::{Entry, Field, Held, decoded, entries, mask_secret_with, secret_values, value_of};
 
 /// What [`masked`] gives.
 pub struct Masked {
@@ -284,9 +282,7 @@ fn bytes(entry: &Entry<'_>) -> Vec<u8> {
     let text = entry.text();
     match entry.field {
         Field::StringData => text.as_bytes().to_vec(),
-        Field::Data => STANDARD
-            .decode(text.as_bytes())
-            .unwrap_or_else(|_| text.as_bytes().to_vec()),
+        Field::Data => decoded(&text).unwrap_or_else(|| text.as_bytes().to_vec()),
     }
 }
 
@@ -416,9 +412,7 @@ fn data_entries(secret: &Value) -> Vec<DataEntry> {
     let mut keyed = BTreeMap::new();
     for entry in entries(secret) {
         let binary = entry.field == Field::Data
-            && STANDARD
-                .decode(entry.text().as_bytes())
-                .is_ok_and(|bytes| std::str::from_utf8(&bytes).is_err());
+            && decoded(&entry.text()).is_some_and(|bytes| std::str::from_utf8(&bytes).is_err());
         keyed.insert(
             entry.key,
             DataEntry {
@@ -642,6 +636,56 @@ stringData: {broken: pw-unread
                 assert!(!text.contains(&format!(": {value}")), "{value} in {text}");
             }
         }
+    }
+
+    #[test]
+    fn a_data_or_string_data_that_is_no_map_is_masked_whole() {
+        let Masked {
+            manifest, values, ..
+        } = masked(&held(
+            "---\n# Source: a.yaml\nkind: Secret\nmetadata: {name: a}\ndata: aHVudGVyMg==\nstringData:\n- s3cret\n",
+        ));
+        assert_eq!(
+            manifest.text,
+            "---\n# Source: a.yaml\ndata: <12 bytes>\nkind: Secret\nmetadata:\n  name: a\nstringData: <10 bytes>\n\n"
+        );
+        assert!(
+            values.0.contains(&"hunter2".to_owned()) && values.0.contains(&"s3cret".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_value_written_over_several_lines_is_the_value_it_decodes_to() {
+        let from = held(
+            "---\n# Source: a.yaml\nkind: Secret\nmetadata: {name: db}\ndata:\n  password: |\n    aHVu\n    dGVyMg==\n  key.der: |\n    MIIBCgKC\n    AQEA/w==\n",
+        );
+        let to = held(
+            "---\n# Source: a.yaml\nkind: Secret\nmetadata: {name: db}\ndata: {password: aHVudGVyMg==, key.der: MIIBCgKCAQEA/w==}\n",
+        );
+        let (before, after) = compared(&from, &to);
+        assert!(
+            !before.contains("changed") && !after.contains("changed"),
+            "{before}"
+        );
+        assert_eq!(
+            masked(&from).manifest.secrets[0].entries,
+            [
+                DataEntry {
+                    key: "key.der".to_owned(),
+                    bytes: 10,
+                    binary: true
+                },
+                DataEntry {
+                    key: "password".to_owned(),
+                    bytes: 7,
+                    binary: false
+                },
+            ]
+        );
+        assert_eq!(
+            secret(&from, 0, &[], "password").unwrap(),
+            ("hunter2".to_owned(), false)
+        );
     }
 
     #[test]

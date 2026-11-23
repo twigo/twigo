@@ -8,7 +8,7 @@ use base64::engine::general_purpose::STANDARD;
 use serde_json::Value;
 use twigo_ipc::{IpcError, Scrubbed};
 
-use super::{Field, Held, entries, whole_tokens_replaced};
+use super::{Field, Held, contents, decoded, whole_tokens_replaced};
 
 /// What takes the place of a value in a text.
 pub const HIDDEN: &str = "<hidden>";
@@ -99,25 +99,28 @@ pub fn scrubbed(mut error: IpcError, secrets: &[String]) -> IpcError {
     error
 }
 
-/// Every value of a Secret's `data` and `stringData` in `objects`, encoded
-/// and decoded, the longest first, so that what a refusal echoes is covered
-/// before any answer shows how the server stored it; empty for any other
-/// kind.
+/// Every string and number a Secret of `objects` holds in `data` and
+/// `stringData`, encoded and decoded, the longest first, so that what a
+/// refusal echoes is covered before any answer shows how the server stored
+/// it. Booleans and nulls carry no secret.
 pub fn secret_values(objects: &[&Value]) -> Vec<String> {
     let mut values = BTreeSet::new();
-    for entry in objects.iter().flat_map(|object| entries(object)) {
-        let Some(text) = entry.value.as_str().filter(|text| !text.is_empty()) else {
-            continue;
-        };
-        values.insert(text.to_owned());
-        match entry.field {
-            Field::StringData => {
-                values.insert(STANDARD.encode(text));
-            }
-            Field::Data => {
-                if let Ok(bytes) = STANDARD.decode(text) {
-                    values.insert(String::from_utf8_lossy(&bytes).into_owned());
+    for object in objects {
+        for (field, value) in contents(object) {
+            let mut texts = Vec::new();
+            scalars(value, &mut texts);
+            for text in texts {
+                match field {
+                    Field::StringData => {
+                        values.insert(STANDARD.encode(&text));
+                    }
+                    Field::Data => {
+                        if let Some(bytes) = decoded(&text) {
+                            values.insert(String::from_utf8_lossy(&bytes).into_owned());
+                        }
+                    }
                 }
+                values.insert(text);
             }
         }
     }
@@ -127,6 +130,25 @@ pub fn secret_values(objects: &[&Value]) -> Vec<String> {
         .collect();
     values.sort_by_key(|value| std::cmp::Reverse(value.len()));
     values
+}
+
+/// The strings and numbers in `value`, at any depth, as text.
+fn scalars(value: &Value, found: &mut Vec<String>) {
+    match value {
+        Value::String(text) => found.push(text.clone()),
+        Value::Number(number) => found.push(number.to_string()),
+        Value::Array(items) => {
+            for item in items {
+                scalars(item, found);
+            }
+        }
+        Value::Object(map) => {
+            for item in map.values() {
+                scalars(item, found);
+            }
+        }
+        Value::Bool(_) | Value::Null => {}
+    }
 }
 
 #[cfg(test)]
@@ -183,6 +205,25 @@ mod tests {
         assert_eq!(
             scrub("token is dHlwZWQtdmFsdWU=", &secrets),
             format!("token is {HIDDEN}")
+        );
+    }
+
+    #[test]
+    fn every_string_and_number_a_secret_holds_is_scrubbed_however_it_is_written() {
+        let secret = json!({
+            "kind": "Secret",
+            "data": { "lines": "aHVu\ndGVyMg==\n" },
+            "stringData": { "pin": 123_456, "on": true, "hosts": ["db-one"] },
+        });
+        let secrets = secret_values(&[&secret]);
+        assert_eq!(
+            scrub("Log in with hunter2 and 123456 at db-one, true.", &secrets),
+            format!("Log in with {HIDDEN} and {HIDDEN} at {HIDDEN}, true.")
+        );
+        let loose = json!({ "kind": "Secret", "data": "aHVudGVyMg==", "stringData": ["s3cret"] });
+        assert_eq!(
+            scrub("hunter2 or s3cret", &secret_values(&[&loose])),
+            format!("{HIDDEN} or {HIDDEN}")
         );
     }
 
