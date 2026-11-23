@@ -25,7 +25,7 @@ import { useListView } from "../list/useListView";
 import { namespaceWords, whereWords } from "../list/scope";
 import { helmUri } from "../uri";
 import { ViewStatus } from "../ViewStatus";
-import { isQuiet } from "./status";
+import { IN_FLIGHT_RELEASE, isQuiet } from "./status";
 
 const COLUMNS: readonly GridColumn[] = [
   { id: "release", title: "Release", width: 200, grow: true },
@@ -156,7 +156,7 @@ export function HelmView({ space }: { space: string }) {
           <span className="flex min-w-0 items-center gap-2">
             <StatusDot
               tone={tone ?? (isQuiet(status) ? "idle" : "ok")}
-              pulse={status.startsWith("pending-") || status === "uninstalling"}
+              pulse={IN_FLIGHT_RELEASE.test(status)}
             />
             <span className="shrink-0 text-content">{text(row, "Name")}</span>
             {chart !== "" && (
