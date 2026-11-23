@@ -78,9 +78,7 @@ export function HistoryList({
   }
   const current = selected ?? lines[0]?.revision;
   const byId = new Map(lines.map((line) => [String(line.revision), line]));
-  const marked = [...states.marks(uri, life)].filter((revision) =>
-    byId.has(String(revision)),
-  );
+  const marked = states.listed(uri, life, lines);
   const item = (index: number): GridItem<RevisionLine, never> | undefined => {
     const line = lines[index];
     if (!line) return undefined;

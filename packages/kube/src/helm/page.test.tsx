@@ -741,6 +741,41 @@ test("a marked revision that Helm prunes is no longer marked, so two marked rows
   expect(await menuOf(3)).toContain("Compare Values");
 });
 
+test("Escape clears the Overview's filter and leaves the marks History holds, which Escape clears only while History draws one", async () => {
+  const { backend, send } = core();
+  const workbench = await openHistory(backend);
+  await mark(1);
+  const grid = () => screen.getByRole("grid", { name: "Revisions" });
+  const clearable = () =>
+    workbench.commands.enabled(
+      "helm.revisions.clearMarks",
+      workbench.keys.lookup(grid()),
+    );
+  expect(clearable()).toBe(true);
+
+  fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
+  await settle(4);
+  const overview = screen.getByRole("tab", { name: "Overview" });
+  await filter("alpha", "demo");
+  const field = screen.getByRole("textbox", { name: "Filter this page" });
+  fireEvent.keyDown(field, { key: "Enter" });
+  await settle(2);
+  fireEvent.keyDown(overview, { code: "Escape", key: "Escape" });
+  await settle(2);
+  expect(field.getAttribute("value")).toBe("");
+
+  fireEvent.click(screen.getByRole("tab", { name: "History" }));
+  await settle(6);
+  expect(markedRevisions()).toEqual([1]);
+
+  act(() => {
+    send({ seq: 85, history: [line(2, "deployed")] });
+  });
+  await settle(4);
+  expect(markedRevisions()).toEqual([]);
+  expect(clearable()).toBe(false);
+});
+
 test("History's Compare with Previous compares with the revision before that Helm keeps, and is not offered on the oldest one it keeps", async () => {
   const { backend, send } = core();
   const workbench = await openHistory(backend);

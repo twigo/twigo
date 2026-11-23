@@ -258,7 +258,9 @@ export function ReleasePage({
   );
   const { revision, previous, epoch } = snapshot;
   const shown = states.shown(uri, epoch);
-  const marks = states.marks(uri, snapshot.life);
+  const marked =
+    (view === "history" || view === "page") &&
+    states.listed(uri, snapshot.life, snapshot.history).length > 0;
   useEffect(
     () => () => {
       states.leave(uri, epoch);
@@ -350,7 +352,7 @@ export function ReleasePage({
     scope.set("helm.canHide", under?.revealed === true);
     scope.set("helm.canRevealAll", text?.whole !== undefined);
     scope.set("helm.canHideAll", (text?.revealed.length ?? 0) > 0);
-    scope.set("helm.marked", marks.size > 0);
+    scope.set("helm.marked", marked);
     scope.set("pageFocus", filterable);
     scope.set(OBJECT_URI, filterable ? uri : undefined);
     scope.set(OBJECT_FILTERED, filtered);
@@ -367,7 +369,7 @@ export function ReleasePage({
     uri,
     under,
     text,
-    marks,
+    marked,
     filterable,
     filtered,
   ]);

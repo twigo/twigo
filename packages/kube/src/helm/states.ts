@@ -1,5 +1,5 @@
 import { Changes } from "@twigo/workbench";
-import type { HelmPart } from "@twigo/protocol";
+import type { HelmPart, RevisionLine } from "@twigo/protocol";
 import { partKey, type Glyph, type Shown } from "./reveals";
 
 /** The views of a release: the recommended four, and the ones the split variant adds. */
@@ -107,6 +107,16 @@ export class ReleaseStates {
   marks(uri: string, life: number): ReadonlySet<number> {
     const held = this.#marks.get(uri);
     return held?.epoch === life ? held.value : UNMARKED;
+  }
+
+  /** The marks of the revisions `lines` lists, the only ones History draws, offers and counts. */
+  listed(
+    uri: string,
+    life: number,
+    lines: readonly RevisionLine[] | undefined,
+  ): readonly number[] {
+    const kept = new Set(lines?.map(({ revision }) => revision));
+    return [...this.marks(uri, life)].filter((revision) => kept.has(revision));
   }
 
   mark(
