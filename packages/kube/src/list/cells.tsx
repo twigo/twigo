@@ -1,5 +1,5 @@
 import type { Cell, Row } from "@twigo/protocol";
-import { cn, StatusDot, type Tone } from "@twigo/ui";
+import { cn, StatusLabel, type Tone } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
 import { ageRole, printedAge, printedAt, restartedRecently } from "../age";
 import { IN_FLIGHT, type ColumnRule } from "../columns";
@@ -116,14 +116,11 @@ export function CellView({
           {rule.recedes ? <span className="text-support">{text}</span> : text}
         </>
       ) : (
-        <span
-          className={cn(
-            "inline-flex items-center gap-1.5 align-top font-semibold",
-            tone === "error" && "text-error",
-            tone === "warn" && "text-warn-foreground",
-          )}
+        <StatusLabel
+          tone={tone}
+          pulse={IN_FLIGHT.test(text)}
+          className="max-w-full align-top font-semibold"
         >
-          <StatusDot tone={tone} pulse={IN_FLIGHT.test(text)} />
           {merged ? (
             <span>
               {merged}
@@ -132,7 +129,7 @@ export function CellView({
           ) : (
             text
           )}
-        </span>
+        </StatusLabel>
       );
       return rule.health && problem !== undefined ? (
         <RequestFailed code={problem} what="this release's latest revision">

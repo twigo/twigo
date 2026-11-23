@@ -2,11 +2,10 @@ import { useCallback, useState } from "react";
 import { History as HistoryIcon } from "lucide-react";
 import type { RevisionLine } from "@twigo/protocol";
 import {
-  cn,
   DataGrid,
   type ActionGroups,
   EmptyState,
-  StatusDot,
+  StatusLabel,
   type GridColumn,
   type GridItem,
 } from "@twigo/ui";
@@ -172,23 +171,20 @@ function Status({
   const tone = statusTone(line.status);
   if (tone) {
     return (
-      <span
-        className={cn(
-          "inline-flex items-center gap-1.5 align-top font-semibold",
-          tone === "error" ? "text-error" : "text-warn-foreground",
-        )}
+      <StatusLabel
+        tone={tone}
+        pulse={IN_FLIGHT_RELEASE.test(line.status)}
+        className="max-w-full align-top font-semibold"
       >
-        <StatusDot tone={tone} pulse={IN_FLIGHT_RELEASE.test(line.status)} />
         {line.status}
-      </span>
+      </StatusLabel>
     );
   }
   if (line.status === "deployed" && line.revision !== latest) {
     return (
-      <span className="inline-flex items-center gap-1.5 align-top">
-        <StatusDot tone="ok" />
+      <StatusLabel tone="ok" className="max-w-full align-top">
         {line.status}
-      </span>
+      </StatusLabel>
     );
   }
   return (
