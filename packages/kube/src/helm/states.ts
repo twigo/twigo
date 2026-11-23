@@ -15,11 +15,10 @@ export type ReleaseTab =
 /** Which of a revision's two values documents is shown: the person's, or the chart's defaults. */
 export type Plate = "user" | "defaults";
 
-/** What a page's text view shows, for the commands that reveal and hide: its eyes, the line the cursor is on, how many values are hidden and which parts are shown. */
+/** What a page's text view shows, for the commands that reveal and hide: its eyes, the line the cursor is on, which parts are shown and what Reveal All asks for. */
 export interface TextState {
   readonly glyphs: readonly Glyph[];
   readonly line: number;
-  readonly hidden: number;
   readonly revealed: readonly HelmPart[];
   /** What Reveal All asks for, one request each: the whole of the values, and for a manifest each place still hidden. */
   readonly reveal: readonly HelmPart[];

@@ -936,7 +936,6 @@ function ValuesView({
     onText({
       glyphs,
       line,
-      hidden,
       revealed: [...own.values()].map(({ part }) => part),
       reveal: hidden > 0 ? [whole] : [],
     });
@@ -1046,14 +1045,13 @@ function ManifestView({
     onText({
       glyphs,
       line,
-      hidden,
       revealed,
       reveal: hiding.map(({ part }) => part),
     });
     return () => {
       onText(undefined);
     };
-  }, [onText, glyphs, line, hidden, revealed, hiding]);
+  }, [onText, glyphs, line, revealed, hiding]);
   return (
     <div className="flex h-full min-h-48 flex-col">
       <TextBar
