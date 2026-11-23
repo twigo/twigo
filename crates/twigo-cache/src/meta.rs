@@ -50,6 +50,19 @@ impl Meta {
         self.created
             .and_then(|created| Timestamp::from_millisecond(created).ok())
     }
+
+    /// The value of its label `key`.
+    pub fn label(&self, key: &str) -> Option<&str> {
+        label(&self.labels, key)
+    }
+}
+
+/// The value of the label `key` of `labels`.
+pub(crate) fn label<'a>(labels: &'a Labels, key: &str) -> Option<&'a str> {
+    labels
+        .iter()
+        .find(|(found, _)| &**found == key)
+        .map(|(_, value)| &**value)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -142,10 +155,7 @@ impl RawMeta {
     pub fn into_meta(self, received: Timestamp) -> Result<Meta, DecodeError> {
         let name = self.name.ok_or(DecodeError::Missing("metadata.name"))?;
         let generated = generated(&name, self.generate_name.as_deref(), |key| {
-            self.labels
-                .iter()
-                .find(|(found, _)| &**found == key)
-                .map(|(_, value)| &**value)
+            label(&self.labels, key)
         });
         Ok(Meta {
             name,

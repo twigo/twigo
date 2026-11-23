@@ -175,15 +175,10 @@ impl Release {
 /// `name` label, or whose `version` is no revision number, is no revision of
 /// a release: it is a release of its own, named as the Secret.
 fn belongs(meta: &Meta) -> (Release, Option<u32>) {
-    let label = |key: &str| {
-        meta.labels
-            .iter()
-            .find(|(label, _)| &**label == key)
-            .map(|(_, value)| &**value)
-    };
     match (
-        label("name"),
-        label("version").and_then(|version| version.parse().ok()),
+        meta.label("name"),
+        meta.label("version")
+            .and_then(|version| version.parse().ok()),
     ) {
         (Some(name), Some(version)) => (
             Release {
@@ -549,10 +544,8 @@ pub(super) fn cells(
     known: &Known<'_>,
 ) -> (Box<[Cell]>, Option<i64>) {
     let label = secret
-        .labels
-        .iter()
-        .find(|(label, _)| &**label == "status")
-        .map_or(Cell::Null, |(_, value)| Cell::Text(value.clone()));
+        .label("status")
+        .map_or(Cell::Null, |value| Cell::Text(value.into()));
     let text = |text: Option<&str>| {
         text.filter(|text| !text.is_empty())
             .map_or(Cell::Null, |text| Cell::Text(text.into()))

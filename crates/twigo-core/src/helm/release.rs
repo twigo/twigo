@@ -622,7 +622,7 @@ async fn run(
         let deployed = revisions
             .iter()
             .rev()
-            .find(|(_, held)| label(&held.row, "status") == Some("deployed"))
+            .find(|(_, held)| held.row.meta.label("status") == Some("deployed"))
             .map(|(&revision, _)| revision);
         let history = parts.history.then(|| {
             revisions
@@ -636,13 +636,13 @@ async fn run(
                     match lines.get(&revision) {
                         Some((stamp, line)) if *stamp == held.stamp => line.clone(),
                         Some((_, line)) => RevisionLine {
-                            status: label(&held.row, "status").unwrap_or_default().to_owned(),
+                            status: held.row.meta.label("status").unwrap_or_default().to_owned(),
                             problem: failed,
                             ..line.clone()
                         },
                         None => undecoded(
                             revision,
-                            label(&held.row, "status").unwrap_or_default(),
+                            held.row.meta.label("status").unwrap_or_default(),
                             failed,
                         ),
                     }
@@ -763,18 +763,10 @@ struct Sent {
     history: Option<Vec<RevisionLine>>,
 }
 
-fn label<'a>(row: &'a Row, key: &str) -> Option<&'a str> {
-    row.meta
-        .labels
-        .iter()
-        .find(|(label, _)| &**label == key)
-        .map(|(_, value)| &**value)
-}
-
 /// The revision a Secret of the namespace holds of release `name`.
 fn revision_of(row: &Row, name: &str) -> Option<u32> {
-    (label(row, "name")? == name)
-        .then(|| label(row, "version")?.parse().ok())
+    (row.meta.label("name")? == name)
+        .then(|| row.meta.label("version")?.parse().ok())
         .flatten()
 }
 
