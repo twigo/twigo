@@ -78,6 +78,17 @@ export function problemWords(code: string): {
   );
 }
 
+/** Whether a batch's problem says its revision cannot be read, as against a request for it that failed, which says nothing of the revision (`ReleaseBatch::problem`). */
+export function isUnreadable(code: string): boolean {
+  return PROBLEMS[code] !== undefined;
+}
+
+/** What a request that failed says, in the mark of the list and History and on the page. */
+export const couldNotFetch = (what: string): string =>
+  `Twigo could not fetch ${what}`;
+
+export const ASKS_AGAIN = "Twigo asks again.";
+
 /** What a list of releases stands in for beside discovery's resources: namespaced, with no verbs or subresources of its own. */
 export const HELM_RESOURCE: Resource = {
   gvr: HELM_RELEASES,

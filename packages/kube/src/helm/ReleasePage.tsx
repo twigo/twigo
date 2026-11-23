@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { CircleAlert } from "lucide-react";
+import { CircleAlert, TriangleAlert } from "lucide-react";
 import {
   HELM_RELEASES,
   REFUSED,
@@ -21,6 +21,7 @@ import {
 } from "@twigo/ui";
 import {
   ErrorMessage,
+  type ErrorLike,
   useChanges,
   useWorkbench,
   variants,
@@ -66,7 +67,12 @@ import {
   type Shown,
 } from "./reveals";
 import type { Plate, ReleaseTab, TextState } from "./states";
-import { problemWords } from "./status";
+import {
+  ASKS_AGAIN,
+  couldNotFetch,
+  isUnreadable,
+  problemWords,
+} from "./status";
 import { TextBar } from "./TextBar";
 import { ValuesTree } from "./ValuesTree";
 import { useRelease } from "./useRelease";
@@ -581,14 +587,11 @@ export function ReleasePage({
               )}
             </EmptyState>
           ) : problem ? (
-            <EmptyState
-              icon={CircleAlert}
-              variant="error"
-              title="This revision cannot be read"
-              className="py-16"
-            >
-              <p>{problemWords(problem.code).why}</p>
-            </EmptyState>
+            <RevisionProblem
+              problem={problem}
+              revision={revision ?? release.revision}
+              onRetry={onReopen}
+            />
           ) : layout === "page" ? (
             <Page body={body} snapshot={snapshot} />
           ) : (
@@ -800,6 +803,48 @@ function Body({
       onEvents={() => undefined}
       slots={slots}
     />
+  );
+}
+
+/** Why the shown revision has no parts: it cannot be read, or a request for it failed, which Rust asks again. */
+function RevisionProblem({
+  problem,
+  revision,
+  onRetry,
+}: {
+  problem: ErrorLike;
+  revision: number | undefined;
+  onRetry: () => void;
+}) {
+  if (isUnreadable(problem.code)) {
+    return (
+      <EmptyState
+        icon={CircleAlert}
+        variant="error"
+        title="This revision cannot be read"
+        className="py-16"
+      >
+        <p>{problemWords(problem.code).why}</p>
+      </EmptyState>
+    );
+  }
+  return (
+    <EmptyState
+      icon={TriangleAlert}
+      variant="warn"
+      title={couldNotFetch(
+        revision === undefined
+          ? "this release's latest revision"
+          : `revision ${String(revision)}`,
+      )}
+      action={{ label: "Retry", onClick: onRetry }}
+      className="py-16"
+    >
+      <p className="max-w-md">
+        <ErrorMessage error={problem} className="justify-center" />
+      </p>
+      <p>{ASKS_AGAIN}</p>
+    </EmptyState>
   );
 }
 

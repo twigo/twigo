@@ -117,10 +117,12 @@ test("a value revealed in the inspector is of the release it showed: another rel
 function core(): {
   backend: Backend;
   send: (batch: Partial<ReleaseBatch>) => void;
+  opened: () => number;
 } {
   const mock = createMockBackend("ready");
   const seen: ReleaseBatch[] = [];
   let send: ((batch: ReleaseBatch) => void) | undefined;
+  let opened = 0;
   const backend: Backend = {
     invoke: (command, request) => mock.invoke(command, request),
     subscribe: ((
@@ -131,6 +133,7 @@ function core(): {
       if (command !== "helm_release_open") {
         return mock.subscribe(command as never, request, onMessage);
       }
+      opened++;
       send = onMessage;
       return mock.subscribe(
         command as never,
@@ -149,6 +152,7 @@ function core(): {
       if (!base || !send) throw new Error("no release is open");
       send({ ...base, ...batch });
     },
+    opened: () => opened,
   };
 }
 
@@ -331,6 +335,94 @@ test("a release whose revision cannot be read is a stopped page: the words the l
   expect(state?.querySelector("svg")?.getAttribute("class")).toContain(
     "opacity-70",
   );
+});
+
+const NO_PARTS = {
+  overview: null,
+  notes: null,
+  description: null,
+  values: null,
+  manifest: null,
+  history: null,
+} as const;
+
+test("a revision that Twigo cannot read is the stopped page, whichever of the four codes says it", async () => {
+  const { backend, send } = core();
+  const workbench = await mountKube(backend);
+  act(() => {
+    workbench.editors.open(release("alpha"));
+  });
+  await settle(8);
+  const codes = [
+    ["helm.not-a-release", "invalidInput"],
+    ["helm.truncated", "invalidInput"],
+    ["helm.too-large", "invalidInput"],
+    ["internal.panic", "internal"],
+  ] as const;
+  for (const [at, [code, kind]] of codes.entries()) {
+    act(() => {
+      send({
+        seq: 60 + at,
+        problem: { code, kind, message: "" },
+        ...NO_PARTS,
+      });
+    });
+    await settle(3);
+    expect(page("alpha").textContent).toContain("This revision cannot be read");
+    expect(page("alpha").textContent).toContain(problemWords(code).why);
+    expect(page("alpha").textContent).not.toContain("could not fetch");
+  }
+});
+
+test("a request that failed for the shown revision is no revision that cannot be read: it says what Twigo could not fetch, its reason and code, that Twigo asks again, and Retry opens the release anew", async () => {
+  const { backend, send, opened } = core();
+  const workbench = await mountKube(backend);
+  act(() => {
+    workbench.editors.open(release("alpha"));
+  });
+  await settle(8);
+  act(() => {
+    send({
+      seq: 60,
+      problem: {
+        code: "server.forbidden",
+        kind: "forbidden",
+        message: "secrets is forbidden for this user",
+      },
+      ...NO_PARTS,
+    });
+  });
+  await settle(3);
+  const title = within(page("alpha")).getByText(
+    "Twigo could not fetch revision 2",
+  );
+  const state = title.parentElement;
+  expect(state?.textContent).toContain("secrets is forbidden for this user");
+  expect(state?.textContent).toContain("server.forbidden");
+  expect(state?.textContent).toContain("Twigo asks again.");
+  expect(state?.className).toContain("text-warn-foreground");
+  expect(page("alpha").textContent).not.toContain(
+    "This revision cannot be read",
+  );
+
+  act(() => {
+    send({
+      seq: 61,
+      problem: { code: "connect.refused", kind: "unavailable", message: "" },
+      ...NO_PARTS,
+    });
+  });
+  await settle(3);
+  expect(page("alpha").textContent).toContain(
+    "Twigo could not fetch revision 2",
+  );
+  expect(page("alpha").textContent).toContain("connect.refused");
+
+  const before = opened();
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await settle(8);
+  expect(opened()).toBeGreaterThan(before);
+  expect(page("alpha").textContent).toContain("Chart version");
 });
 
 test("a release in a namespace whose Secrets the person may not list says so, naming them, where one they may list shows whole", async () => {
