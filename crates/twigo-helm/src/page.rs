@@ -60,7 +60,6 @@ pub(crate) struct StoredIn {
 /// What the chart says of itself beyond its name and versions.
 #[derive(Default)]
 pub(crate) struct Chart {
-    pub name: String,
     pub description: String,
     pub home: String,
     pub sources: Vec<String>,
@@ -99,21 +98,19 @@ pub fn page(stored: &Stored<'_>) -> Result<Page, IpcError> {
         Some(chart) => (chart.metadata, chart.values),
         None => (None, None),
     };
-    let head = metadata.as_ref().map(|metadata| {
-        (
-            metadata.name.clone(),
-            metadata.version.clone(),
-            metadata.app_version.clone(),
-        )
-    });
-    let chart = metadata.map_or_else(Chart::default, |metadata| Chart {
-        name: metadata.name,
-        description: metadata.description,
-        home: metadata.home,
-        sources: metadata.sources,
-        kube_version: metadata.kube_version,
-        deprecated: metadata.deprecated,
-    });
+    let (head, chart) = match metadata {
+        Some(metadata) => (
+            Some((metadata.name, metadata.version, metadata.app_version)),
+            Chart {
+                description: metadata.description,
+                home: metadata.home,
+                sources: metadata.sources,
+                kube_version: metadata.kube_version,
+                deprecated: metadata.deprecated,
+            },
+        ),
+        None => (None, Chart::default()),
+    };
     Ok(Page {
         summary: Summary::of(
             json.name,

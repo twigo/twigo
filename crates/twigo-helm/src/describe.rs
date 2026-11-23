@@ -282,6 +282,7 @@ fn hooks(page: &Page) -> Option<Section> {
 /// The chart, but for its versions, which the vitals hold.
 fn chart(page: &Page) -> Section {
     let chart = &page.chart;
+    let name = page.summary().chart_name().unwrap_or_default();
     let mut fields = Vec::new();
     let mut add = |label: &str, value: Value| {
         fields.push(Field {
@@ -291,13 +292,13 @@ fn chart(page: &Page) -> Section {
         });
     };
     for (label, text) in [
-        ("Name", &chart.name),
+        ("Name", name),
         ("Description", &chart.description),
         ("Home", &chart.home),
         ("Kubernetes", &chart.kube_version),
     ] {
         if !text.is_empty() {
-            add(label, Value::Text { text: text.clone() });
+            add(label, Value::Text { text: text.into() });
         }
     }
     if !chart.sources.is_empty() {
@@ -324,7 +325,7 @@ fn chart(page: &Page) -> Section {
         );
     }
     Section {
-        summary: match (chart.deprecated, chart.name.as_str()) {
+        summary: match (chart.deprecated, name) {
             (true, _) => text("deprecated"),
             (false, "") => Vec::new(),
             (false, name) => text(name),

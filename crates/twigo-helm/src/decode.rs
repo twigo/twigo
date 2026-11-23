@@ -326,6 +326,10 @@ impl Summary {
             .map(|chart| format!("{}-{}", chart.name, chart.version))
     }
 
+    pub(crate) fn chart_name(&self) -> Option<&str> {
+        self.chart.as_ref().map(|chart| chart.name.as_str())
+    }
+
     pub(crate) fn chart_version(&self) -> Option<&str> {
         self.chart.as_ref().map(|chart| chart.version.as_str())
     }
