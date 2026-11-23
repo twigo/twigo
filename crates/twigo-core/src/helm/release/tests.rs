@@ -676,6 +676,48 @@ async fn a_failing_page_is_asked_again_with_growing_pauses_and_a_refused_one_as_
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_failing_history_line_and_a_pinned_editor_s_newest_are_asked_again_with_growing_pauses() {
+    let fake = Fake::default();
+    revision(&fake, 1, "superseded");
+    revision(&fake, 2, "deployed");
+    fake.state().no_endpoints.insert(path(1));
+    let parts = ReleaseParts {
+        history: true,
+        ..OVERVIEW
+    };
+    let mut rig = Rig::open(fake, None, parts).await;
+    rig.until("line 1's failure", |shown| {
+        shown
+            .history
+            .as_ref()
+            .is_some_and(|lines| lines.len() == 2 && lines[1].problem.is_some())
+    })
+    .await;
+    rig.drain_for(Duration::from_secs(150)).await;
+    let line = rig.gets(1);
+
+    let fake = Fake::default();
+    revision(&fake, 1, "superseded");
+    revision(&fake, 2, "deployed");
+    fake.state().no_endpoints.insert(path(2));
+    let mut rig = Rig::open(fake, Some(1), OVERVIEW).await;
+    let failing = format!("Problem={}", ErrorCode::ServerUnavailable.wire());
+    rig.until("the newest's failure", |shown| {
+        shown.printed().contains(&failing)
+    })
+    .await;
+    rig.drain_for(Duration::from_secs(150)).await;
+    let newest = rig.gets(2);
+
+    for (what, gets) in [("History's line", line), ("the newest", newest)] {
+        assert!(
+            (25..=64).contains(&gets),
+            "{gets} GETs of {what} in 150 s, where pauses of 0.5 s growing to 2.5-5 s give 26 to 62"
+        );
+    }
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_relist_asks_history_s_failed_lines_and_a_pinned_editor_s_newest_again_at_once() {
     let fake = Fake::default();
     revision(&fake, 1, "superseded");
