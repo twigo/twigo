@@ -27,13 +27,23 @@ const LAST_APPLIED: &str = "kubectl.kubernetes.io/last-applied-configuration";
 /// value replaced by its size and the last-applied annotation dropped, and
 /// for a ConfigMap that holds a Helm release its `release` replaced by its
 /// size.
-pub fn for_view(mut object: Value) -> Value {
+pub fn for_view(object: Value) -> Value {
+    let release = holds_helm_release(&object);
+    for_view_as(object, release)
+}
+
+/// [`for_view`] of one version of an object, masking the `release` of a
+/// ConfigMap where `release` says that a version of it holds a Helm
+/// release, as each side of an edit's diff does, so that an edit that
+/// drops or changes `owner: helm` shows no release.
+pub fn for_view_as(mut object: Value, release: bool) -> Value {
     if let Some(metadata) = object.get_mut("metadata").and_then(Value::as_object_mut) {
         metadata.remove("managedFields");
     }
     if object["apiVersion"] == "v1" && object["kind"] == "Secret" {
         mask_secret(&mut object);
-    } else if holds_helm_release(&object)
+    } else if release
+        && config_map(&object)
         && let Some(release) = object
             .get_mut("data")
             .and_then(|data| data.get_mut("release"))
@@ -47,9 +57,11 @@ pub fn for_view(mut object: Value) -> Value {
 /// release in, whose `release` holds the release's values and manifest as
 /// a Secret's would.
 pub fn holds_helm_release(object: &Value) -> bool {
-    object["apiVersion"] == "v1"
-        && object["kind"] == "ConfigMap"
-        && object["metadata"]["labels"]["owner"] == "helm"
+    config_map(object) && object["metadata"]["labels"]["owner"] == "helm"
+}
+
+fn config_map(object: &Value) -> bool {
+    object["apiVersion"] == "v1" && object["kind"] == "ConfigMap"
 }
 
 /// A Secret with each value replaced by its size and the last-applied

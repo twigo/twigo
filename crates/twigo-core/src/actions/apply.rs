@@ -5,12 +5,14 @@
 //!
 //! The configuration holds a Secret's real values, since Twigo may own keys
 //! it applied before, so nothing built from it leaves Rust unmasked: both
-//! sides of the diff go through [`for_view`], warnings and error text are
-//! scrubbed of every value it knows, what the dry-run's answer adds
-//! included, whole tokens only, a plan names no value, and the `kubectl`
-//! line of a Secret, or of a ConfigMap that holds a Helm release, carries
-//! no body, so it stops being runnable at `-f -`, where the configuration
-//! would go on stdin.
+//! sides of the diff go through [`for_view_as`], a ConfigMap's `release`
+//! masked on both where the object opened, the edit, the live object or
+//! the answer holds a Helm release, warnings and error text are scrubbed of
+//! every value it knows, what the dry-run's answer adds included, whole
+//! tokens only, a plan names no value, and the `kubectl` line of a Secret,
+//! or of a ConfigMap that holds a Helm release, carries no body, so it
+//! stops being runnable at `-f -`, where the configuration would go on
+//! stdin.
 //!
 //! A merge patch cannot address a list element, so a removal inside a list
 //! sends the outermost list on its path whole, as it stands after the
@@ -61,7 +63,7 @@ use twigo_kube::errors;
 use twigo_kube::openapi::Document;
 use twigo_policy::friction::Risk;
 use twigo_policy::redact::{
-    Field, entries, for_view, holds_helm_release, is_mask, scrub, scrubbed, secret_values,
+    Field, entries, for_view_as, holds_helm_release, is_mask, scrub, scrubbed, secret_values,
 };
 use twigo_policy::{Actor, Attributes};
 
@@ -512,18 +514,23 @@ fn resource_version(object: &Value) -> Option<&str> {
     object["metadata"]["resourceVersion"].as_str()
 }
 
-/// An object as a side of the diff: as the view shows it, without what would
-/// only be noise.
-pub(crate) fn side(object: Value) -> Value {
-    if object.is_null() {
-        return object;
-    }
-    let mut object = for_view(object);
-    if let Some(metadata) = object["metadata"].as_object_mut() {
-        metadata.remove("resourceVersion");
-        metadata.remove("generation");
-    }
-    object
+/// The two sides of the diff, each as the view shows it, without what would
+/// only be noise; where `release` or either side says the object holds a
+/// Helm release, both show its `release` as a size.
+pub(crate) fn sides(live: Value, result: Value, release: bool) -> (Value, Value) {
+    let release = release || holds_helm_release(&live) || holds_helm_release(&result);
+    let side = |object: Value| {
+        if object.is_null() {
+            return object;
+        }
+        let mut object = for_view_as(object, release);
+        if let Some(metadata) = object["metadata"].as_object_mut() {
+            metadata.remove("resourceVersion");
+            metadata.remove("generation");
+        }
+        object
+    };
+    (side(live), side(result))
 }
 
 /// The object a preview of this request is of.
@@ -722,6 +729,11 @@ pub(crate) async fn preview(
         objects.extend(&config);
         objects.extend(&live);
         let secrets = secret_values(&objects);
+        let release = holds_helm_release(&edited)
+            || opened
+                .as_ref()
+                .is_some_and(|opened| holds_helm_release(&opened.base))
+            || live.as_ref().is_some_and(holds_helm_release);
 
         let holds_what_it_read =
             lock.is_some() && lock.as_deref() == live.as_ref().and_then(resource_version);
@@ -733,9 +745,8 @@ pub(crate) async fn preview(
                 edited: &edited,
                 live: live.as_ref(),
                 ignored,
-                bodiless: secret
-                    || holds_helm_release(&edited)
-                    || live.as_ref().is_some_and(holds_helm_release),
+                release,
+                bodiless: secret || release,
                 comparable_to: live
                     .as_ref()
                     .filter(|_| status_subresource)
@@ -832,6 +843,9 @@ struct Try<'a> {
     edited: &'a Value,
     live: Option<&'a Value>,
     ignored: Vec<String>,
+    /// The object it opened, the edit or the live object holds a Helm
+    /// release, which the diff's sides mask.
+    release: bool,
     /// What it sends holds a Secret's values or a Helm release, which its
     /// kubectl line leaves out.
     bodiless: bool,
@@ -961,10 +975,15 @@ async fn dry_run(
         })),
         target: (*target).clone(),
     })?;
+    let (live, result) = sides(
+        live.cloned().unwrap_or(Value::Null),
+        result,
+        attempt.release,
+    );
     Ok(ApplyPreviewed::Ready {
         id,
-        live: side(live.cloned().unwrap_or(Value::Null)),
-        result: side(result),
+        live,
+        result,
         warnings,
         removals: removals.iter().map(ToString::to_string).collect(),
         ignored: attempt.ignored.clone(),
@@ -1251,7 +1270,11 @@ fn answer_patch(
         *bodiless,
     )?;
     let warnings: Vec<String> = told.iter().map(|text| scrub(text, &secrets)).collect();
-    let live_view = side(live.cloned().unwrap_or(Value::Null));
+    let (live, result) = sides(
+        live.cloned().unwrap_or(Value::Null),
+        object,
+        attempt.release,
+    );
     let id = (attempt.keep)(Prepared {
         context: target.context.clone(),
         object: attempt.object.clone(),
@@ -1269,8 +1292,8 @@ fn answer_patch(
     })?;
     Ok(ApplyPreviewed::Ready {
         id,
-        live: live_view,
-        result: side(object),
+        live,
+        result,
         warnings,
         removals: removals.iter().map(ToString::to_string).collect(),
         ignored: attempt.ignored.clone(),
@@ -2388,6 +2411,7 @@ mod tests {
             edited: &edited,
             live: None,
             ignored: Vec::new(),
+            release: false,
             bodiless: false,
             comparable_to: None,
             lock: Some("1".to_owned()),

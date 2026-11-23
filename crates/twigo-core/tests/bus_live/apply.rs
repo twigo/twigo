@@ -915,21 +915,22 @@ async fn an_edit_of_a_config_map_that_holds_a_helm_release_names_none_of_it() {
         base["data"]["release"] = json!(format!("<{} bytes>", RELEASE.len()));
         base
     };
+    let request = |edited: Value| ApplyRequest {
+        space: cluster.context.clone(),
+        opened: Some(OpenedEdit {
+            target: reference("", "v1", "configmaps", Some(&namespace), name),
+            base: masked(),
+            lock: rv(&live),
+            locked: None,
+        }),
+        edited,
+        force: false,
+        drop: vec![],
+    };
     let annotated = |key: &str| {
         let mut edited = masked();
         edited["metadata"]["annotations"] = json!({ key: "1" });
-        ApplyRequest {
-            space: cluster.context.clone(),
-            opened: Some(OpenedEdit {
-                target: reference("", "v1", "configmaps", Some(&namespace), name),
-                base: masked(),
-                lock: rv(&live),
-                locked: None,
-            }),
-            edited,
-            force: false,
-            drop: vec![],
-        }
+        request(edited)
     };
     let free = |context: &str, text: &str| assert!(!text.contains(RELEASE), "{context}: {text}");
 
@@ -943,6 +944,30 @@ async fn an_edit_of_a_config_map_that_holds_a_helm_release_names_none_of_it() {
         "{}",
         line(&plan)
     );
+
+    for owner in [None, Some("someone")] {
+        let mut edited = masked();
+        let labels = edited["metadata"]["labels"].as_object_mut().unwrap();
+        match owner {
+            Some(owner) => labels.insert("owner".to_owned(), json!(owner)),
+            None => labels.remove("owner"),
+        };
+        let answer = preview(&core, request(edited)).await;
+        free(
+            &format!("the preview of owner {owner:?}"),
+            &serde_json::to_string(&answer).unwrap(),
+        );
+        let ApplyPreviewed::Ready { live, result, .. } = answer else {
+            panic!("expected ready, got {answer:?}");
+        };
+        assert_eq!(
+            result["metadata"]["labels"].get("owner"),
+            owner.map(|owner| json!(owner)).as_ref()
+        );
+        for side in [&live, &result] {
+            assert_eq!(side["data"]["release"], masked()["data"]["release"]);
+        }
+    }
 
     let policy = admission_policy(
         &cluster,

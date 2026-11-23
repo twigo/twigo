@@ -17,7 +17,7 @@ use twigo_ipc::{ApprovalDetail, IpcError, NoDiff, RequestClass};
 use twigo_kube::client::{ActorClients, Server};
 use twigo_policy::Attributes;
 
-use crate::actions::{send, side};
+use crate::actions::{send, sides};
 
 /// The largest body an ask shows as sent.
 const SHOWN_BODY: usize = 4 << 10;
@@ -140,9 +140,10 @@ async fn diff(
     } else {
         live(api, parts).await
     };
+    let (live, result) = sides(live, result, false);
     Ok(ApprovalDetail::Diff {
-        live: side(live),
-        result: side(result),
+        live,
+        result,
         warnings,
     })
 }
