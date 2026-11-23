@@ -158,7 +158,7 @@ pub struct Entry<'a> {
     pub value: &'a Value,
 }
 
-impl Entry<'_> {
+impl<'a> Entry<'a> {
     /// Its size in bytes. A value of `data` counts the bytes its base64
     /// stands for, from its length, never decoded; one that is no base64,
     /// which the API server never serves and only a release's manifest can
@@ -170,9 +170,7 @@ impl Entry<'_> {
             Field::StringData => text.len() as u64,
         }
     }
-}
 
-impl<'a> Entry<'a> {
     /// The value's text: a string's, none for null, and the JSON of any
     /// other value.
     pub fn text(&self) -> Cow<'a, str> {
