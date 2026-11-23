@@ -888,6 +888,7 @@ async fn no_secret_value_reaches_the_webview_by_any_answer() {
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
 async fn an_edit_of_a_config_map_that_holds_a_helm_release_names_none_of_it() {
     const RELEASE: &str = "H4sIAAAAAAAC/release+of+a+config+map/kept+by+helm=";
+    const LAST_APPLIED: &str = "kubectl.kubernetes.io/last-applied-configuration";
     let cluster = Cluster::connect().await;
     let namespace = cluster.namespace("apply-release").await;
     let dir = tempfile::tempdir().unwrap();
@@ -903,6 +904,7 @@ async fn an_edit_of_a_config_map_that_holds_a_helm_release_names_none_of_it() {
             "metadata": {
                 "name": name,
                 "labels": { "owner": "helm", "name": "app", "version": "1", "status": "deployed" },
+                "annotations": { LAST_APPLIED: format!(r#"{{"data":{{"release":"{RELEASE}"}}}}"#) },
             },
             "data": { "release": RELEASE },
         }),
@@ -913,6 +915,10 @@ async fn an_edit_of_a_config_map_that_holds_a_helm_release_names_none_of_it() {
     let masked = || {
         let mut base = view(&live);
         base["data"]["release"] = json!(format!("<{} bytes>", RELEASE.len()));
+        base["metadata"]["annotations"]
+            .as_object_mut()
+            .unwrap()
+            .remove(LAST_APPLIED);
         base
     };
     let request = |edited: Value| ApplyRequest {

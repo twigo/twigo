@@ -26,7 +26,7 @@ const LAST_APPLIED: &str = "kubectl.kubernetes.io/last-applied-configuration";
 /// The object as a view shows it: managedFields dropped, for a Secret each
 /// value replaced by its size and the last-applied annotation dropped, and
 /// for a ConfigMap that holds a Helm release its `release` replaced by its
-/// size.
+/// size and the last-applied annotation dropped.
 pub fn for_view(object: Value) -> Value {
     let release = holds_helm_release(&object);
     for_view_as(object, release)
@@ -42,13 +42,14 @@ pub fn for_view_as(mut object: Value, release: bool) -> Value {
     }
     if object["apiVersion"] == "v1" && object["kind"] == "Secret" {
         mask_secret(&mut object);
-    } else if release
-        && config_map(&object)
-        && let Some(release) = object
+    } else if release && config_map(&object) {
+        if let Some(release) = object
             .get_mut("data")
             .and_then(|data| data.get_mut("release"))
-    {
-        *release = Value::String(mask(release.as_str().map_or(0, str::len) as u64));
+        {
+            *release = Value::String(mask(release.as_str().map_or(0, str::len) as u64));
+        }
+        drop_last_applied(&mut object);
     }
     object
 }
@@ -96,7 +97,11 @@ fn mask_secret_with(
     for (field, mask) in whole {
         secret[field.name()] = Value::String(mask);
     }
-    if let Some(annotations) = secret
+    drop_last_applied(secret);
+}
+
+fn drop_last_applied(object: &mut Value) {
+    if let Some(annotations) = object
         .get_mut("metadata")
         .and_then(|metadata| metadata.get_mut("annotations"))
         .and_then(Value::as_object_mut)

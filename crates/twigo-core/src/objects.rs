@@ -1222,6 +1222,10 @@ mod tests {
                 "name": "sh.helm.release.v1.gamma.v1",
                 "namespace": "fmt-c",
                 "labels": { "owner": "helm", "name": "gamma", "version": "1" },
+                "annotations": {
+                    "kubectl.kubernetes.io/last-applied-configuration":
+                        "{\"data\":{\"release\":\"H4sIAAAAAAAC/5RU227bOBD9\"}}",
+                },
             },
             "data": { "release": "H4sIAAAAAAAC/5RU227bOBD9" },
         });

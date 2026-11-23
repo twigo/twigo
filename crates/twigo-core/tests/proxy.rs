@@ -321,10 +321,17 @@ const RELEASE: &str = "sh.helm.release.v1.r.v1";
 const RELEASE_VALUE: &str = "H4sIAAAAAAAAcmVsZWFzZQ";
 
 fn release_config_map() -> Value {
+    let applied = format!(r#"{{"data":{{"release":"{RELEASE_VALUE}"}}}}"#);
     json!({
         "apiVersion": "v1",
         "kind": "ConfigMap",
-        "metadata": { "name": RELEASE, "namespace": "a", "resourceVersion": "1", "labels": { "owner": "helm", "name": "r", "version": "1" } },
+        "metadata": {
+            "name": RELEASE,
+            "namespace": "a",
+            "resourceVersion": "1",
+            "labels": { "owner": "helm", "name": "r", "version": "1" },
+            "annotations": { "kubectl.kubernetes.io/last-applied-configuration": applied },
+        },
         "data": { "release": RELEASE_VALUE },
     })
 }
