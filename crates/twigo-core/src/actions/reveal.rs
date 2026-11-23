@@ -11,7 +11,7 @@ use twigo_policy::redact::{secret_value, values};
 use super::shell_line;
 use crate::Core;
 use crate::bus::{self, Finished, Planned};
-use crate::helm::{Showing, ShownPage};
+use crate::helm::ShownPage;
 
 pub(crate) fn reveal(
     core: &Core,
@@ -91,16 +91,16 @@ pub(crate) fn reveal_helm(
     revision: u32,
     part: HelmPart,
 ) -> Result<Planned, IpcError> {
-    let (context, namespace, name, showing) = core.releases.with(window, release, |opened| {
+    let (context, namespace, name, shown_page) = core.releases.with(window, release, |opened| {
         (
             opened.context().to_owned(),
             opened.namespace().to_owned(),
             opened.name().to_owned(),
-            opened.showing(),
+            opened.shown(),
         )
     })?;
     let connection = core.policy.connection(&context);
-    let ShownPage { page, secret, .. } = shown(&showing, revision)?;
+    let ShownPage { page, secret, .. } = shown(shown_page, revision)?;
     let (value, binary) = page.revealed(&part)?;
     let words = Words::of(&part, &page);
     let release_words = format!("release {name} (revision {revision}) in {namespace}");
@@ -169,10 +169,11 @@ pub(crate) fn reveal_helm(
                 let core = this
                     .upgrade()
                     .ok_or_else(|| IpcError::new(ErrorCode::AppQuitting, "Twigo is quitting"))?;
-                let showing = core
-                    .releases
-                    .with(&window, release, |opened| opened.showing())?;
-                let now = shown(&showing, revision)?;
+                let now = shown(
+                    core.releases
+                        .with(&window, release, |opened| opened.shown())?,
+                    revision,
+                )?;
                 if now.secret != secret {
                     return Err(changed(revision));
                 }
@@ -184,9 +185,8 @@ pub(crate) fn reveal_helm(
 }
 
 /// The page of `revision`, refused unless the release shows it.
-fn shown(showing: &Showing, revision: u32) -> Result<ShownPage, IpcError> {
-    showing
-        .now()
+fn shown(shown: Option<ShownPage>, revision: u32) -> Result<ShownPage, IpcError> {
+    shown
         .filter(|shown| shown.revision == revision)
         .ok_or_else(|| changed(revision))
 }

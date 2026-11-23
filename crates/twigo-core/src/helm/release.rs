@@ -130,9 +130,9 @@ impl Opened {
         &self.name
     }
 
-    /// What it shows, read when asked, after it closes too.
-    pub(crate) fn showing(&self) -> Showing {
-        Showing(Arc::clone(&self.control))
+    /// The page shown, none while it shows no page.
+    pub(crate) fn shown(&self) -> Option<ShownPage> {
+        self.control.shown.lock().expect("release lock").clone()
     }
 
     pub(crate) fn set_view(&self, revision: Option<u32>, parts: ReleaseParts) {
@@ -149,17 +149,6 @@ impl Opened {
 impl Drop for Opened {
     fn drop(&mut self) {
         self.task.abort();
-    }
-}
-
-/// An open release's shown revision.
-#[derive(Clone)]
-pub(crate) struct Showing(Arc<Control>);
-
-impl Showing {
-    /// The page shown, none while it shows no page.
-    pub(crate) fn now(&self) -> Option<ShownPage> {
-        self.0.shown.lock().expect("release lock").clone()
     }
 }
 

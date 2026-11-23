@@ -171,7 +171,7 @@ async fn an_open_release_shows_its_latest_revision_fetched_once_and_each_part_as
             .contains("kind: ConfigMap")
     );
     assert_eq!(rig.gets(2), 1, "the page is held while the editor is open");
-    let shown = rig.opened.showing().now().expect("a page is held");
+    let shown = rig.opened.shown().expect("a page is held");
     assert_eq!(shown.revision, 2);
 }
 
@@ -342,7 +342,7 @@ async fn a_pinned_revision_that_helm_prunes_says_so() {
     );
     assert!(shown.exists);
     assert_eq!(shown.revision, Some(1));
-    assert!(rig.opened.showing().now().is_none(), "its page is dropped");
+    assert!(rig.opened.shown().is_none(), "its page is dropped");
 }
 
 #[tokio::test(start_paused = true)]
@@ -359,7 +359,7 @@ async fn an_uninstall_that_keeps_no_history_ends_the_release() {
     let shown = &rig.watched.shown;
     assert_eq!((shown.revision, shown.latest), (None, None));
     assert_eq!(shown.status, Some(ViewState::Ready));
-    assert!(rig.opened.showing().now().is_none());
+    assert!(rig.opened.shown().is_none());
 }
 
 #[tokio::test(start_paused = true)]
@@ -481,7 +481,7 @@ async fn requests_that_fail_are_said_while_they_do_and_the_revisions_shown_once_
     })
     .await;
     assert_eq!(rig.watched.shown.revision, Some(2));
-    assert!(rig.opened.showing().now().is_none());
+    assert!(rig.opened.shown().is_none());
     let lines = rig.watched.shown.history.as_ref().unwrap();
     assert_eq!(
         lines[1].status, "superseded",
@@ -914,7 +914,7 @@ async fn the_shown_revision_s_and_a_history_line_s_failure_shows_only_on_the_ver
         shown.problem.is_some() && line_1(shown).problem.is_some()
     })
     .await;
-    assert!(rig.opened.showing().now().is_none());
+    assert!(rig.opened.shown().is_none());
 
     rig.fake.state().forbidden.remove(&path(2));
     rig.fake.state().gets_take = Duration::from_secs(2);
@@ -928,7 +928,7 @@ async fn the_shown_revision_s_and_a_history_line_s_failure_shows_only_on_the_ver
         .collect();
     assert!(said.is_empty(), "the first rewrite's refusal: {said:?}");
     assert!(
-        rig.opened.showing().now().is_some(),
+        rig.opened.shown().is_some(),
         "the page of an earlier version of the same Secret is shown again"
     );
     let line = line_1(&rig.watched.shown);
