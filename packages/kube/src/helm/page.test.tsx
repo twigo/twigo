@@ -386,6 +386,48 @@ async function menuOf(revision: number) {
   return items;
 }
 
+test("the revisions marked in History stay marked when the release moves to a new revision", async () => {
+  const { backend, send } = core();
+  await openHistory(backend);
+  await mark(1);
+  await mark(2);
+  expect(markedRevisions()).toEqual([2, 1]);
+
+  act(() => {
+    send({
+      seq: 80,
+      revision: 3,
+      latest: 3,
+      history: [
+        line(3, "deployed"),
+        line(2, "superseded"),
+        line(1, "superseded"),
+      ],
+    });
+  });
+  await settle(4);
+  expect(markedRevisions()).toEqual([2, 1]);
+});
+
+test("the revisions marked in History are gone when the release is uninstalled and installed again", async () => {
+  const { backend, send } = core();
+  await openHistory(backend);
+  await mark(1);
+  expect(markedRevisions()).toEqual([1]);
+
+  act(() => {
+    send({ seq: 81, ...NOTHING_LEFT });
+  });
+  await settle(3);
+  expect(page("alpha").textContent).toContain("This release is gone");
+
+  act(() => {
+    send({ seq: 82, history: [line(2, "deployed"), line(1, "superseded")] });
+  });
+  await settle(3);
+  expect(markedRevisions()).toEqual([]);
+});
+
 test("a marked revision that Helm prunes is no longer marked, so two marked rows on screen offer their comparisons and one does not", async () => {
   const { backend, send } = core();
   await openHistory(backend);
