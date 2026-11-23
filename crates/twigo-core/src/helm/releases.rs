@@ -6,11 +6,13 @@
 //! which `helm get` reads. That revision is fetched and decoded to its
 //! summary once per uid and `resourceVersion`, four at a time, and its row
 //! then has Chart, App Version, Updated and the status its payload says, or
-//! the code that keeps it from being read in Problem. Helm writes a
+//! the status `unreadable` and the code that keeps it from being read in
+//! Problem. Helm writes a
 //! revision's Secret again when its status changes: its last summary stays
 //! until the new one lands, the status the label's meanwhile. A request that
-//! fails is said in Problem while it does, and asked again after the hub's
-//! backoff and at every relist.
+//! fails says nothing of the revision: its code is in Problem while it fails,
+//! beside the label's status, and it is asked again after the hub's backoff
+//! and at every relist.
 //!
 //! The decodes need no wake of their own: the batcher drains its source at
 //! every flush while nothing is unacknowledged, and a summary that lands is
@@ -278,6 +280,10 @@ impl Failing {
     }
 }
 
+/// The status of a revision that cannot be read, which a list counts as
+/// failing.
+const UNREADABLE: &str = "unreadable";
+
 /// What a row shows of its newest revision beyond the labels.
 #[derive(Default)]
 pub(super) struct Known<'a> {
@@ -285,9 +291,10 @@ pub(super) struct Known<'a> {
     /// one decoded from an earlier version of the same Secret gives all but
     /// the status, which the label then says.
     pub(super) summary: Option<(&'a Summary, bool)>,
-    /// What keeps it from being read: what its decode decided, or why a
-    /// request for it fails, while it does.
-    pub(super) problem: Option<ErrorCode>,
+    /// What its decode decided keeps it from being read.
+    pub(super) unreadable: Option<ErrorCode>,
+    /// Why a request for it fails, while it does.
+    pub(super) failing: Option<ErrorCode>,
 }
 
 impl<'a> Known<'a> {
@@ -298,25 +305,23 @@ impl<'a> Known<'a> {
         decoded: Option<(&Stamp, Result<&'a Summary, ErrorCode>)>,
         failed: Option<&Failing>,
     ) -> Self {
-        let mut known = match decoded {
-            Some((at, Ok(summary))) if at == stamp => Known {
-                summary: Some((summary, true)),
-                problem: None,
-            },
-            Some((at, Err(code))) if at == stamp => Known {
-                summary: None,
-                problem: Some(code),
-            },
-            Some((at, Ok(summary))) if at.same_secret(stamp) => Known {
-                summary: Some((summary, false)),
-                problem: None,
-            },
-            _ => Known::default(),
+        let (summary, unreadable) = match decoded {
+            Some((at, Ok(summary))) if at == stamp => (Some((summary, true)), None),
+            Some((at, Err(code))) if at == stamp => (None, Some(code)),
+            Some((at, Ok(summary))) if at.same_secret(stamp) => (Some((summary, false)), None),
+            _ => (None, None),
         };
-        if let Some(failed) = failed {
-            known.problem = Some(failed.error().code);
+        Known {
+            summary,
+            unreadable,
+            failing: failed.map(|failed| failed.error().code),
         }
-        known
+    }
+
+    /// Whether the cells it makes hold all that will be known until the
+    /// revision changes or a fetch answers.
+    pub(super) fn read(&self) -> bool {
+        self.summary.is_some() || self.unreadable.is_some() || self.failing.is_some()
     }
 }
 
@@ -523,10 +528,11 @@ pub(super) fn cells(
         text.filter(|text| !text.is_empty())
             .map_or(Cell::Null, |text| Cell::Text(text.into()))
     };
+    let unreadable = || Cell::Text(UNREADABLE.into());
     let (revision, status, chart, app_version, created, problem) = match revision {
         None => (
             Cell::Null,
-            label,
+            unreadable(),
             Cell::Null,
             Cell::Null,
             None,
@@ -537,6 +543,7 @@ pub(super) fn cells(
             (
                 Cell::Int(i64::from(revision)),
                 match known.summary {
+                    _ if known.unreadable.is_some() => unreadable(),
                     Some((summary, true)) => Cell::Text(summary.status().word().into()),
                     _ => label,
                 },
@@ -546,7 +553,8 @@ pub(super) fn cells(
                     .and_then(Summary::last_deployed)
                     .map(|at| at.as_millisecond()),
                 known
-                    .problem
+                    .failing
+                    .or(known.unreadable)
                     .map_or(Cell::Null, |code| Cell::Text(code.wire().into())),
             )
         }

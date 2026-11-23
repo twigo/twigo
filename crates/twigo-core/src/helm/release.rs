@@ -507,7 +507,7 @@ async fn run(
                 printed(&cells(&target.name, Some(latest), &held.row.meta, &known).0)
             })
             .unwrap_or_default();
-        let header_read = known.summary.is_some() || known.problem.is_some();
+        let header_read = known.read();
         let deployed = revisions
             .iter()
             .rev()

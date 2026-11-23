@@ -305,15 +305,15 @@ async fn a_secret_of_helms_owner_without_the_labels_is_a_row_of_its_own() {
     .await;
     rig.shows(&[
         "a app 1 deployed -",
-        &format!("a stray - - {}", ErrorCode::HelmNotARelease.wire()),
+        &format!("a stray - unreadable {}", ErrorCode::HelmNotARelease.wire()),
     ])
     .await;
 
     odd_secret(&rig.fake);
     rig.shows(&[
         "a app 1 deployed -",
-        &format!("a odd - - {}", ErrorCode::HelmNotARelease.wire()),
-        &format!("a stray - - {}", ErrorCode::HelmNotARelease.wire()),
+        &format!("a odd - unreadable {}", ErrorCode::HelmNotARelease.wire()),
+        &format!("a stray - unreadable {}", ErrorCode::HelmNotARelease.wire()),
     ])
     .await;
 }
@@ -522,7 +522,7 @@ async fn a_broken_release_secret_keeps_its_row_with_its_problem_while_the_others
         rig.seen.text("a", "cut", "Problem"),
         ErrorCode::HelmTruncated.wire()
     );
-    for (column, label) in [("Name", "cut"), ("Revision", "3"), ("Status", "failed")] {
+    for (column, label) in [("Name", "cut"), ("Revision", "3"), ("Status", "unreadable")] {
         assert_eq!(rig.seen.text("a", "cut", column), label, "{column}");
     }
     for column in ["Chart", "App Version"] {

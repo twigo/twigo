@@ -2693,7 +2693,7 @@
         "name": "trunc",
         "problem": "helm.truncated",
         "revision": 1,
-        "status": "deployed"
+        "status": "unreadable"
       },
       "name": "trunc",
       "namespace": "fmt-d",

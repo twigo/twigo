@@ -52,8 +52,8 @@ struct Mocked {
 struct Latest {
     name: String,
     revision: u32,
-    /// The release's once its revision is decoded, else the label's, as the
-    /// core's row reads it.
+    /// The release's once its revision is decoded, `unreadable` where it
+    /// cannot be, as the core's row reads it.
     status: String,
     chart: Option<String>,
     app_version: Option<String>,
@@ -120,7 +120,7 @@ fn mocked(namespace: &str, name: &str, read: &[Read]) -> Mocked {
         name: name.to_owned(),
         revision: newest.revision,
         status: summary.map_or_else(
-            || newest.status.clone(),
+            || "unreadable".to_owned(),
             |summary| summary.status().word().to_owned(),
         ),
         chart: summary.and_then(|summary| summary.chart()),
