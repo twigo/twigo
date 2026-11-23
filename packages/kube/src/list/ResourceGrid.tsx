@@ -480,7 +480,11 @@ function Grid({
             tone={tone}
             alarmed={alarmed}
             finished={finished}
-            problem={problemOf(gvr, snapshot.columns, row)}
+            problem={
+              shownColumn.rule.health
+                ? problemOf(gvr, snapshot.columns, row)
+                : undefined
+            }
           />
         );
       }}
