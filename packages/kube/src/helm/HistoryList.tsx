@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import { History as HistoryIcon } from "lucide-react";
 import type { RevisionLine } from "@twigo/protocol";
 import {
@@ -63,12 +63,6 @@ export function HistoryList({
   useChanges(states.changes);
   const [selected, setSelected] = useState<number | undefined>(undefined);
   const register = useListRegistration({ "resource.group": "helm.sh" });
-  const registerGrid = useCallback(
-    (element: HTMLElement, controller: Parameters<typeof register>[1]) => {
-      return register(element, controller);
-    },
-    [register],
-  );
   if (lines.length === 0) {
     return (
       <EmptyState icon={HistoryIcon} title="No revisions">
@@ -140,7 +134,7 @@ export function HistoryList({
               return <Description line={line} />;
           }
         }}
-        register={registerGrid}
+        register={register}
       />
       {marked.length > 0 && (
         <div className="absolute bottom-3 left-1/2 z-[5] -translate-x-1/2">
