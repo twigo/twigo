@@ -1687,9 +1687,12 @@ status: ViewState,
  */
 exists: boolean, 
 /**
- * The revision the parts are of: the one asked for, else the latest;
- * null while it shows none, as from when the Secret of the one shown
- * goes until the next one's page lands.
+ * The revision the parts are of: the one asked for, else the latest.
+ * Null until its page is read or the read fails, and again from when
+ * the Secret of the one shown goes until the next page is read or the
+ * read fails, whether the release follows the latest or the revision
+ * was pinned and Helm still keeps it; a pinned revision Helm no longer
+ * keeps is named at once, with `helm.revision-gone`.
  */
 revision: number | null, 
 /**
