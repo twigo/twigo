@@ -119,7 +119,10 @@ pub fn scrubbed(mut error: IpcError, secrets: &[String]) -> IpcError {
 /// `stringData`, encoded and decoded, and the `release` of a ConfigMap that
 /// holds a Helm release, the longest first, so that what a refusal echoes is
 /// covered before any answer shows how the server stored it; none of any
-/// other kind. Booleans and nulls carry no secret.
+/// other kind. Booleans and nulls carry no secret. A value whose text reads
+/// as a number comes in each of that number's spellings too, since a
+/// template may print the value it came from as a float where the Secret
+/// holds it quoted, or the other way round.
 pub fn secret_values(objects: &[&Value]) -> Vec<String> {
     let mut values = BTreeSet::new();
     for object in objects {
@@ -134,15 +137,19 @@ pub fn secret_values(objects: &[&Value]) -> Vec<String> {
             let mut texts = Vec::new();
             scalars(value, &mut texts);
             for text in texts {
-                match field {
+                let stored = match field {
                     Field::StringData => {
                         values.insert(STANDARD.encode(&text));
+                        Some(text.clone())
                     }
-                    Field::Data => {
-                        if let Some(bytes) = decode_base64(text.as_bytes()) {
-                            values.insert(String::from_utf8_lossy(&bytes).into_owned());
-                        }
+                    Field::Data => decode_base64(text.as_bytes())
+                        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned()),
+                };
+                if let Some(stored) = stored {
+                    if let Ok(number) = stored.parse::<Number>() {
+                        values.extend(spellings(&number));
                     }
+                    values.insert(stored);
                 }
                 values.insert(text);
             }
@@ -410,6 +417,33 @@ mod tests {
                 "PIN {HIDDEN}, got &value.valueUnstructured{{Value:{HIDDEN}}}, port {HIDDEN}, n {{Value:{HIDDEN}}}."
             )
         );
+    }
+
+    #[test]
+    fn a_number_a_secret_holds_as_text_is_scrubbed_in_each_spelling_of_it() {
+        for (secret, notes) in [
+            (
+                json!({ "stringData": { "pin": "1234567" } }),
+                "Your PIN is 1.234567e+06.",
+            ),
+            (
+                json!({ "data": { "pin": "MTIzNDU2Nw==" } }),
+                "Your PIN is 1.234567e+06.",
+            ),
+            (
+                json!({ "stringData": { "pin": "1.234567e+06" } }),
+                "Your PIN is 1234567.",
+            ),
+        ] {
+            let mut secret = secret;
+            secret["kind"] = json!("Secret");
+            let secrets = secret_values(&[&secret]);
+            assert_eq!(
+                scrub(notes, &secrets),
+                format!("Your PIN is {HIDDEN}."),
+                "{secret}"
+            );
+        }
     }
 
     #[test]
