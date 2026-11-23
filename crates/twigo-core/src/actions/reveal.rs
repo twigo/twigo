@@ -232,10 +232,19 @@ impl Words {
                     format!("manifest secrets/{secret} key {key}"),
                 )
             }
-            HelmPart::Document { document } => (
-                format!("document {document} of the manifest"),
-                format!("manifest document {document}"),
-            ),
+            HelmPart::Document { document } => {
+                let source = page
+                    .manifest()
+                    .unread
+                    .into_iter()
+                    .find(|unread| unread.document == *document)
+                    .and_then(|unread| unread.source);
+                let what = match source {
+                    Some(source) => format!("the document {source} in the manifest"),
+                    None => format!("document {} in the manifest", u64::from(*document) + 1),
+                };
+                (what, format!("manifest document {document}"))
+            }
             HelmPart::Notes => ("the notes".to_owned(), "notes".to_owned()),
             HelmPart::Description => ("the description".to_owned(), "description".to_owned()),
         };

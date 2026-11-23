@@ -16,7 +16,8 @@ fn key(key: &str) -> ValueStep {
 }
 
 /// Revision `version` of `a/db`, with a string, a number and a list among
-/// the person's values and a Secret in its manifest.
+/// the person's values, and a Secret and two documents Twigo cannot read,
+/// one with its source and one without, in its manifest.
 fn revision(fake: &Fake, version: u32, status: &str) {
     let mut release = testing::release("a", "db", version, status);
     release["config"] = json!({
@@ -24,7 +25,9 @@ fn revision(fake: &Fake, version: u32, status: &str) {
         "hosts": ["one", "two"],
     });
     let manifest = release["manifest"].as_str().unwrap().to_owned()
-        + "---\n# Source: demo/templates/secret.yaml\napiVersion: v1\nkind: Secret\nmetadata:\n  name: db-auth\nstringData:\n  token: tok-en\n";
+        + "---\n# Source: demo/templates/secret.yaml\napiVersion: v1\nkind: Secret\nmetadata:\n  name: db-auth\nstringData:\n  token: tok-en\n"
+        + "---\n# Source: demo/templates/broken.yaml\nkind: Secret\nstringData: {broken: one\n"
+        + "---\nkind: Secret\nstringData: {broken: two\n";
     release["manifest"] = json!(manifest);
     testing::put(fake, &release, status);
 }
@@ -117,6 +120,20 @@ async fn a_reveal_names_its_place_and_prints_helm_s_command_only_where_it_prints
             "manifest secrets/db-auth key token",
             None,
             "tok-en",
+        ),
+        (
+            HelmPart::Document { document: 2 },
+            "Reveal the document demo/templates/broken.yaml in the manifest of release db (revision 2) in a from kind-test?",
+            "manifest document 2",
+            None,
+            "# Source: demo/templates/broken.yaml\nkind: Secret\nstringData: {broken: one",
+        ),
+        (
+            HelmPart::Document { document: 3 },
+            "Reveal document 4 in the manifest of release db (revision 2) in a from kind-test?",
+            "manifest document 3",
+            None,
+            "kind: Secret\nstringData: {broken: two",
         ),
         (
             HelmPart::Notes,
