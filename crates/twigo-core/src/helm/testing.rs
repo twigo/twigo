@@ -122,7 +122,6 @@ fn secret(
     })
 }
 
-/// The path of a revision's Secret.
 pub(crate) fn path(namespace: &str, name: &str, version: u32) -> String {
     format!(
         "/api/v1/namespaces/{namespace}/secrets/{}",

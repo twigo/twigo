@@ -24,7 +24,6 @@ const ITEM: &str = "helm releases";
 /// What Helm lists its releases by (`List` in its Secrets driver).
 const OWNER: &str = "owner=helm";
 
-/// The core group's Secrets, which Helm keeps its releases in.
 fn secret_resource() -> Resource {
     Resource {
         group: String::new(),

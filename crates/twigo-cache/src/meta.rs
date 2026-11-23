@@ -51,13 +51,11 @@ impl Meta {
             .and_then(|created| Timestamp::from_millisecond(created).ok())
     }
 
-    /// The value of its label `key`.
     pub fn label(&self, key: &str) -> Option<&str> {
         label(&self.labels, key)
     }
 }
 
-/// The value of the label `key` of `labels`.
 pub(crate) fn label<'a>(labels: &'a Labels, key: &str) -> Option<&'a str> {
     labels
         .iter()

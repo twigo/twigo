@@ -77,7 +77,6 @@ impl<K: Eq + Hash, T> Reads<K, T> {
             .map(|failing| &failing.error)
     }
 
-    /// Whether `stamp` of `key` is being fetched.
     pub(super) fn asking(&self, key: &K, stamp: &Stamp) -> bool {
         self.asked.get(key) == Some(stamp)
     }
@@ -171,7 +170,6 @@ impl<K: Eq + Hash, T> Reads<K, T> {
     }
 }
 
-/// A request for a version of a Secret that failed.
 struct Failing {
     stamp: Stamp,
     error: IpcError,
