@@ -700,7 +700,7 @@ async fn a_decode_that_panics_marks_the_revision_and_the_editor_goes_on() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn two_revisions_compare_with_a_value_that_changed_marked_on_both_sides() {
+async fn two_revisions_compare_with_a_value_that_changed_reading_before_and_after() {
     let fake = Fake::default();
     for (version, password) in [(1, "alpha1"), (2, "bravo2")] {
         let mut release = with_secret(version, "deployed", password);
@@ -722,21 +722,39 @@ async fn two_revisions_compare_with_a_value_that_changed_marked_on_both_sides() 
     };
 
     let values = compare(ComparedPart::Values, 1, 2).await.unwrap();
-    for side in [&values.from, &values.to] {
-        assert!(
-            side.contains(r#""password":"<6 bytes, changed>""#),
-            "{side}"
-        );
-    }
+    assert!(
+        values.from.contains(r#""password":"<6 bytes, before>""#),
+        "{}",
+        values.from
+    );
+    assert!(
+        values.to.contains(r#""password":"<6 bytes, after>""#),
+        "{}",
+        values.to
+    );
+    let reversed = compare(ComparedPart::Values, 2, 1).await.unwrap();
+    assert!(
+        reversed.from.contains(r#""password":"<6 bytes, after>""#),
+        "{}",
+        reversed.from
+    );
+    assert!(
+        reversed.to.contains(r#""password":"<6 bytes, before>""#),
+        "{}",
+        reversed.to
+    );
     let defaults = compare(ComparedPart::Defaults, 1, 2).await.unwrap();
     assert_eq!(
         defaults.from, defaults.to,
         "the chart's defaults did not change"
     );
     let manifest = compare(ComparedPart::Manifest, 1, 2).await.unwrap();
-    for side in [&manifest.from, &manifest.to] {
-        assert!(side.contains("<6 bytes, changed>"), "{side}");
-    }
+    assert!(
+        manifest.from.contains("<6 bytes, before>"),
+        "{}",
+        manifest.from
+    );
+    assert!(manifest.to.contains("<6 bytes, after>"), "{}", manifest.to);
     assert!(
         manifest.from.contains("revision: \"1\"") && manifest.to.contains("revision: \"2\""),
         "from is the left side and to the right"

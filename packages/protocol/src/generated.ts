@@ -281,10 +281,12 @@ export type ComparedPart = "values" | "defaults" | "manifest";
 
 /**
  * The two sides masked as their views are, but that a masked value which
- * differs from its counterpart reads `<N bytes, changed>` on both: values
- * pair by their path, a manifest's Secrets by kind, namespace and name, a
- * Secret whose document writes no namespace in its release's, and a key
- * by the value the server would store, `stringData`'s over `data`'s.
+ * differs from its counterpart reads `<N bytes, before>` on the lower
+ * revision's side and `<N bytes, after>` on the higher's, whichever is
+ * `from`: values pair by their path, a manifest's Secrets by kind,
+ * namespace and name, a Secret whose document writes no namespace in its
+ * release's, and a key by the value the server would store,
+ * `stringData`'s over `data`'s.
  */
 export type ComparedRevisions = { from: string, to: string, };
 

@@ -304,7 +304,7 @@ test("an open release follows its namespace's scenario: a refused one sends no p
   expect(panicking.batches[panicking.batches.length - 1]).toBe(last);
 });
 
-test("a comparison marks a masked value that changed on both sides, whichever way round it is asked", async () => {
+test("a comparison reads a masked value that changed as before in the lower revision and after in the higher, whichever way round it is asked", async () => {
   const backend = createMockBackend();
   const release = { space: "prod-eu", namespace: "payments", name: "alpha" };
   const forward = backend.invoke("helm_compare", {
@@ -322,8 +322,8 @@ test("a comparison marks a masked value that changed on both sides, whichever wa
   await vi.advanceTimersByTimeAsync(10);
   const a = await forward;
   const b = await backward;
-  expect(a.from).toContain("<16 bytes, changed>");
-  expect(a.to).toContain("<16 bytes, changed>");
+  expect(a.from).toContain("<16 bytes, before>");
+  expect(a.to).toContain("<16 bytes, after>");
   expect({ from: b.to, to: b.from }).toEqual(a);
 });
 

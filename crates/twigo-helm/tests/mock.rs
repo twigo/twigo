@@ -310,9 +310,10 @@ fn masked_only(value: &Value) -> bool {
     match value {
         Value::String(text) => {
             is_mask(text)
-                || text
-                    .strip_suffix(", changed>")
-                    .is_some_and(|size| is_mask(&format!("{size}>")))
+                || [", before>", ", after>"].iter().any(|marked| {
+                    text.strip_suffix(marked)
+                        .is_some_and(|size| is_mask(&format!("{size}>")))
+                })
         }
         Value::Number(_) => false,
         Value::Array(items) => items.iter().all(masked_only),

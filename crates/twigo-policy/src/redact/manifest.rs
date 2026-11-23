@@ -13,7 +13,8 @@ use serde_json::Value;
 use twigo_ipc::{DataEntry, ErrorCode, IpcError, ManifestSecret, ReleaseManifest, UnreadDocument};
 
 use super::{
-    Entry, Field, Held, decode_base64, entries, mask_secret_with, secret_values, text, value_of,
+    Entry, Field, Held, Side, decode_base64, entries, mask_secret_with, secret_values, text,
+    value_of,
 };
 
 /// What [`masked`] gives.
@@ -61,18 +62,31 @@ pub fn masked(manifest: &Held<String>) -> Masked {
     }
 }
 
-/// Two revisions' manifests masked so that a value of a Secret that differs
-/// from the same key of its counterpart, the Secret of the same name and
-/// namespace on the other side, reads `<N bytes, changed>` on both, and so
-/// does a `data` or `stringData` masked whole that differs from its
-/// counterpart's. A Secret whose document writes no namespace, or an empty
-/// one, is in its revision's release's `namespace`, where Helm creates it.
-pub fn compared(from: (&Held<String>, &str), to: (&Held<String>, &str)) -> (String, String) {
-    let (from_read, to_read) = (read_all(&from.0.0), read_all(&to.0.0));
-    let (from_values, to_values) = (stored(&from_read, from.1), stored(&to_read, to.1));
-    let before = written(&from.0.0, from_read, Some((&to_values, from.1))).text;
-    let after = written(&to.0.0, to_read, Some((&from_values, to.1))).text;
-    (before, after)
+/// A lower and a higher revision's manifests masked so that a value of a
+/// Secret that differs from the same key of its counterpart, the Secret of
+/// the same name and namespace on the other side, reads `<N bytes, before>`
+/// in the lower's and `<N bytes, after>` in the higher's, and so does a
+/// `data` or `stringData` masked whole that differs from its counterpart's.
+/// A Secret whose document writes no namespace, or an empty one, is in its
+/// revision's release's `namespace`, where Helm creates it.
+pub fn compared(before: (&Held<String>, &str), after: (&Held<String>, &str)) -> (String, String) {
+    let (before_read, after_read) = (read_all(&before.0.0), read_all(&after.0.0));
+    let (before_values, after_values) =
+        (stored(&before_read, before.1), stored(&after_read, after.1));
+    let lower = Versus {
+        theirs: &after_values,
+        namespace: before.1,
+        side: Side::Before,
+    };
+    let higher = Versus {
+        theirs: &before_values,
+        namespace: after.1,
+        side: Side::After,
+    };
+    (
+        written(&before.0.0, before_read, Some(lower)).text,
+        written(&after.0.0, after_read, Some(higher)).text,
+    )
 }
 
 /// One key of a Secret of the manifest, as [`ManifestSecret`] places it:
@@ -367,15 +381,24 @@ fn stored(read: &[(Document<'_>, Read)], namespace: &str) -> Stored {
     stored
 }
 
+/// The other revision of a comparison, as it stands to the one written: its
+/// Secrets, the namespace of the release the one written is of, which names
+/// a Secret that writes none, and which side the one written is.
+#[derive(Clone, Copy)]
+struct Versus<'a> {
+    theirs: &'a Stored,
+    namespace: &'a str,
+    side: Side,
+}
+
 /// The manifest written again: each document that holds a Secret from its
-/// value masked, and in a comparison marked where `counterparts`, named
-/// with the release's namespace, differ; each document Twigo could not read
-/// as its `# Source:` line and a line that says so; every other one as it
-/// stands.
+/// value masked, and in a comparison marked where `versus` differs; each
+/// document Twigo could not read as its `# Source:` line and a line that
+/// says so; every other one as it stands.
 fn written(
     manifest: &str,
     read: Vec<(Document<'_>, Read)>,
-    counterparts: Option<(&Stored, &str)>,
+    versus: Option<Versus<'_>>,
 ) -> ReleaseManifest {
     let mut text = String::with_capacity(manifest.len() + 1);
     let mut lines = 1;
@@ -396,7 +419,7 @@ fn written(
                 value,
                 secrets: places,
             } if !places.is_empty() => {
-                let rewritten = rewritten(value, &places, counterparts, |place, secret| {
+                let rewritten = rewritten(value, &places, versus, |place, secret| {
                     let metadata = &secret["metadata"];
                     secrets.push(ManifestSecret {
                         document: index as u32,
@@ -446,7 +469,7 @@ fn written(
 fn rewritten(
     mut value: Value,
     places: &[Vec<u32>],
-    counterparts: Option<(&Stored, &str)>,
+    versus: Option<Versus<'_>>,
     mut each: impl FnMut(&[u32], &Value),
 ) -> Option<String> {
     for place in places {
@@ -454,20 +477,22 @@ fn rewritten(
             continue;
         };
         each(place, secret);
-        let theirs =
-            counterparts.and_then(|(stored, namespace)| stored.get(&name(secret, namespace)));
+        let theirs = versus.and_then(|versus| {
+            let theirs = versus.theirs.get(&name(secret, versus.namespace))?;
+            Some((theirs, versus.side))
+        });
         let ours = holds(secret).keys;
         mask_secret_with(
             secret,
             |entry| {
-                theirs
-                    .and_then(|theirs| theirs.keys.get(entry.key))
-                    .is_some_and(|other| ours.get(entry.key) != Some(other))
+                let (theirs, side) = theirs?;
+                let other = theirs.keys.get(entry.key)?;
+                (ours.get(entry.key) != Some(other)).then_some(side)
             },
             |field, value| {
-                theirs
-                    .and_then(|theirs| theirs.whole.get(field.name()))
-                    .is_some_and(|other| other.as_deref() != Some(&*text(value)))
+                let (theirs, side) = theirs?;
+                let other = theirs.whole.get(field.name())?;
+                (other.as_deref() != Some(&*text(value))).then_some(side)
             },
         );
     }
@@ -511,6 +536,10 @@ fn data_entries(secret: &Value) -> Vec<DataEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn marked(text: &str) -> bool {
+        text.contains(", before>") || text.contains(", after>")
+    }
 
     const MANIFEST: &str = r#"---
 # Source: demo/templates/secret.yaml
@@ -690,7 +719,7 @@ stringData: {broken: pw-unread
     }
 
     #[test]
-    fn a_secret_s_value_that_changed_is_marked_on_both_sides() {
+    fn a_secret_s_value_that_changed_reads_before_in_the_lower_revision_and_after_in_the_higher() {
         let from = held(
             "---\n# Source: a.yaml\nkind: Secret\nmetadata: {name: db}\nstringData: {same: one, changed: old, gone: x, moved: m}\n---\n# Source: b.yaml\nkind: Secret\nmetadata: {name: db, namespace: other}\nstringData: {changed: old}\n",
         );
@@ -698,11 +727,10 @@ stringData: {broken: pw-unread
             "---\n# Source: c.yaml\nkind: List\nitems:\n- kind: Secret\n  metadata: {name: db}\n  data: {same: b25l, changed: bmV3, added: eQ==}\n  stringData: {moved: m}\n---\n# Source: b.yaml\nkind: Secret\nmetadata: {name: db, namespace: other}\nstringData: {changed: old}\n",
         );
         let (before, after) = compared((&from, "default"), (&to, "default"));
-        assert!(before.contains("changed: <3 bytes, changed>\n  gone: <1 bytes>\n  moved: <1 bytes>\n  same: <3 bytes>\n"), "{before}");
+        assert!(before.contains("changed: <3 bytes, before>\n  gone: <1 bytes>\n  moved: <1 bytes>\n  same: <3 bytes>\n"), "{before}");
         assert!(
-            after.contains(
-                "added: <1 bytes>\n    changed: <3 bytes, changed>\n    same: <3 bytes>\n"
-            ),
+            after
+                .contains("added: <1 bytes>\n    changed: <3 bytes, after>\n    same: <3 bytes>\n"),
             "{after}"
         );
         assert!(
@@ -758,10 +786,7 @@ stringData: {broken: pw-unread
             "---\n# Source: a.yaml\nkind: Secret\nmetadata: {name: db}\ndata: {password: aHVudGVyMg==, key.der: MIIBCgKCAQEA/w==}\n",
         );
         let (before, after) = compared((&from, "default"), (&to, "default"));
-        assert!(
-            !before.contains("changed") && !after.contains("changed"),
-            "{before}"
-        );
+        assert!(!marked(&before) && !marked(&after), "{before}");
         assert_eq!(
             masked(&from).manifest.secrets[0].entries,
             [
@@ -792,18 +817,16 @@ stringData: {broken: pw-unread
             "---\n# Source: a.yaml\nkind: Secret\nmetadata: {name: db, namespace: payments}\nstringData: {password: new-password}\n",
         );
         let (before, after) = compared((&from, "payments"), (&to, "payments"));
-        for side in [&before, &after] {
-            assert!(side.contains("password: <12 bytes, changed>"), "{side}");
-        }
+        assert!(before.contains("password: <12 bytes, before>"), "{before}");
+        assert!(after.contains("password: <12 bytes, after>"), "{after}");
         let (before, _) = compared((&from, "default"), (&to, "default"));
-        assert!(!before.contains("changed"), "{before}");
+        assert!(!marked(&before), "{before}");
         let empty = held(
             "---\n# Source: a.yaml\nkind: Secret\nmetadata: {name: db, namespace: \"\"}\nstringData: {password: old-password}\n",
         );
         let (before, after) = compared((&empty, "payments"), (&to, "payments"));
-        for side in [&before, &after] {
-            assert!(side.contains("password: <12 bytes, changed>"), "{side}");
-        }
+        assert!(before.contains("password: <12 bytes, before>"), "{before}");
+        assert!(after.contains("password: <12 bytes, after>"), "{after}");
     }
 
     #[test]
@@ -817,34 +840,36 @@ stringData: {broken: pw-unread
             (
                 "data: {password: hunter2}",
                 "data: {password: aHVudGVyMg==}",
-                "password: <7 bytes, changed>",
+                "password: <7 bytes",
             ),
             (
                 "stringData: {pin: 1234567}",
                 "stringData: {pin: \"1234567\"}",
-                "pin: <7 bytes, changed>",
+                "pin: <7 bytes",
             ),
             (
                 "stringData: {enabled: true}",
                 "stringData: {enabled: \"true\"}",
-                "enabled: <4 bytes, changed>",
+                "enabled: <4 bytes",
             ),
             (
                 "data: {pin: 1234}",
                 "data: {pin: \"1234\"}",
-                "pin: <3 bytes, changed>",
+                "pin: <3 bytes",
             ),
         ] {
             let (from, to) = (secret(refused), secret(stored));
             let (before, after) = compared((&from, "default"), (&to, "default"));
-            for side in [&before, &after] {
-                assert!(side.contains(mask), "{refused}: {side}");
-            }
-            let (before, after) = compared((&from, "default"), (&from, "default"));
             assert!(
-                !before.contains("changed") && !after.contains("changed"),
+                before.contains(&format!("{mask}, before>")),
                 "{refused}: {before}"
             );
+            assert!(
+                after.contains(&format!("{mask}, after>")),
+                "{refused}: {after}"
+            );
+            let (before, after) = compared((&from, "default"), (&from, "default"));
+            assert!(!marked(&before) && !marked(&after), "{refused}: {before}");
         }
     }
 
@@ -857,20 +882,19 @@ stringData: {broken: pw-unread
         };
         let (old, new) = (secret("old-password"), secret("new-password"));
         let (before, after) = compared((&old, "default"), (&new, "default"));
-        for side in [&before, &after] {
-            assert!(side.contains("stringData: <12 bytes, changed>"), "{side}");
-        }
-        let (before, after) = compared((&old, "default"), (&old, "default"));
         assert!(
-            !before.contains("changed") && !after.contains("changed"),
+            before.contains("stringData: <12 bytes, before>"),
             "{before}"
         );
+        assert!(after.contains("stringData: <12 bytes, after>"), "{after}");
+        let (before, after) = compared((&old, "default"), (&old, "default"));
+        assert!(!marked(&before) && !marked(&after), "{before}");
         let (before, _) = compared(
             (&old, "default"),
             (&secret("{password: old-password}"), "default"),
         );
         assert!(
-            before.contains("stringData: <12 bytes, changed>"),
+            before.contains("stringData: <12 bytes, before>"),
             "{before}"
         );
     }
@@ -881,17 +905,14 @@ stringData: {broken: pw-unread
             "---\n# Source: a.yaml\nkind: Secret\nmetadata: {name: db}\ndata: {k: aGk=}\nstringData: {k: there}\n",
         );
         let (before, after) = compared((&both, "default"), (&both, "default"));
-        assert!(
-            !before.contains("changed") && !after.contains("changed"),
-            "{before}"
-        );
+        assert!(!marked(&before) && !marked(&after), "{before}");
         let other = held(
             "---\n# Source: a.yaml\nkind: Secret\nmetadata: {name: db}\nstringData: {k: elsewhere}\n",
         );
         let (before, _) = compared((&both, "default"), (&other, "default"));
         assert!(
-            before.contains("data:\n  k: <2 bytes, changed>\n")
-                && before.contains("stringData:\n  k: <5 bytes, changed>\n"),
+            before.contains("data:\n  k: <2 bytes, before>\n")
+                && before.contains("stringData:\n  k: <5 bytes, before>\n"),
             "{before}"
         );
     }

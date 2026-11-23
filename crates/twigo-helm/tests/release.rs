@@ -290,7 +290,7 @@ fn each_reveal_answers_its_value_and_an_address_that_names_nothing_is_refused() 
 }
 
 #[test]
-fn two_revisions_compare_with_what_changed_marked() {
+fn two_revisions_compare_with_what_changed_before_and_after() {
     let (first, second) = (
         opened("fmt-a.sh.helm.release.v1.alpha.v1"),
         opened("fmt-a.sh.helm.release.v1.alpha.v2"),
@@ -300,30 +300,49 @@ fn two_revisions_compare_with_what_changed_marked() {
         serde_json::from_str(&values.from).unwrap(),
         serde_json::from_str(&values.to).unwrap(),
     );
-    assert_eq!(from["database"]["password"], "<16 bytes, changed>");
-    assert_eq!(to["database"]["password"], "<16 bytes, changed>");
+    assert_eq!(from["database"]["password"], "<16 bytes, before>");
+    assert_eq!(to["database"]["password"], "<16 bytes, after>");
     assert_eq!(from["zz"], "<24 bytes>", "only in the first");
     let defaults = compared(&first, &second, ComparedPart::Defaults);
     assert_eq!(defaults.from, defaults.to, "the chart did not change");
     let manifest = compared(&first, &second, ComparedPart::Manifest);
     assert!(
-        manifest.from.contains("password: <16 bytes, changed>"),
+        manifest.from.contains("password: <16 bytes, before>"),
         "{}",
         manifest.from
     );
     assert!(
-        manifest.to.contains("password: <16 bytes, changed>"),
+        manifest.to.contains("password: <16 bytes, after>"),
         "{}",
         manifest.to
     );
-    assert!(
-        manifest.to.contains("token: <15 bytes>\n"),
-        "{}",
-        manifest.to
-    );
+    for text in [&manifest.from, &manifest.to] {
+        assert!(text.contains("token: <15 bytes>\n"), "{text}");
+    }
     for text in [&manifest.from, &manifest.to, &values.from, &values.to] {
         assert!(!text.contains("user-password-r"), "{text}");
     }
+}
+
+#[test]
+fn the_lower_revision_reads_before_and_the_higher_after_whichever_is_asked_first() {
+    let (first, second) = (
+        opened("fmt-a.sh.helm.release.v1.alpha.v1"),
+        opened("fmt-a.sh.helm.release.v1.alpha.v2"),
+    );
+    for part in [
+        ComparedPart::Values,
+        ComparedPart::Defaults,
+        ComparedPart::Manifest,
+    ] {
+        let asked = compared(&first, &second, part);
+        let reversed = compared(&second, &first, part);
+        assert_eq!(reversed.from, asked.to, "{part:?}");
+        assert_eq!(reversed.to, asked.from, "{part:?}");
+    }
+    let values = compared(&second, &first, ComparedPart::Values);
+    assert!(values.from.contains("<16 bytes, after>"), "{}", values.from);
+    assert!(values.to.contains("<16 bytes, before>"), "{}", values.to);
 }
 
 fn built(release: &Json) -> Page {

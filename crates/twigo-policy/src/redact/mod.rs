@@ -68,16 +68,16 @@ fn config_map(object: &Value) -> bool {
 /// A Secret with each value replaced by its size and the last-applied
 /// annotation dropped.
 fn mask_secret(secret: &mut Value) {
-    mask_secret_with(secret, |_| false, |_, _| false);
+    mask_secret_with(secret, |_| None, |_, _| None);
 }
 
 /// [`mask_secret`], each value that `changed` picks, and each `data` or
-/// `stringData` masked whole that `changed_whole` picks, reading
-/// `<N bytes, changed>`.
+/// `stringData` masked whole that `changed_whole` picks, reading as the
+/// side they return says.
 fn mask_secret_with(
     secret: &mut Value,
-    changed: impl Fn(&Entry<'_>) -> bool,
-    changed_whole: impl Fn(Field, &Value) -> bool,
+    changed: impl Fn(&Entry<'_>) -> Option<Side>,
+    changed_whole: impl Fn(Field, &Value) -> Option<Side>,
 ) {
     let masks: Vec<(Field, String, String)> = entries(secret)
         .map(|entry| {
@@ -114,11 +114,21 @@ fn mask(bytes: u64) -> String {
     format!("<{bytes} bytes>")
 }
 
-fn marked(bytes: u64, changed: bool) -> String {
-    if changed {
-        format!("<{bytes} bytes, changed>")
-    } else {
-        mask(bytes)
+/// Which of a comparison's two revisions a text is of: a value that
+/// differs from its counterpart reads `<N bytes, before>` in the lower
+/// revision's and `<N bytes, after>` in the higher's, so that a diff of
+/// the two marks its line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Side {
+    Before,
+    After,
+}
+
+fn marked(bytes: u64, changed: Option<Side>) -> String {
+    match changed {
+        Some(Side::Before) => format!("<{bytes} bytes, before>"),
+        Some(Side::After) => format!("<{bytes} bytes, after>"),
+        None => mask(bytes),
     }
 }
 

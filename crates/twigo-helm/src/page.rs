@@ -223,15 +223,29 @@ impl Page {
 }
 
 /// Two revisions of a release masked for a comparison, a masked value that
-/// differs from its counterpart reading `<N bytes, changed>` on both sides.
+/// differs from its counterpart reading `<N bytes, before>` on the lower
+/// revision's side and `<N bytes, after>` on the higher's, whichever of them
+/// `from` is.
 pub fn compared(from: &Page, to: &Page, part: ComparedPart) -> ComparedRevisions {
-    let (from, to) = match part {
-        ComparedPart::Values => values::compared(&from.user, &to.user),
-        ComparedPart::Defaults => values::compared(&from.defaults, &to.defaults),
+    let reversed = from.summary.revision() > to.summary.revision();
+    let (before, after) = if reversed { (to, from) } else { (from, to) };
+    let (before, after) = match part {
+        ComparedPart::Values => values::compared(&before.user, &after.user),
+        ComparedPart::Defaults => values::compared(&before.defaults, &after.defaults),
         ComparedPart::Manifest => manifest::compared(
-            (&from.manifest, from.summary.namespace()),
-            (&to.manifest, to.summary.namespace()),
+            (&before.manifest, before.summary.namespace()),
+            (&after.manifest, after.summary.namespace()),
         ),
     };
-    ComparedRevisions { from, to }
+    if reversed {
+        ComparedRevisions {
+            from: after,
+            to: before,
+        }
+    } else {
+        ComparedRevisions {
+            from: before,
+            to: after,
+        }
+    }
 }

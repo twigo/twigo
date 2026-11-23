@@ -9,13 +9,13 @@
           },
           "from": 1,
           "manifest": {
-            "from": "---\n# Source: demo/templates/secret.yaml\napiVersion: v1\ndata:\n  token: <15 bytes>\nkind: Secret\nmetadata:\n  labels:\n    app.kubernetes.io/instance: alpha\n    app.kubernetes.io/name: demo\n    helm.sh/chart: demo-0.1.0\n  name: alpha-db\nstringData:\n  host: <10 bytes>\n  password: <16 bytes, changed>\ntype: Opaque\n\n---\n# Source: demo/charts/sub/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-sub\ndata:\n  greeting: \"hello from parent\"\n  subOnly: \n  region: \"us-east\"\n\n---\n# Source: demo/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-config\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\ndata:\n  replicas: \"2\"\n  image: \"registry.example/demo:1.1\"\n  region: \"us-east\"\n  fromSub: \"42\"\n  app.toml: |\n    [server]\n    listen = \"0.0.0.0:8080\"\n    \n\n---\n# Source: demo/templates/service.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: alpha-svc\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\nspec:\n  selector:\n    app.kubernetes.io/instance: alpha\n  ports:\n    - name: http\n      port: 80\n      targetPort: 8080\n\n\n",
-            "to": "---\n# Source: demo/templates/secret.yaml\napiVersion: v1\ndata:\n  token: <15 bytes>\nkind: Secret\nmetadata:\n  labels:\n    app.kubernetes.io/instance: alpha\n    app.kubernetes.io/name: demo\n    helm.sh/chart: demo-0.1.0\n  name: alpha-db\nstringData:\n  host: <10 bytes>\n  password: <16 bytes, changed>\ntype: Opaque\n\n---\n# Source: demo/charts/sub/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-sub\ndata:\n  greeting: \"hello from parent\"\n  subOnly: \"a default only the subchart has\"\n  region: \"eu-west\"\n\n---\n# Source: demo/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-config\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\ndata:\n  replicas: \"1\"\n  image: \"registry.example/demo:1.2\"\n  region: \"eu-west\"\n  fromSub: \"42\"\n  app.toml: |\n    [server]\n    listen = \"0.0.0.0:8080\"\n    \n\n---\n# Source: demo/templates/service.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: alpha-svc\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\nspec:\n  selector:\n    app.kubernetes.io/instance: alpha\n  ports:\n    - name: http\n      port: 80\n      targetPort: 8080\n\n\n"
+            "from": "---\n# Source: demo/templates/secret.yaml\napiVersion: v1\ndata:\n  token: <15 bytes>\nkind: Secret\nmetadata:\n  labels:\n    app.kubernetes.io/instance: alpha\n    app.kubernetes.io/name: demo\n    helm.sh/chart: demo-0.1.0\n  name: alpha-db\nstringData:\n  host: <10 bytes>\n  password: <16 bytes, before>\ntype: Opaque\n\n---\n# Source: demo/charts/sub/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-sub\ndata:\n  greeting: \"hello from parent\"\n  subOnly: \n  region: \"us-east\"\n\n---\n# Source: demo/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-config\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\ndata:\n  replicas: \"2\"\n  image: \"registry.example/demo:1.1\"\n  region: \"us-east\"\n  fromSub: \"42\"\n  app.toml: |\n    [server]\n    listen = \"0.0.0.0:8080\"\n    \n\n---\n# Source: demo/templates/service.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: alpha-svc\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\nspec:\n  selector:\n    app.kubernetes.io/instance: alpha\n  ports:\n    - name: http\n      port: 80\n      targetPort: 8080\n\n\n",
+            "to": "---\n# Source: demo/templates/secret.yaml\napiVersion: v1\ndata:\n  token: <15 bytes>\nkind: Secret\nmetadata:\n  labels:\n    app.kubernetes.io/instance: alpha\n    app.kubernetes.io/name: demo\n    helm.sh/chart: demo-0.1.0\n  name: alpha-db\nstringData:\n  host: <10 bytes>\n  password: <16 bytes, after>\ntype: Opaque\n\n---\n# Source: demo/charts/sub/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-sub\ndata:\n  greeting: \"hello from parent\"\n  subOnly: \"a default only the subchart has\"\n  region: \"eu-west\"\n\n---\n# Source: demo/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: alpha-config\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\ndata:\n  replicas: \"1\"\n  image: \"registry.example/demo:1.2\"\n  region: \"eu-west\"\n  fromSub: \"42\"\n  app.toml: |\n    [server]\n    listen = \"0.0.0.0:8080\"\n    \n\n---\n# Source: demo/templates/service.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: alpha-svc\n  labels:\n    app.kubernetes.io/name: demo\n    app.kubernetes.io/instance: alpha\n    helm.sh/chart: demo-0.1.0\nspec:\n  selector:\n    app.kubernetes.io/instance: alpha\n  ports:\n    - name: http\n      port: 80\n      targetPort: 8080\n\n\n"
           },
           "to": 2,
           "values": {
-            "from": "{\"database\":{\"password\":\"<16 bytes, changed>\"},\"extra\":[\"<3 bytes>\",\"<3 bytes>\"],\"global\":{\"region\":\"<7 bytes>\"},\"image\":{\"tag\":\"<3 bytes, changed>\"},\"removeMe\":null,\"replicaCount\":\"<1 bytes>\",\"sub\":{\"subOnly\":null},\"zz\":\"<24 bytes>\"}",
-            "to": "{\"database\":{\"password\":\"<16 bytes, changed>\"},\"image\":{\"tag\":\"<3 bytes, changed>\"}}"
+            "from": "{\"database\":{\"password\":\"<16 bytes, before>\"},\"extra\":[\"<3 bytes>\",\"<3 bytes>\"],\"global\":{\"region\":\"<7 bytes>\"},\"image\":{\"tag\":\"<3 bytes, before>\"},\"removeMe\":null,\"replicaCount\":\"<1 bytes>\",\"sub\":{\"subOnly\":null},\"zz\":\"<24 bytes>\"}",
+            "to": "{\"database\":{\"password\":\"<16 bytes, after>\"},\"image\":{\"tag\":\"<3 bytes, after>\"}}"
           }
         }
       ],
@@ -849,13 +849,13 @@
           },
           "from": 1,
           "manifest": {
-            "from": "---\n# Source: failing/templates/secret.yaml\napiVersion: v1\ndata:\n  password: <19 bytes, changed>\nkind: Secret\nmetadata:\n  name: epsilon-credentials\ntype: Opaque\n\n\n",
-            "to": "---\n# Source: failing/templates/secret.yaml\napiVersion: v1\ndata:\n  extra: <11 bytes>\n  password: <19 bytes, changed>\nkind: Secret\nmetadata:\n  name: epsilon-credentials\ntype: Opaque\n\n\n"
+            "from": "---\n# Source: failing/templates/secret.yaml\napiVersion: v1\ndata:\n  password: <19 bytes, before>\nkind: Secret\nmetadata:\n  name: epsilon-credentials\ntype: Opaque\n\n\n",
+            "to": "---\n# Source: failing/templates/secret.yaml\napiVersion: v1\ndata:\n  extra: <11 bytes>\n  password: <19 bytes, after>\nkind: Secret\nmetadata:\n  name: epsilon-credentials\ntype: Opaque\n\n\n"
           },
           "to": 2,
           "values": {
-            "from": "{\"password\":\"<19 bytes, changed>\"}",
-            "to": "{\"extra\":\"<11 bytes>\",\"password\":\"<19 bytes, changed>\"}"
+            "from": "{\"password\":\"<19 bytes, before>\"}",
+            "to": "{\"extra\":\"<11 bytes>\",\"password\":\"<19 bytes, after>\"}"
           }
         }
       ],
@@ -1664,8 +1664,8 @@
           },
           "to": 2,
           "values": {
-            "from": "{\"message\":\"<10 bytes, changed>\"}",
-            "to": "{\"message\":\"<6 bytes, changed>\"}"
+            "from": "{\"message\":\"<10 bytes, before>\"}",
+            "to": "{\"message\":\"<6 bytes, after>\"}"
           }
         }
       ],
@@ -2157,8 +2157,8 @@
           },
           "to": 2,
           "values": {
-            "from": "{\"message\":\"<10 bytes, changed>\"}",
-            "to": "{\"message\":\"<13 bytes, changed>\"}"
+            "from": "{\"message\":\"<10 bytes, before>\"}",
+            "to": "{\"message\":\"<13 bytes, after>\"}"
           }
         }
       ],

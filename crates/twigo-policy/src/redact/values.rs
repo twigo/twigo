@@ -11,7 +11,7 @@ use std::fmt::Write;
 use serde_json::value::RawValue;
 use twigo_ipc::{ErrorCode, IpcError, ValueStep};
 
-use super::Held;
+use super::{Held, Side, marked};
 
 /// The values with every string and number masked.
 pub fn masked(values: &Held<Box<RawValue>>) -> String {
@@ -20,15 +20,16 @@ pub fn masked(values: &Held<Box<RawValue>>) -> String {
     text
 }
 
-/// Two revisions' values masked so that a value that differs from its
-/// counterpart, the value at the same path on the other side, reads
-/// `<N bytes, changed>` on both; a value with no counterpart reads as
-/// [`masked`] writes it.
-pub fn compared(from: &Held<Box<RawValue>>, to: &Held<Box<RawValue>>) -> (String, String) {
-    let (mut before, mut after) = (String::new(), String::new());
-    write(&from.0, Some(Some(&to.0)), &mut before);
-    write(&to.0, Some(Some(&from.0)), &mut after);
-    (before, after)
+/// A lower and a higher revision's values masked so that a value that
+/// differs from its counterpart, the value at the same path on the other
+/// side, reads `<N bytes, before>` in the lower's and `<N bytes, after>` in
+/// the higher's; a value with no counterpart reads as [`masked`] writes it.
+pub fn compared(before: &Held<Box<RawValue>>, after: &Held<Box<RawValue>>) -> (String, String) {
+    let (mut lower, mut higher) = (String::new(), String::new());
+    let versus = |theirs, side| Some(Versus { theirs, side });
+    write(&before.0, versus(Some(&after.0), Side::Before), &mut lower);
+    write(&after.0, versus(Some(&before.0), Side::After), &mut higher);
+    (lower, higher)
 }
 
 /// What `path` holds, everything under it as JSON text as Helm stored it;
@@ -107,11 +108,18 @@ impl<'a> Node<'a> {
     }
 }
 
-/// Writes `raw` masked. `other` is None outside a comparison, and in one its
-/// counterpart, None where it has none.
-fn write(raw: &RawValue, other: Option<Option<&RawValue>>, out: &mut String) {
+/// A value's counterpart in a comparison, none where the other side has
+/// none, and the side the value is on.
+#[derive(Clone, Copy)]
+struct Versus<'a> {
+    theirs: Option<&'a RawValue>,
+    side: Side,
+}
+
+/// Writes `raw` masked. `versus` is None outside a comparison.
+fn write(raw: &RawValue, versus: Option<Versus<'_>>, out: &mut String) {
     let node = Node::of(raw);
-    let counterpart = other.flatten().map(Node::of);
+    let counterpart = versus.and_then(|versus| versus.theirs).map(Node::of);
     match node {
         Node::Map(map) => {
             let theirs = match &counterpart {
@@ -125,8 +133,11 @@ fn write(raw: &RawValue, other: Option<Option<&RawValue>>, out: &mut String) {
                 }
                 out.push_str(&serde_json::Value::from(key.as_str()).to_string());
                 out.push(':');
-                let counterpart = other.map(|_| theirs.and_then(|map| map.get(key).copied()));
-                write(value, counterpart, out);
+                let below = versus.map(|versus| Versus {
+                    theirs: theirs.and_then(|map| map.get(key).copied()),
+                    ..versus
+                });
+                write(value, below, out);
             }
             out.push('}');
         }
@@ -140,20 +151,22 @@ fn write(raw: &RawValue, other: Option<Option<&RawValue>>, out: &mut String) {
                 if index > 0 {
                     out.push(',');
                 }
-                let counterpart = other.map(|_| theirs.and_then(|items| items.get(index).copied()));
-                write(item, counterpart, out);
+                let below = versus.map(|versus| Versus {
+                    theirs: theirs.and_then(|items| items.get(index).copied()),
+                    ..versus
+                });
+                write(item, below, out);
             }
             out.push(']');
         }
         Node::Clear(text) => out.push_str(text),
         Node::Text(_) | Node::Number(_) => {
             let bytes = node.masked_length().unwrap_or_default();
-            let changed = counterpart.is_some_and(|theirs| !same(&node, &theirs));
-            if changed {
-                let _ = write!(out, "\"<{bytes} bytes, changed>\"");
-            } else {
-                let _ = write!(out, "\"<{bytes} bytes>\"");
-            }
+            let changed = match (versus, &counterpart) {
+                (Some(versus), Some(theirs)) if !same(&node, theirs) => Some(versus.side),
+                _ => None,
+            };
+            let _ = write!(out, "\"{}\"", marked(bytes as u64, changed));
         }
     }
 }
@@ -188,7 +201,7 @@ mod tests {
     }
 
     #[test]
-    fn a_value_that_changed_is_marked_on_both_sides_and_one_alone_is_not() {
+    fn a_value_that_changed_reads_before_in_the_lower_revision_and_after_in_the_higher() {
         let from = held(
             r#"{"same":"a","changed":"old","size":"abc","gone":"x","list":[1,2],"shape":"s"}"#,
         );
@@ -198,11 +211,11 @@ mod tests {
         let (before, after) = compared(&from, &to);
         assert_eq!(
             before,
-            r#"{"changed":"<3 bytes, changed>","gone":"<1 bytes>","list":["<1 bytes>","<1 bytes, changed>"],"same":"<1 bytes>","shape":"<1 bytes, changed>","size":"<3 bytes, changed>"}"#
+            r#"{"changed":"<3 bytes, before>","gone":"<1 bytes>","list":["<1 bytes>","<1 bytes, before>"],"same":"<1 bytes>","shape":"<1 bytes, before>","size":"<3 bytes, before>"}"#
         );
         assert_eq!(
             after,
-            r#"{"added":"<1 bytes>","changed":"<3 bytes, changed>","list":["<1 bytes>","<1 bytes, changed>","<1 bytes>"],"same":"<1 bytes>","shape":{"s":"<1 bytes>"},"size":"<4 bytes, changed>"}"#
+            r#"{"added":"<1 bytes>","changed":"<3 bytes, after>","list":["<1 bytes>","<1 bytes, after>","<1 bytes>"],"same":"<1 bytes>","shape":{"s":"<1 bytes>"},"size":"<4 bytes, after>"}"#
         );
     }
 
