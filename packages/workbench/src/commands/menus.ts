@@ -13,6 +13,7 @@ export type MenuId =
   | "resource/context"
   | "resource/details"
   | "resource/marked"
+  | "helm/marked"
   | "helm/release"
   | "helm/revision"
   | "helm/revisions"

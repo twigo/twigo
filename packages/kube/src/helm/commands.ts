@@ -6,6 +6,7 @@ import {
   History,
   ShipWheel,
   SquareArrowOutUpRight,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import * as v from "valibot";
@@ -317,6 +318,29 @@ export function registerHelm(
     "helm.canHideAll",
     true,
   );
+
+  commands.register({
+    id: "helm.revisions.clearMarks",
+    title: "Clear Marks",
+    category: "Helm",
+    icon: X,
+    enablement: "helm.marked",
+    run: (_args, lookup) => {
+      const uri = lookup("helm.page");
+      if (typeof uri === "string") releases.clearMarks(uri);
+    },
+  });
+  menus.append("helm/marked", {
+    command: "helm.revisions.clearMarks",
+    group: "9_clear",
+  });
+  keybindings.register("core", [
+    {
+      key: "escape",
+      command: "helm.revisions.clearMarks",
+      when: "helm.marked && !detailsOpen",
+    },
+  ]);
 
   const compare = (
     id: string,

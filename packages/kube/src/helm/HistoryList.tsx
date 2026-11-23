@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { History as HistoryIcon } from "lucide-react";
 import type { RevisionLine } from "@twigo/protocol";
 import {
+  ActionBar,
   DataGrid,
   type ActionGroups,
   EmptyState,
@@ -46,6 +47,7 @@ export function HistoryList({
   latest,
   states,
   menu,
+  bar,
   onOpen,
 }: {
   uri: string;
@@ -55,6 +57,8 @@ export function HistoryList({
   states: ReleaseStates;
   /** The menu of the selected revision, and of the marked ones. */
   menu: (revision: number, marked: readonly number[]) => ActionGroups;
+  /** The actions of the bar over the marked revisions. */
+  bar: (marked: readonly number[]) => ActionGroups;
   onOpen: (revision: number) => void;
 }) {
   useChanges(states.changes);
@@ -81,62 +85,76 @@ export function HistoryList({
   const item = (index: number): GridItem<RevisionLine, never> | undefined => {
     const line = lines[index];
     if (!line) return undefined;
+    const tone = statusTone(line.status);
     return {
       type: "row",
       id: String(line.revision),
       data: line,
-      ...(line.status === UNREADABLE && { tone: "error" as const }),
+      ...(tone && { tone }),
     };
   };
   return (
-    <DataGrid<RevisionLine, never>
-      label="Revisions"
-      columns={COLUMNS}
-      length={lines.length}
-      query={`${uri}\n${String(lines.length)}`}
-      item={item}
-      indexOf={(id) => lines.findIndex((line) => String(line.revision) === id)}
-      onRange={() => undefined}
-      selected={current === undefined ? undefined : String(current)}
-      onSelect={(id) => {
-        setSelected(Number(id));
-      }}
-      onActivate={() => undefined}
-      onOpen={(id) => {
-        onOpen(Number(id));
-      }}
-      marked={new Set(marked.map(String))}
-      onMark={(ids, on) => {
-        states.mark(uri, life, ids.map(Number), on);
-      }}
-      menu={
-        current === undefined || !byId.has(String(current))
-          ? []
-          : menu(current, marked)
-      }
-      loading={false}
-      cell={(line, column) => {
-        switch (column.id) {
-          case "revision":
-            return String(line.revision);
-          case "updated":
-            return line.updated ? (
-              <Age at={line.updated} />
-            ) : (
-              <span className="text-quiet" />
-            );
-          case "status":
-            return <StatusWord line={line} latest={latest} />;
-          case "chart":
-            return line.chart ?? <span className="text-quiet" />;
-          case "appVersion":
-            return line.appVersion ?? <span className="text-quiet" />;
-          default:
-            return <Description line={line} />;
+    <>
+      <DataGrid<RevisionLine, never>
+        label="Revisions"
+        columns={COLUMNS}
+        length={lines.length}
+        query={`${uri}\n${String(lines.length)}`}
+        item={item}
+        indexOf={(id) =>
+          lines.findIndex((line) => String(line.revision) === id)
         }
-      }}
-      register={registerGrid}
-    />
+        onRange={() => undefined}
+        selected={current === undefined ? undefined : String(current)}
+        onSelect={(id) => {
+          setSelected(Number(id));
+        }}
+        onActivate={() => undefined}
+        onOpen={(id) => {
+          onOpen(Number(id));
+        }}
+        marked={new Set(marked.map(String))}
+        onMark={(ids, on) => {
+          states.mark(uri, life, ids.map(Number), on);
+        }}
+        menu={
+          current === undefined || !byId.has(String(current))
+            ? []
+            : menu(current, marked)
+        }
+        loading={false}
+        cell={(line, column) => {
+          switch (column.id) {
+            case "revision":
+              return String(line.revision);
+            case "updated":
+              return line.updated ? (
+                <Age at={line.updated} />
+              ) : (
+                <span className="text-quiet" />
+              );
+            case "status":
+              return <StatusWord line={line} latest={latest} />;
+            case "chart":
+              return line.chart ?? <span className="text-quiet" />;
+            case "appVersion":
+              return line.appVersion ?? <span className="text-quiet" />;
+            default:
+              return <Description line={line} />;
+          }
+        }}
+        register={registerGrid}
+      />
+      {marked.length > 0 && (
+        <div className="absolute bottom-3 left-1/2 z-[5] -translate-x-1/2">
+          <ActionBar actions={bar(marked)}>
+            <span className="px-2 tabular-nums">
+              <span className="font-semibold">{marked.length}</span> marked
+            </span>
+          </ActionBar>
+        </div>
+      )}
+    </>
   );
 }
 

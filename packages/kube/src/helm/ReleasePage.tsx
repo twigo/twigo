@@ -257,6 +257,7 @@ export function ReleasePage({
   );
   const { revision, previous, epoch } = snapshot;
   const shown = states.shown(uri, epoch);
+  const marks = states.marks(uri, snapshot.life);
   useEffect(
     () => () => {
       states.leave(uri, epoch);
@@ -356,6 +357,7 @@ export function ReleasePage({
     scope.set("helm.canHide", under?.revealed === true);
     scope.set("helm.canRevealAll", (text?.reveal.length ?? 0) > 0);
     scope.set("helm.canHideAll", (text?.revealed.length ?? 0) > 0);
+    scope.set("helm.marked", marks.size > 0);
     scope.set("pageFocus", filterable);
     scope.set(OBJECT_URI, filterable ? uri : undefined);
     scope.set(OBJECT_FILTERED, filtered);
@@ -372,6 +374,7 @@ export function ReleasePage({
     uri,
     under,
     text,
+    marks,
     filterable,
     filtered,
   ]);
@@ -429,6 +432,20 @@ export function ReleasePage({
       onHide={hide}
       onOpen={open}
       onOpenRevision={onOpenRevision}
+      markedBar={(marked) => [
+        ...(marked.length === 2
+          ? workbench.actions("helm/revisions", lookup, {
+              space: release.space,
+              namespace: release.namespace,
+              name: release.name,
+              from: Math.min(...marked),
+              to: Math.max(...marked),
+            })
+          : []),
+        ...workbench.actions("helm/marked", (key) =>
+          key === "helm.marked" ? true : lookup(key),
+        ),
+      ]}
       revisionMenu={(at, marked) => {
         const names = {
           space: release.space,
@@ -640,6 +657,7 @@ function Body({
   onOpen,
   onOpenRevision,
   revisionMenu,
+  markedBar,
   split,
 }: {
   onText: (state: TextState | undefined) => void;
@@ -660,6 +678,8 @@ function Body({
   onOpen: (target: ObjectRef) => void;
   onOpenRevision: (revision: number) => void;
   revisionMenu: (revision: number, marked: readonly number[]) => ActionGroups;
+  /** What the bar over marked revisions offers. */
+  markedBar: (marked: readonly number[]) => ActionGroups;
   split: boolean;
 }) {
   const { releases: states, overviews, pages } = services;
@@ -694,7 +714,7 @@ function Body({
       ) : null;
     case "history":
       return snapshot.history ? (
-        <div className="h-full min-h-48">
+        <div className="relative h-full min-h-48">
           <HistoryList
             uri={uri}
             life={snapshot.life}
@@ -702,6 +722,7 @@ function Body({
             latest={snapshot.latest}
             states={states}
             menu={revisionMenu}
+            bar={markedBar}
             onOpen={onOpenRevision}
           />
         </div>

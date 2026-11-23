@@ -125,6 +125,11 @@ export class ReleaseStates {
     this.changes.emit();
   }
 
+  /** The marks of the revisions History shows, all at once. */
+  clearMarks(uri: string): void {
+    if (this.#marks.delete(uri)) this.changes.emit();
+  }
+
   /** What was revealed in `epoch`: nothing once the view is in another. */
   shown(uri: string, epoch: number): ReadonlyMap<string, Shown> {
     const held = this.#reveals.get(uri);

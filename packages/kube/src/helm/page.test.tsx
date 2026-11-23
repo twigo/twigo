@@ -561,7 +561,7 @@ const forbidden = {
   message: "",
 } as const;
 
-test("History draws a line as the list draws a row: Truncated in the error band where its revision cannot be read, the label's status with a mark where the request for it failed", async () => {
+test("History draws a line as the list draws a row: the error band where its revision failed or cannot be read, and the label's status with a mark where the request for it failed", async () => {
   const { backend, send } = core();
   await openHistory(backend);
   act(() => {
@@ -578,13 +578,13 @@ test("History draws a line as the list draws a row: Truncated in the error band 
   expect(cellOf(revisionRow(3), "status")).toBe("Truncated");
   expect(revisionRow(3).dataset.tone).toBe("error");
   expect(within(revisionRow(3)).queryByRole("img")).toBeNull();
-  for (const [revision, status] of [
-    [2, "deployed"],
-    [1, "failed"],
+  for (const [revision, status, tone] of [
+    [2, "deployed", undefined],
+    [1, "failed", "error"],
   ] as const) {
     const row = revisionRow(revision);
     expect(cellOf(row, "status")).toBe(status);
-    expect(row.dataset.tone).toBeUndefined();
+    expect(row.dataset.tone).toBe(tone);
     const mark = within(row).getByRole("img", {
       name: `Could not fetch revision ${String(revision)}`,
     });
@@ -633,6 +633,54 @@ test("the revisions marked in History are gone when the release is uninstalled a
     send({ seq: 82, history: [line(2, "deployed"), line(1, "superseded")] });
   });
   await settle(3);
+  expect(markedRevisions()).toEqual([]);
+});
+
+test("two marked revisions bring the marked bar, as the pods list's: the count, the three comparisons and Clear Marks, which Escape does too", async () => {
+  const { backend } = core();
+  const workbench = await openHistory(backend);
+  const bar = () =>
+    screen.queryByText("marked")?.closest('[role="toolbar"]') ?? null;
+  expect(bar()).toBeNull();
+  await mark(2);
+  expect(bar()?.textContent).toBe("1 markedClear Marks⎋");
+  await mark(1);
+  expect(bar()?.textContent).toMatch(
+    /^2 markedCompare ValuesCompare DefaultsCompare ManifestsClear Marks⎋$/,
+  );
+
+  const opened = vi
+    .spyOn(workbench.editors, "open")
+    .mockImplementation(() => undefined);
+  fireEvent.click(
+    within(bar() as HTMLElement).getByRole("button", {
+      name: /^Compare Manifests/,
+    }),
+  );
+  await settle(2);
+  expect(opened).toHaveBeenLastCalledWith(
+    diffUri({
+      kind: "release",
+      release: { space: "prod-eu", namespace: "payments", name: "alpha" },
+      from: 1,
+      to: 2,
+      part: "manifest",
+    }),
+  );
+
+  fireEvent.click(
+    within(bar() as HTMLElement).getByRole("button", { name: /^Clear Marks/ }),
+  );
+  await settle(2);
+  expect(markedRevisions()).toEqual([]);
+  expect(bar()).toBeNull();
+
+  await mark(1);
+  fireEvent.keyDown(screen.getByRole("grid", { name: "Revisions" }), {
+    key: "Escape",
+    code: "Escape",
+  });
+  await settle(2);
   expect(markedRevisions()).toEqual([]);
 });
 
