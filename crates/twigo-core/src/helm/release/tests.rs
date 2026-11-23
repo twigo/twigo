@@ -968,3 +968,40 @@ async fn the_shown_revision_s_and_a_history_line_s_failure_shows_only_on_the_ver
     })
     .await;
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_pin_to_the_page_shown_while_a_newer_one_is_fetched_keeps_it() {
+    let fake = Fake::default();
+    revision(&fake, 1, "deployed");
+    let mut rig = Rig::open(fake, None, OVERVIEW).await;
+    rig.until("revision 1", |shown| {
+        notes(shown) == Some("Revision 1 of app")
+    })
+    .await;
+
+    rig.fake.state().gets_take = Duration::from_secs(1);
+    revision(&rig.fake, 2, "deployed");
+    let opened = &rig.opened;
+    let unacked = loop {
+        let batch = rig.watched.next(|_| {}).await;
+        if batch.latest == Some(2) {
+            break batch.seq;
+        }
+        opened.ack(batch.seq);
+    };
+    while rig.fake.state().gets_overlap == 0 {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    rig.opened.set_view(Some(1), OVERVIEW);
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let from = rig.watched.sent.len();
+    rig.opened.ack(unacked);
+    rig.drain_for(Duration::from_secs(3)).await;
+    let said: Vec<_> = rig.watched.sent[from..]
+        .iter()
+        .map(|batch| batch.revision)
+        .collect();
+    assert!(!said.contains(&Some(2)), "{said:?}");
+    assert_eq!(rig.opened.shown().map(|page| page.revision), Some(1));
+    assert_eq!(rig.gets(1), 1);
+}

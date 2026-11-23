@@ -93,19 +93,22 @@ impl<K: Eq + Hash, T> Reads<K, T> {
     }
 
     /// Marks `stamp` of `key` asked where it wants a fetch, and says whether
-    /// it does.
+    /// it does; where it does not, a request for another version of `key`
+    /// is no longer the one asked, so its answer is not taken.
     pub(super) fn ask(&mut self, key: K, stamp: &Stamp) -> bool {
         let wants = self.wants(&key, stamp);
         if wants {
             self.asked.insert(key, stamp.clone());
+        } else if !self.asking(&key, stamp) {
+            self.asked.remove(&key);
         }
         wants
     }
 
-    /// Takes what the request for `stamp` of `key` answered, unless another
-    /// was asked since, and says whether it did: a failed request grows the
-    /// pause of the last one for that Secret, anything else is kept as `keep`
-    /// makes it.
+    /// Takes what the request for `stamp` of `key` answered, unless it is no
+    /// longer the one asked, and says whether it did: a failed request grows
+    /// the pause of the last one for that Secret, anything else is kept as
+    /// `keep` makes it.
     pub(super) fn answered<U>(
         &mut self,
         key: K,

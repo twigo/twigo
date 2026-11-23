@@ -797,3 +797,51 @@ async fn an_answer_twigo_cannot_read_keeps_the_label_s_status_and_is_asked_again
     rig.drain_for(Duration::from_secs(10)).await;
     assert!(testing::gets(&rig.fake, "a", "app", 1) >= 3);
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_row_that_falls_back_from_a_revision_deleted_while_fetched_keeps_its_chart() {
+    let mut rig = Rig::over(&["a"], |fake| {
+        revision(fake, "a", "app", 1, "deployed");
+    })
+    .await;
+    rig.until("revision 1's chart", |seen| {
+        seen.text("a", "app", "Chart") == "demo-1.1.0"
+    })
+    .await;
+
+    rig.fake.state().gets_take = Duration::from_secs(1);
+    revision(&rig.fake, "a", "app", 2, "pending-upgrade");
+    let unacked = loop {
+        let batch = rig.batches.recv().await.expect("the list runs");
+        let seq = batch.seq;
+        rig.seen.apply(batch);
+        if rig.seen.text("a", "app", "Revision") == "2" {
+            break seq;
+        }
+        rig.list.ack(seq);
+    };
+    while rig.fake.state().gets_overlap == 0 {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    gone(&rig.fake, "a", "app", 2);
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    rig.list.ack(unacked);
+    let mut rows = Vec::new();
+    for _ in 0..300 {
+        rig.drain_for(Duration::from_millis(10)).await;
+        let row = (
+            rig.seen.text("a", "app", "Revision"),
+            rig.seen.text("a", "app", "Chart"),
+        );
+        if rows.last() != Some(&row) {
+            rows.push(row);
+        }
+    }
+    assert!(
+        rows.iter()
+            .all(|(revision, chart)| revision != "1" || chart == "demo-1.1.0"),
+        "{rows:?}"
+    );
+    assert_eq!(rig.seen.text("a", "app", "Revision"), "1");
+    assert_eq!(testing::gets(&rig.fake, "a", "app", 1), 1);
+}

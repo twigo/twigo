@@ -293,6 +293,7 @@ async fn run(
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let permits = Arc::new(Semaphore::new(AT_ONCE));
     let mut fetching: FuturesUnordered<BoxFuture<'static, Answer>> = FuturesUnordered::new();
+    let mut landed: Vec<Answer> = Vec::new();
     let mut revisions: BTreeMap<u32, Revision> = BTreeMap::new();
     let mut placed: HashMap<RowKey, u32> = HashMap::new();
     let mut pages: Reads<(), Shown> = Reads::default();
@@ -318,27 +319,7 @@ async fn run(
                 false
             }
             Some(answer) = fetching.next(), if !fetching.is_empty() => {
-                match answer {
-                    Answer::Page(revision, stamp, page) => {
-                        let kept = !matches!(page, Err(Failed::Request(_)));
-                        if pages.answered((), stamp, page, |page| Shown { revision, page }) && kept {
-                            gone = None;
-                            dirty.page = true;
-                            dirty.values = true;
-                            dirty.manifest = true;
-                        }
-                    }
-                    Answer::Line(revision, stamp, line) => {
-                        lines.answered(revision, stamp, line, |line| {
-                            line.unwrap_or_else(|error| undecoded(revision, UNREADABLE, Some(error)))
-                        });
-                    }
-                    Answer::Latest(stamp, decoded) => {
-                        newest.answered((), stamp, decoded, |decoded| {
-                            decoded.map_err(|error| error.code)
-                        });
-                    }
-                }
+                landed.push(answer);
                 false
             }
         };
@@ -412,6 +393,41 @@ async fn run(
             }
             _ => gone = None,
         }
+        let newest_row =
+            latest.and_then(|latest| revisions.get(&latest).map(|held| (latest, held)));
+        newest.retain(|()| newest_row.is_some());
+        if let Some((latest, held)) = newest_row
+            && wanted != Some(latest)
+            && parts.overview
+            && newest.ask((), &held.stamp)
+        {
+            fetching.push(newest_of(&target, &held.row, held.stamp.clone()));
+        }
+        // Taken after this tick's asks, so that one for a revision no longer
+        // wanted is not.
+        for answer in landed.drain(..) {
+            match answer {
+                Answer::Page(revision, stamp, page) => {
+                    let kept = !matches!(page, Err(Failed::Request(_)));
+                    if pages.answered((), stamp, page, |page| Shown { revision, page }) && kept {
+                        gone = None;
+                        dirty.page = true;
+                        dirty.values = true;
+                        dirty.manifest = true;
+                    }
+                }
+                Answer::Line(revision, stamp, line) => {
+                    lines.answered(revision, stamp, line, |line| {
+                        line.unwrap_or_else(|error| undecoded(revision, UNREADABLE, Some(error)))
+                    });
+                }
+                Answer::Latest(stamp, decoded) => {
+                    newest.answered((), stamp, decoded, |decoded| {
+                        decoded.map_err(|error| error.code)
+                    });
+                }
+            }
+        }
         // A failure of the request for the wanted revision's Secret as it
         // stands, which withdraws the page shown.
         let page_failing = wanted_held.and_then(|held| pages.failure(&(), &held.stamp));
@@ -442,9 +458,6 @@ async fn run(
         // The newest revision's summary, which the overview's header prints
         // as the list's row does: the page's where the editor shows that
         // revision, else decoded on its own.
-        let newest_row =
-            latest.and_then(|latest| revisions.get(&latest).map(|held| (latest, held)));
-        newest.retain(|()| newest_row.is_some());
         let known = match newest_row {
             None => Known::default(),
             Some((latest, held)) if wanted == Some(latest) => {
@@ -458,9 +471,6 @@ async fn run(
                 Known::of(&held.stamp, paged, page_failing)
             }
             Some((_, held)) => {
-                if parts.overview && newest.ask((), &held.stamp) {
-                    fetching.push(newest_of(&target, &held.row, held.stamp.clone()));
-                }
                 let decoded = newest
                     .get(&())
                     .map(|(stamp, decoded)| (stamp, decoded.as_ref().map_err(|code| *code)));

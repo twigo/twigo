@@ -65,46 +65,40 @@ impl Source for Releases {
             status,
             parts,
         } = self.secrets.drain_shown();
-        let answers = self.fetches.answers();
         let held = &mut self.held;
-        let (delta, touched) = match delta {
+        let (reset, mut touched) = match delta {
             Delta::Reset { rows, .. } => {
                 held.reset(rows);
-                for (release, stamp, read) in answers {
-                    held.answered(release, stamp, read);
-                }
-                let rows = held.rows();
-                let touched: Vec<Release> = held.releases.keys().cloned().collect();
-                let delta = Delta::Reset {
-                    rows,
-                    columns: Some(Arc::clone(&self.columns)),
-                };
-                (delta, touched)
+                (true, held.releases.keys().cloned().collect())
             }
-            Delta::Changed { upserted, removed } => {
-                let mut touched = held.change(upserted, &removed);
-                for (release, stamp, read) in answers {
-                    touched.extend(held.answered(release, stamp, read));
-                }
-                let (mut upserted, mut removed) = (Vec::new(), Vec::new());
-                for release in &touched {
-                    match held.row(release) {
-                        Some(row) => upserted.push(row),
-                        None => removed.push(release.key()),
-                    }
-                }
-                (
-                    Delta::Changed { upserted, removed },
-                    touched.into_iter().collect(),
-                )
+            Delta::Changed { upserted, removed } => (false, held.change(upserted, &removed)),
+        };
+        // Asked before the answers are taken, so that one for a revision
+        // that is no longer its release's newest is not.
+        let mut unread: Vec<Unread> = touched
+            .iter()
+            .filter_map(|release| held.unread(release.clone()))
+            .collect();
+        for (release, stamp, read) in self.fetches.answers() {
+            touched.extend(held.answered(release, stamp, read));
+        }
+        let delta = if reset {
+            Delta::Reset {
+                rows: held.rows(),
+                columns: Some(Arc::clone(&self.columns)),
             }
+        } else {
+            let (mut upserted, mut removed) = (Vec::new(), Vec::new());
+            for release in &touched {
+                match held.row(release) {
+                    Some(row) => upserted.push(row),
+                    None => removed.push(release.key()),
+                }
+            }
+            Delta::Changed { upserted, removed }
         };
         let due: Vec<Release> = held.reads.due().cloned().collect();
-        let unread: Vec<Unread> = touched
-            .into_iter()
-            .chain(due)
-            .filter_map(|release| held.unread(release))
-            .collect();
+        unread.extend(due.into_iter().filter_map(|release| held.unread(release)));
         for unread in unread {
             self.fetches.fetch(unread);
         }
