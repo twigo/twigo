@@ -238,10 +238,18 @@ fn go_json(float: f64) -> String {
 /// The sign, the shortest digits that read back as `float`, the nearest
 /// of them and a tie to the even, as Go rounds them, and the exponent of
 /// the first: Rust's `{:e}` gives as many digits but rounds a tie up, and
-/// its `{:.*e}` rounds the exact value, a tie to the even.
+/// its `{:.*e}` rounds the exact value, a tie to the even, which at a power
+/// of two, where the floats below are twice as dense as above, can fall
+/// outside what reads back as `float`, where `{:e}`'s digits stand.
 fn shortest(float: f64) -> (&'static str, String, i32) {
-    let (_, digits, _) = scientific(&format!("{float:e}"));
-    scientific(&format!("{float:.*e}", digits.len() - 1))
+    let written = format!("{float:e}");
+    let (_, digits, _) = scientific(&written);
+    let rounded = format!("{float:.*e}", digits.len() - 1);
+    if rounded.parse::<f64>() == Ok(float) {
+        scientific(&rounded)
+    } else {
+        scientific(&written)
+    }
 }
 
 /// `digits` with the point where `exponent` puts it, padded with zeros.
@@ -400,6 +408,7 @@ mod tests {
             (1e21, "1e+21"),
             (1.5e300, "1.5e+300"),
             (0.000_001, "0.000001"),
+            (2f64.powi(-24), "5.960464477539063e-08"),
             (-0.000_001_234, "-0.000001234"),
             (1e-7, "1e-7"),
             (1.5e-10, "1.5e-10"),
@@ -417,6 +426,7 @@ mod tests {
             "stringData": { "pin": 1_234_567.0, "port": 5432, "n": 1_152_921_504_606_846_976.0 },
         })]);
         assert_eq!(
+            (2f64.powi(-24), "5.960464477539063e-8"),
             scrub(
                 "PIN 1.234567e+06, got &value.valueUnstructured{Value:1234567}, port 5432, n {Value:1152921504606847000}.",
                 &secrets
