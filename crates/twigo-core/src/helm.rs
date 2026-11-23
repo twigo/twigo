@@ -23,16 +23,21 @@ const ITEM: &str = "helm releases";
 /// What Helm lists its releases by (`List` in its Secrets driver).
 const OWNER: &str = "owner=helm";
 
+/// The core group's Secrets, which Helm keeps its releases in.
+fn secret_resource() -> Resource {
+    Resource {
+        group: String::new(),
+        version: "v1".to_owned(),
+        resource: "secrets".to_owned(),
+        namespaced: true,
+    }
+}
+
 /// The metadata of the release Secrets of `namespaces` in `context`.
 fn secrets(context: String, namespaces: Vec<String>) -> Query {
     Query {
         context,
-        resource: Resource {
-            group: String::new(),
-            version: "v1".to_owned(),
-            resource: "secrets".to_owned(),
-            namespaced: true,
-        },
+        resource: secret_resource(),
         format: RowFormat::Metadata,
         namespaces,
         selectors: Selectors {

@@ -16,7 +16,7 @@ use http_body_util::BodyExt;
 use kube::client::Body;
 use serde::Deserialize;
 use twigo_cache::encoding;
-use twigo_cache::hub::{Hub, Resource};
+use twigo_cache::hub::Hub;
 use twigo_helm::Stored;
 use twigo_ipc::{ErrorCode, IpcError};
 use twigo_kube::client::Clients;
@@ -86,13 +86,7 @@ async fn fetched(
     namespace: &str,
     name: &str,
 ) -> Result<(HeaderMap, Bytes), Failed> {
-    let secrets = Resource {
-        group: String::new(),
-        version: "v1".to_owned(),
-        resource: "secrets".to_owned(),
-        namespaced: true,
-    };
-    let path = secrets
+    let path = super::secret_resource()
         .object_path(Some(namespace), name)
         .map_err(Failed::Read)?;
     let request = Request::get(path)
