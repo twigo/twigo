@@ -698,10 +698,7 @@ impl Rig {
 }
 
 fn path(release: &str, version: u32) -> String {
-    format!(
-        "/api/v1/namespaces/a/secrets/{}",
-        secret_name(release, version)
-    )
+    testing::path("a", release, version)
 }
 
 #[tokio::test(start_paused = true)]

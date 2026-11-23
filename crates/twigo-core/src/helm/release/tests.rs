@@ -106,10 +106,7 @@ impl Rig {
 }
 
 fn path(version: u32) -> String {
-    format!(
-        "/api/v1/namespaces/a/secrets/{}",
-        secret_name("app", version)
-    )
+    testing::path("a", "app", version)
 }
 
 fn release_ref() -> ReleaseRef {
