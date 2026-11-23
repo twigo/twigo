@@ -12,7 +12,6 @@ import { isShown, type ShownUsage } from "./metrics";
 import { OpenView } from "./openView";
 
 export interface ObjectSnapshot {
-  readonly seq: number;
   readonly status: ViewState;
   /** False until the object is listed, and once it is deleted. */
   readonly exists: boolean;
@@ -30,7 +29,6 @@ export interface ObjectSnapshot {
 }
 
 export const INITIAL_OBJECT: ObjectSnapshot = {
-  seq: 0,
   status: { state: "connecting" },
   exists: false,
   overview: undefined,
@@ -77,7 +75,6 @@ export class ObjectView extends OpenView<
 
   protected next(batch: ObjectBatch, previous: ObjectSnapshot): ObjectSnapshot {
     return {
-      seq: batch.seq,
       status: batch.status,
       exists: batch.exists,
       overview: batch.exists
