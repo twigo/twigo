@@ -2,7 +2,7 @@ import type { HelmPart, ReleaseManifest, ValueStep } from "@twigo/protocol";
 import { outlineOf, type Entry } from "../edit/outline";
 
 /** A masked value as the core writes it: `<12 bytes>`, and `<12 bytes, changed>` in a comparison. */
-export const MASK = /<\d+ bytes(?:, changed)?>/;
+const MASK = /<\d+ bytes(?:, changed)?>/;
 
 /** What a Reveal gave, by the part it answers. */
 export interface Shown {
