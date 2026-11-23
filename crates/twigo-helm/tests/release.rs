@@ -223,7 +223,7 @@ fn notes_and_a_description_that_print_a_secret_s_value_are_scrubbed() {
         format!("NOTES:\n{stored}\n"),
         text("get/epsilon.r2.v4.notes.txt")
     );
-    let line = line(epsilon.summary(), Some(description.clone()));
+    let line = line(&epsilon);
     assert_eq!((line.revision, line.status.as_str()), (2, "failed"));
     assert_eq!(line.description, Some(description));
 }

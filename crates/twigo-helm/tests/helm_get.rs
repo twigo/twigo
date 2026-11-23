@@ -165,7 +165,7 @@ fn a_history_line_is_what_helm_history_prints() {
         let ours: Vec<Value> = revisions()
             .filter(|(printed, _)| printed.starts_with(release))
             .map(|(_, page)| {
-                let line = line(page.summary(), Some(page.description()));
+                let line = line(&page);
                 let description = line
                     .description
                     .as_ref()

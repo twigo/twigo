@@ -29,8 +29,7 @@ use twigo_cache::store::RowKey;
 use twigo_cache::table::Row;
 use twigo_helm::{Page, Stored, Summary};
 use twigo_ipc::{
-    Discovered, ErrorCode, IpcError, ReleaseBatch, ReleaseParts, Resource, RevisionLine, Scrubbed,
-    ViewState,
+    Discovered, ErrorCode, IpcError, ReleaseBatch, ReleaseParts, Resource, RevisionLine, ViewState,
 };
 use twigo_panic::contain;
 
@@ -592,7 +591,7 @@ async fn run(
                         stamp: Some(stamp),
                         page: Ok(page),
                     }) if *at == revision && *stamp == held.stamp => {
-                        let line = twigo_helm::line(page.summary(), Some(page.description()));
+                        let line = twigo_helm::line(page);
                         lines.insert(revision, (held.stamp.clone(), line));
                         lines_failed.remove(&revision);
                     }
@@ -849,9 +848,7 @@ fn line_of(
 /// A revision as History shows it, its description scrubbed of the values
 /// of that revision's Secrets; its page goes once the line is made.
 fn history_line(stored: &Stored<'_>) -> Result<RevisionLine, IpcError> {
-    let page = twigo_helm::page(stored)?;
-    let description: Scrubbed = page.description();
-    Ok(twigo_helm::line(page.summary(), Some(description)))
+    twigo_helm::page(stored).map(|page| twigo_helm::line(&page))
 }
 
 #[cfg(test)]
