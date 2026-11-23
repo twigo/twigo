@@ -52,7 +52,8 @@ struct Mocked {
 struct Latest {
     name: String,
     revision: u32,
-    /// The label's, as the list reads it before decoding.
+    /// The release's once its revision is decoded, else the label's, as the
+    /// core's row reads it.
     status: String,
     chart: Option<String>,
     app_version: Option<String>,
@@ -118,7 +119,10 @@ fn mocked(namespace: &str, name: &str, read: &[Read]) -> Mocked {
     let latest = Latest {
         name: name.to_owned(),
         revision: newest.revision,
-        status: newest.status.clone(),
+        status: summary.map_or_else(
+            || newest.status.clone(),
+            |summary| summary.status().word().to_owned(),
+        ),
         chart: summary.and_then(|summary| summary.chart()),
         app_version: summary.and_then(|summary| summary.app_version().map(str::to_owned)),
         last_deployed: summary
