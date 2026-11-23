@@ -794,38 +794,29 @@ fn undecoded(revision: u32, status: &str, problem: Option<IpcError>) -> Revision
     }
 }
 
-/// Decodes the revision in `secret`, through the context's clients.
-async fn decoded<T: Send + 'static>(
-    target: (Hub, String, String),
-    secret: Box<str>,
+/// Decodes the revision in `row`'s Secret, through the context's clients.
+fn decoded<T: Send + 'static>(
+    target: &Target,
+    row: &Row,
     decode: fn(&Stored<'_>) -> Result<T, IpcError>,
-) -> Result<T, Failed> {
-    let (hub, context, namespace) = target;
-    fetch::decoded(&hub, &context, &namespace, &secret, decode).await
-}
-
-fn where_of(target: &Target) -> (Hub, String, String) {
-    (
+) -> impl Future<Output = Result<T, Failed>> + Send + 'static {
+    let (hub, context, namespace) = (
         target.hub.clone(),
         target.context.clone(),
         target.namespace.clone(),
-    )
+    );
+    let secret = row.meta.name.clone();
+    async move { fetch::decoded(&hub, &context, &namespace, &secret, decode).await }
 }
 
 fn page_of(target: &Target, row: &Row, revision: u32, stamp: Stamp) -> BoxFuture<'static, Answer> {
-    let (at, secret) = (where_of(target), row.meta.name.clone());
-    Box::pin(async move {
-        Answer::Page(
-            revision,
-            stamp,
-            decoded(at, secret, twigo_helm::page).await.map(Arc::new),
-        )
-    })
+    let page = decoded(target, row, twigo_helm::page);
+    Box::pin(async move { Answer::Page(revision, stamp, page.await.map(Arc::new)) })
 }
 
 fn newest_of(target: &Target, row: &Row, stamp: Stamp) -> BoxFuture<'static, Answer> {
-    let (at, secret) = (where_of(target), row.meta.name.clone());
-    Box::pin(async move { Answer::Latest(stamp, decoded(at, secret, twigo_helm::summary).await) })
+    let summary = decoded(target, row, twigo_helm::summary);
+    Box::pin(async move { Answer::Latest(stamp, summary.await) })
 }
 
 fn line_of(
@@ -835,13 +826,13 @@ fn line_of(
     stamp: Stamp,
     permits: &Arc<Semaphore>,
 ) -> BoxFuture<'static, Answer> {
-    let (at, secret, permits) = (where_of(target), row.meta.name.clone(), Arc::clone(permits));
+    let (line, permits) = (decoded(target, row, history_line), Arc::clone(permits));
     Box::pin(async move {
         let _permit = permits
             .acquire_owned()
             .await
             .expect("an editor's permits are never closed");
-        Answer::Line(revision, stamp, decoded(at, secret, history_line).await)
+        Answer::Line(revision, stamp, line.await)
     })
 }
 
