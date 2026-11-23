@@ -9,7 +9,7 @@
 //! masked on both where the object opened, the edit, the live object or
 //! the answer holds a Helm release, warnings and error text are scrubbed of
 //! every value it knows, what the dry-run's answer adds included, whole
-//! tokens only, a plan names no value, and the `kubectl` line of a Secret,
+//! tokens only and none shorter than four characters, a plan names no value, and the `kubectl` line of a Secret,
 //! or of a ConfigMap that holds a Helm release, carries no body, so it
 //! stops being runnable at `-f -`, where the configuration would go on
 //! stdin.

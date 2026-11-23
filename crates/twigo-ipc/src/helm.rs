@@ -99,7 +99,8 @@ pub struct ReleaseBatch {
     /// the Secret of the one shown goes until the next page is read or the
     /// read fails, whether the release follows the latest or the revision
     /// was pinned and Helm still keeps it; a pinned revision Helm no longer
-    /// keeps is named at once, with `helm.revision-gone`.
+    /// keeps is named at once, with `helm.revision-gone`, while Helm keeps
+    /// another revision of the release, and null once it keeps none.
     pub revision: Option<u32>,
     /// The highest revision Helm keeps, which `helm get` reads.
     pub latest: Option<u32>,
@@ -138,7 +139,9 @@ pub struct ReleaseBatch {
 }
 
 /// A text with every value of the revision's Secrets that stands in it as a
-/// whole token replaced by `<hidden>`.
+/// whole token replaced by `<hidden>`, but a value shorter than four
+/// characters or with no letter or digit, which stays, as it cannot be told
+/// from the numbers, the words and the punctuation around it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct Scrubbed {
     pub text: String,
