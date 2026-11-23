@@ -658,6 +658,7 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     Its command line is helm's only where helm prints exactly that place: `helm get values` with `-o json` for the person's whole values, and `helm get all` with `--template '{{index .Release.Config …}}'` for a string or a boolean of theirs, since Helm reads every number as a float, which Go prints in exponent form from a million on, and prints null as `<no value>`; any other place has none.
   - Releases are read from Secrets only.
     A ConfigMap labelled `owner=helm`, where Helm's ConfigMap driver keeps a release, shows its `release` as a size and never sends its value, which an edit's refusal is scrubbed of as a Secret's values are, and an edit's kubectl line stops at `-f -`, as a Secret's does.
+    Its view drops the last-applied annotation, which holds the release in clear, as a Secret's view drops it.
     Both sides of an edit's diff show it as a size where the object opened, the edit, the live object or the answer holds a release, so that an edit that drops or changes `owner: helm` shows none.
 - **Events for an object.**
   A watch of `events.k8s.io/v1` with a field selector on the regarding object: its `regarding.uid`, a node's `regarding.kind=Node,regarding.name=…`, since the kubelet reports a node's name as its uid, and a mirror pod's the uid of the pod it mirrors, as kubectl describe reads them ([research](research/details.md#events)).
