@@ -122,17 +122,31 @@ test("helm:view is a second view of the Explorer container, and the explorer has
   );
 });
 
-test("mask:tree shows the values as rows of key paths with an eye on each masked one, which reveals it until Hide", async () => {
+test("mask:tree shows the values as rows of key paths in a tree that the list keys walk, where Enter or a click on a masked row reveals it until the same is done again", async () => {
   variant("mask:tree");
   await open(alpha);
   fireEvent.click(screen.getByRole("tab", { name: "Values" }));
   await settle(6);
   const tree = screen.getByRole("tree", { name: "Values" });
-  const password = within(tree).getByRole("treeitem", { name: /password/ });
-  expect(password.textContent).toContain("<16 bytes>");
-  fireEvent.click(
-    screen.getByRole("button", { name: "Reveal database.password" }),
-  );
+  const item = (name: RegExp) => within(tree).getByRole("treeitem", { name });
+  expect(item(/password/).textContent).toContain("<16 bytes>");
+  expect(item(/password/).getAttribute("aria-level")).toBe("2");
+
+  const press = (code: string) => {
+    fireEvent.keyDown(tree, { code, key: code });
+  };
+  const at = () => {
+    const id = tree.getAttribute("aria-activedescendant");
+    return id === null ? undefined : document.getElementById(id)?.textContent;
+  };
+  tree.focus();
+  expect(at()).toContain("database");
+  press("ArrowDown");
+  expect(at()).toContain("password");
+  press("ArrowLeft");
+  expect(at()).toContain("database");
+  press("ArrowDown");
+  press("Enter");
   await settle(3);
   expect(screen.getByRole("dialog").textContent).toContain(
     "Reveal database.password of release alpha (revision 2)",
@@ -141,9 +155,7 @@ test("mask:tree shows the values as rows of key paths with an eye on each masked
   await settle(4);
   expect(tree.textContent).toContain("user-password-r2");
   expect(tree.textContent).not.toContain("<16 bytes>");
-  fireEvent.click(
-    screen.getByRole("button", { name: "Hide database.password" }),
-  );
+  fireEvent.click(item(/password/));
   await settle(2);
   expect(tree.textContent).not.toContain("user-password-r2");
   expect(tree.textContent).toContain("<16 bytes>");
