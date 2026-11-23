@@ -14,9 +14,11 @@ use crate::{
 };
 
 /// The releases of a space's namespaces, one row a release, which is its
-/// latest revision: Name, Revision and Status from the labels Helm sets on its
-/// Secrets, Chart (`name-version`), App Version and Updated once that revision
-/// is decoded. Updated is an `age` column that reads the row's `created`, the
+/// latest revision: Name and Revision from the labels Helm sets on its
+/// Secrets, Status from the `status` label until that revision is decoded and
+/// the release's own after, as `helm list` prints it, and Chart
+/// (`name-version`), App Version and Updated once that revision is decoded.
+/// Updated is an `age` column that reads the row's `created`, the
 /// revision's `info.last_deployed`; Problem holds the wire name of the code
 /// that keeps the revision from being read, and is empty when it is. Its
 /// batches are [`ListBatch`](crate::ListBatch)es, and `list_set_window`,
