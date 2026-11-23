@@ -73,6 +73,45 @@ test("helm:sidebar is a third container whose rows read the list's batches, a cl
   });
 });
 
+async function sidebar(scenario: "rbacNamespaces" | "rbacTypedNamespaces") {
+  variant("helm:sidebar");
+  const workbench = await mountKube(createMockBackend(scenario));
+  fireEvent.mouseDown(screen.getByRole("tab", { name: "Helm" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Helm" }));
+  await settle(60);
+  return workbench;
+}
+
+test("helm:sidebar says which namespaces it leaves out, as the list does: counted where the credentials may list some, named where one is refused", async () => {
+  const workbench = await sidebar("rbacNamespaces");
+  const grid = screen.getByRole("grid", { name: "Helm releases" });
+  expect(
+    within(grid)
+      .getAllByRole("row")
+      .map((row) => row.textContent),
+  ).toHaveLength(2);
+  expect(document.body.textContent).toContain(
+    "Showing the 1 namespace you may list: these credentials may not list Secrets in the other 11.",
+  );
+  act(() => {
+    workbench.spaces.update("prod-eu", (state) => ({
+      ...state,
+      namespaces: ["payments", "default", "auth"],
+    }));
+  });
+  await settle(60);
+  expect(document.body.textContent).toContain(
+    "These credentials may not list Secrets in auth, payments, which Helm keeps its releases in.",
+  );
+});
+
+test("helm:sidebar says a whole refusal as the list does, in every namespace at once", async () => {
+  await sidebar("rbacTypedNamespaces");
+  expect(document.body.textContent).toContain(
+    "These credentials may not list Secrets in every namespace at once, which Helm keeps its releases in.",
+  );
+});
+
 test("helm:view is a second view of the Explorer container, and the explorer has no Helm section", async () => {
   variant("helm:view");
   await mountKube(createMockBackend("ready"));
