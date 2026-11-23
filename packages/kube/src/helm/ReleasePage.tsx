@@ -23,7 +23,6 @@ import {
   type ErrorLike,
   useChanges,
   useWorkbench,
-  variants,
 } from "@twigo/workbench";
 import { useResources } from "../discovery";
 import { yamlOfObject } from "../edit/object";
@@ -74,7 +73,6 @@ import {
   problemWords,
 } from "./status";
 import { TextBar } from "./TextBar";
-import { ValuesTree } from "./ValuesTree";
 import { useRelease } from "./useRelease";
 
 const MaskedText = lazy(() => import("./MaskedText"));
@@ -775,8 +773,6 @@ function ValuesView({
   useChanges(states.changes);
   const plate: Plate = states.plate(uri);
   const defaults = plate === "defaults";
-  // @todo: drop this read once the owner has chosen how a masked value looks (mask:token, mask:tree), keeping the choice's branch
-  const tree = variants().mask === "tree" && states.form(uri) === "tree";
   const own = useMemo(
     () =>
       new Map(
@@ -826,20 +822,6 @@ function ValuesView({
         }}
         className="w-full shadow-[inset_0_-1px_0_var(--border-subtle)]"
       />
-      {variants().mask === "tree" && (
-        <TabBar
-          label="How the values read"
-          tabs={[
-            { value: "tree" as const, label: "Tree" },
-            { value: "yaml" as const, label: "YAML" },
-          ]}
-          value={states.form(uri)}
-          onChange={(next) => {
-            states.setForm(uri, next);
-          }}
-          className="w-full shadow-[inset_0_-1px_0_var(--border-subtle)]"
-        />
-      )}
       {masked === null ? (
         <EmptyState icon={CircleAlert} title="No values were set">
           This revision was installed with the chart's defaults.
@@ -853,24 +835,15 @@ function ValuesView({
             canHide={own.size > 0}
           />
           <div className="min-h-0 flex-1 overflow-auto">
-            {tree ? (
-              <ValuesTree
-                document={document}
-                defaults={defaults}
-                shown={own}
+            <Suspense fallback={<Skeleton className="m-3 h-4 w-1/2" />}>
+              <MaskedText
+                id={`${uri}/${plate}`}
+                text={text}
+                glyphs={glyphs}
                 onGlyph={onGlyph}
+                onCursor={setLine}
               />
-            ) : (
-              <Suspense fallback={<Skeleton className="m-3 h-4 w-1/2" />}>
-                <MaskedText
-                  id={`${uri}/${plate}`}
-                  text={text}
-                  glyphs={glyphs}
-                  onGlyph={onGlyph}
-                  onCursor={setLine}
-                />
-              </Suspense>
-            )}
+            </Suspense>
           </div>
         </>
       )}

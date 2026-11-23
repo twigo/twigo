@@ -25,9 +25,6 @@ interface PageActions {
   hideAll(): void;
 }
 
-/** How the values read: as rows of key paths, or as their YAML. */
-export type Form = "tree" | "yaml";
-
 /** What the page holds of one `epoch` of a release's view (`ReleaseSnapshot.epoch`). */
 interface Held<T> {
   readonly epoch: number;
@@ -52,18 +49,7 @@ export class ReleaseStates {
   readonly #plates = new Map<string, Plate>();
   readonly #marks = new Map<string, Held<ReadonlySet<number>>>();
   readonly #reveals = new Map<string, Held<ReadonlyMap<string, Shown>>>();
-  readonly #forms = new Map<string, Form>();
   readonly #actions = new Map<string, PageActions>();
-
-  form(uri: string): Form {
-    return this.#forms.get(uri) ?? "tree";
-  }
-
-  setForm(uri: string, form: Form): void {
-    if (this.form(uri) === form) return;
-    this.#forms.set(uri, form);
-    this.changes.emit();
-  }
 
   /** A page says what Reveal and Hide do on it while it shows. */
   register(uri: string, actions: PageActions): () => void {
@@ -163,6 +149,5 @@ export class ReleaseStates {
     this.#plates.delete(uri);
     this.#marks.delete(uri);
     this.#reveals.delete(uri);
-    this.#forms.delete(uri);
   }
 }

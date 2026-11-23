@@ -516,6 +516,38 @@ test("the page's filter finds what Helm wrote of a failed revision, and keeps th
   expect(found).not.toContain("Nothing here matches");
 });
 
+test("the page's filter searches the notes and opens the section that holds a match", async () => {
+  await open(release("alpha"));
+  expect(document.body.textContent).not.toContain("registry.example/demo:1.2");
+  await filter("alpha", "registry.example");
+  expect(document.body.textContent).toContain("registry.example/demo:1.2");
+  expect(screen.queryByText("Objects")).toBeNull();
+  expect(screen.getAllByText("Notes").length).toBeGreaterThan(0);
+});
+
+test("Reveal All and Hide All are commands of the page, enabled while there is something to reveal or to hide", async () => {
+  const workbench = await open(release("alpha"));
+  fireEvent.click(screen.getByRole("tab", { name: "Values" }));
+  await settle(6);
+  const tab = screen.getByRole("tab", { name: "Values" });
+  const lookup = () => workbench.keys.lookup(tab);
+  const enabled = (id: string) => workbench.commands.enabled(id, lookup());
+  const text = () => screen.getByTestId("masked-text").dataset.text ?? "";
+  expect(enabled("helm.text.revealAll")).toBe(true);
+  expect(enabled("helm.text.hideAll")).toBe(false);
+  await act(() => workbench.commands.execute("helm.text.revealAll", lookup()));
+  await settle(3);
+  fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
+  await settle(4);
+  expect(text()).toContain("user-password-r2");
+  expect(enabled("helm.text.revealAll")).toBe(false);
+  expect(enabled("helm.text.hideAll")).toBe(true);
+  await act(() => workbench.commands.execute("helm.text.hideAll", lookup()));
+  await settle(2);
+  expect(text()).not.toContain("user-password-r2");
+  expect(enabled("helm.text.hideAll")).toBe(false);
+});
+
 test("Copy helm Command is enabled where a command prints the view, and not on the chart's defaults", async () => {
   const workbench = await open(release("alpha"));
   const tab = screen.getByRole("tab", { name: "Overview" });
