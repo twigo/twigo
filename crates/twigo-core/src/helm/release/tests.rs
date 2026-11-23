@@ -565,6 +565,10 @@ async fn two_revisions_compare_with_a_value_that_changed_marked_on_both_sides() 
     for side in [&manifest.from, &manifest.to] {
         assert!(side.contains("<6 bytes, changed>"), "{side}");
     }
+    assert!(
+        manifest.from.contains("revision: \"1\"") && manifest.to.contains("revision: \"2\""),
+        "from is the left side and to the right"
+    );
     let sent = serde_json::to_string(&(values, defaults, manifest)).unwrap();
     for password in ["alpha1", "bravo2"] {
         assert!(!sent.contains(password), "{password} left Rust");
