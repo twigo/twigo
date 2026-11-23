@@ -578,7 +578,7 @@ async fn no_more_than_four_release_secrets_are_fetched_at_once() {
 
 #[tokio::test(start_paused = true)]
 async fn a_release_whose_get_fails_says_so_while_it_does_and_fills_once_it_answers() {
-    let path = format!("/api/v1/namespaces/a/secrets/{}", secret_name("app", 1));
+    let path = path("app", 1);
     let mut rig = Rig::over(&["a"], |fake| {
         revision(fake, "a", "app", 1, "deployed");
         fake.state().no_endpoints.insert(path.clone());
@@ -649,7 +649,7 @@ async fn a_decode_under_way_when_its_release_moves_on_is_dropped() {
 
 #[tokio::test(start_paused = true)]
 async fn a_relist_asks_a_failed_release_again_at_once() {
-    let path = format!("/api/v1/namespaces/a/secrets/{}", secret_name("app", 1));
+    let path = path("app", 1);
     let mut rig = Rig::over(&["a"], |fake| {
         revision(fake, "a", "app", 1, "deployed");
         fake.state().no_endpoints.insert(path.clone());

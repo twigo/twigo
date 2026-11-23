@@ -340,12 +340,7 @@ async fn requests_that_fail_are_said_while_they_do_and_the_revisions_shown_once_
     let fake = Fake::default();
     revision(&fake, 1, "superseded");
     revision(&fake, 2, "deployed");
-    let paths = [1, 2].map(|version| {
-        format!(
-            "/api/v1/namespaces/a/secrets/{}",
-            secret_name("app", version)
-        )
-    });
+    let paths = [1, 2].map(path);
     fake.state().forbidden.extend(paths.clone());
     let mut rig = Rig::open(fake, None, ALL).await;
     let refused = |problem: Option<&IpcError>| {
@@ -385,7 +380,7 @@ async fn requests_that_fail_are_said_while_they_do_and_the_revisions_shown_once_
 async fn a_relist_asks_a_failed_revision_again_at_once() {
     let fake = Fake::default();
     revision(&fake, 1, "deployed");
-    let path = format!("/api/v1/namespaces/a/secrets/{}", secret_name("app", 1));
+    let path = path(1);
     fake.state().no_endpoints.insert(path.clone());
     let mut rig = Rig::open(fake, None, OVERVIEW).await;
     rig.until("the failure", |shown| shown.problem.is_some())
@@ -501,7 +496,7 @@ async fn a_pinned_revision_s_overview_waits_for_the_newest_s_header_and_asks_it_
     let blank = rig.overviews_until("Revision=2", "Chart=demo-1.2.0").await;
     assert!(blank.is_empty(), "{blank:?}");
 
-    let path = format!("/api/v1/namespaces/a/secrets/{}", secret_name("app", 3));
+    let path = path(3);
     rig.fake.state().forbidden.insert(path.clone());
     revision(&rig.fake, 3, "deployed");
     rig.until("the refusal", |shown| {
