@@ -797,7 +797,7 @@ async fn an_open_release_shows_what_helm_gets_and_no_value_before_a_reveal() {
     list.until(|list| !list.text(&cut_row, "Problem").is_empty())
         .await;
     assert_eq!(list.text(&cut_row, "Problem"), "helm.truncated");
-    assert_eq!(list.text(&cut_row, "Status"), "deployed");
+    assert_eq!(list.text(&cut_row, "Status"), "unreadable");
     assert_eq!(
         list.text(&row, "Chart"),
         cluster.listed(namespace)["app"]["chart"].as_str().unwrap()
