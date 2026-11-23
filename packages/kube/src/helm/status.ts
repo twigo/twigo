@@ -83,7 +83,6 @@ export function isUnreadable(code: string): boolean {
   return PROBLEMS[code] !== undefined;
 }
 
-/** What a request that failed says, in the mark of the list and History and on the page. */
 export const couldNotFetch = (what: string): string =>
   `Twigo could not fetch ${what}`;
 
