@@ -209,6 +209,7 @@ export {
   type LogsSnapshot,
 } from "./logs";
 export { INITIAL_OBJECT, ObjectView, type ObjectSnapshot } from "./object";
+export type { OpenView } from "./openView";
 export {
   CLUSTER_SESSIONS,
   SHELL_FRAME_BYTES,

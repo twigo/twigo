@@ -1,6 +1,4 @@
-import { FrameAcks } from "./acks";
 import type { Backend } from "./backend";
-import { IpcError, toIpcError } from "./error";
 import type {
   IpcError as Wire,
   Overview,
@@ -11,9 +9,9 @@ import type {
   ReleaseValues,
   RevisionLine,
   Scrubbed,
-  SubscriptionId,
   ViewState,
 } from "./generated";
+import { OpenView } from "./openView";
 
 export interface ReleaseSnapshot {
   readonly seq: number;
@@ -76,113 +74,49 @@ export interface ReleaseAsk {
 }
 
 /**
- * One open release as a store for `useSyncExternalStore`, a release editor's
- * or the inspector's (ARCHITECTURE 4.3). Rust follows only the parts its views
- * show of the revision they follow, and each batch carries the parts that
- * changed; a part of one revision is never shown beside another's, so the
- * snapshot drops what it holds when the revision moves.
+ * One open release, a release editor's or the inspector's (ARCHITECTURE 4.3).
+ * Rust follows only the parts its views show of the revision they follow; a
+ * part of one revision is never shown beside another's, so the snapshot drops
+ * what it holds when the revision moves.
  */
-export class ReleaseView {
-  readonly #backend: Backend;
-  readonly #listeners = new Set<() => void>();
-  #snapshot = INITIAL_RELEASE;
-  #epoch = 0;
-  #life = 0;
-  #id: SubscriptionId | undefined;
-  readonly #opened: Promise<SubscriptionId>;
-  #ask: ReleaseAsk;
-  #sent: ReleaseAsk;
-  readonly #acks = new FrameAcks(
-    (id, seq) => this.#backend.invoke("helm_release_ack", { id, seq }),
-    () => this.#closed,
-    (error) => {
-      this.#fail(error);
-    },
-  );
-  #closed = false;
-
+export class ReleaseView extends OpenView<
+  ReleaseAsk,
+  ReleaseBatch,
+  ReleaseSnapshot
+> {
   constructor(backend: Backend, release: ReleaseRef, ask: ReleaseAsk) {
-    this.#backend = backend;
-    this.#ask = ask;
-    this.#sent = ask;
-    this.#opened = backend.subscribe(
-      "helm_release_open",
-      { release, revision: ask.revision, parts: ask.parts },
-      (batch) => {
-        this.#apply(batch);
+    super(
+      {
+        open: (onBatch) =>
+          backend.subscribe(
+            "helm_release_open",
+            { release, revision: ask.revision, parts: ask.parts },
+            onBatch,
+          ),
+        ask: (id, next) =>
+          backend.invoke("helm_release_set_view", {
+            id,
+            revision: next.revision,
+            parts: next.parts,
+          }),
+        ack: (id, seq) => backend.invoke("helm_release_ack", { id, seq }),
+        close: (id) => backend.invoke("helm_release_close", id),
+        what: "release",
       },
-    );
-    this.#opened.then(
-      (id) => {
-        this.#id = id;
-        if (this.#closed) {
-          void this.#backend.invoke("helm_release_close", id);
-          return;
-        }
-        if (!sameAsk(this.#ask, this.#sent)) this.#send();
-        this.#acks.opened(id);
-      },
-      (error: unknown) => {
-        this.#fail(error);
-      },
+      INITIAL_RELEASE,
+      ask,
     );
   }
 
-  readonly subscribe = (listener: () => void): (() => void) => {
-    this.#listeners.add(listener);
-    return () => this.#listeners.delete(listener);
-  };
-
-  readonly getSnapshot = (): ReleaseSnapshot => this.#snapshot;
-
-  setAsk(ask: ReleaseAsk): void {
-    if (this.#closed || sameAsk(ask, this.#ask)) return;
-    this.#ask = ask;
-    if (this.#id !== undefined) this.#send();
-  }
-
-  /** Its subscription's id, which a Reveal names it by, once it is open. */
-  id(): Promise<SubscriptionId> {
-    return this.#opened.then((id) => {
-      if (this.#closed)
-        throw new IpcError("subscription.not-found", "the release is closed");
-      return id;
-    });
-  }
-
-  close(): void {
-    this.#closed = true;
-    this.#listeners.clear();
-    if (this.#id !== undefined) {
-      void this.#backend.invoke("helm_release_close", this.#id);
-    }
-  }
-
-  #send(): void {
-    if (this.#id === undefined) return;
-    const ask = this.#ask;
-    this.#sent = ask;
-    this.#backend
-      .invoke("helm_release_set_view", {
-        id: this.#id,
-        revision: ask.revision,
-        parts: ask.parts,
-      })
-      .catch((error: unknown) => {
-        this.#fail(error);
-      });
-  }
-
-  #apply(batch: ReleaseBatch): void {
-    if (this.#closed) return;
-    const previous = this.#snapshot;
+  protected next(
+    batch: ReleaseBatch,
+    previous: ReleaseSnapshot,
+  ): ReleaseSnapshot {
     const kept = batch.exists && batch.revision === previous.revision;
-    if (!kept) this.#epoch = ++epochs;
-    if (batch.exists && !previous.exists) this.#life = ++epochs;
-    this.#publish({
+    return {
       seq: batch.seq,
-      epoch: this.#epoch,
-      life: this.#life,
+      epoch: kept ? previous.epoch : ++epochs,
+      life: batch.exists && !previous.exists ? ++epochs : previous.life,
       status: batch.status,
       exists: batch.exists,
       revision: batch.revision ?? undefined,
@@ -196,21 +130,11 @@ export class ReleaseView {
       values: batch.values ?? (kept ? previous.values : undefined),
       manifest: batch.manifest ?? (kept ? previous.manifest : undefined),
       history: batch.exists ? (batch.history ?? previous.history) : undefined,
-    });
-    this.#acks.took(batch.seq);
+    };
   }
 
-  #fail(error: unknown): void {
-    if (this.#closed) return;
-    this.#publish({
-      ...this.#snapshot,
-      status: { state: "error", error: toIpcError(error) },
-    });
-  }
-
-  #publish(snapshot: ReleaseSnapshot): void {
-    this.#snapshot = snapshot;
-    for (const listener of this.#listeners) listener();
+  protected same(a: ReleaseAsk, b: ReleaseAsk): boolean {
+    return sameAsk(a, b);
   }
 }
 
