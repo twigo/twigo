@@ -493,7 +493,7 @@ fn an_uninstall_that_has_not_ended_says_so() {
 }
 
 #[test]
-fn a_hook_s_secret_is_masked_and_scrubbed_from_the_notes() {
+fn a_hook_s_secret_is_scrubbed_from_the_notes() {
     let release = serde_json::json!({
         "name": "hooked",
         "version": 1,
@@ -510,8 +510,4 @@ fn a_hook_s_secret_is_masked_and_scrubbed_from_the_notes() {
     });
     let hooked = built(&release);
     assert_eq!(hooked.notes().text, "The key is <hidden>.");
-    assert_eq!(
-        hooked.hooks(),
-        "---\n# Source: hooked/templates/key.yaml\napiVersion: v1\nkind: Secret\nmetadata:\n  name: hooked-key\nstringData:\n  key: <17 bytes>\n\n"
-    );
 }

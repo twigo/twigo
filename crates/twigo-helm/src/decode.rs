@@ -444,8 +444,6 @@ pub(crate) struct HookJson {
     #[serde(default)]
     pub kind: String,
     #[serde(default)]
-    pub path: String,
-    #[serde(default)]
     pub manifest: String,
     #[serde(default)]
     pub events: Vec<String>,

@@ -40,11 +40,11 @@ A crafted Secret carries the labels `owner=helm`, `name`, `status`, `version` an
 
 ## What helm printed
 
-`get/` holds what helm v4.3.2 printed for each revision of `alpha` in `fmt-a` and of `beta`, `get manifest`, `get notes`, `get hooks`, `get values -o json` and `get metadata -o json`, in `<release>.r<revision>.v4.<part>`, `history -o json` of both in `<release>.v4.history.json`, and `get values -o json` of `order` in `order.r1.v4.values.json`.
-helm v3.22.1 printed the same bytes for those revisions' manifests, notes, hooks and values.
+`get/` holds what helm v4.3.2 printed for each revision of `alpha` in `fmt-a` and of `beta`, `get manifest`, `get notes`, `get values -o json` and `get metadata -o json`, in `<release>.r<revision>.v4.<part>`, `history -o json` of both in `<release>.v4.history.json`, and `get values -o json` of `order` in `order.r1.v4.values.json`.
+helm v3.22.1 printed the same bytes for those revisions' manifests, notes and values.
 `record-failed.sh` writes `epsilon`'s manifests, notes and history beside them.
 
-`get manifest` prints the stored manifest and a line feed; `get notes` prints `NOTES:`, a line feed, the stored notes and a line feed, or nothing for none; `get hooks` prints, for each hook, `---`, a `# Source:` line with its path, its stored manifest and a line feed.
+`get manifest` prints the stored manifest and a line feed; `get notes` prints `NOTES:`, a line feed, the stored notes and a line feed, or nothing for none.
 
 ## Left out
 

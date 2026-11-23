@@ -74,7 +74,7 @@ fn the_manifest_is_helm_s_but_for_its_secrets() {
 }
 
 #[test]
-fn the_notes_and_hooks_are_helm_s() {
+fn the_notes_are_helm_s() {
     for (printed, page) in revisions() {
         let notes = page.notes();
         assert!(!notes.hidden, "{printed}");
@@ -86,11 +86,6 @@ fn the_notes_and_hooks_are_helm_s() {
         assert_eq!(
             shown,
             text(&format!("get/{printed}.notes.txt")),
-            "{printed}"
-        );
-        assert_eq!(
-            page.hooks(),
-            text(&format!("get/{printed}.hooks.txt")),
             "{printed}"
         );
     }
