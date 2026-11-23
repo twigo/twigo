@@ -117,7 +117,7 @@ test("a release whose request failed keeps the label's status and tone, with a m
     const row = rowOf(name, "payments");
     expect(cellOf(row, "Status")).toBe(status);
     const mark = within(row).getByRole("img", {
-      name: "Could not fetch the latest revision",
+      name: "Could not fetch this release's latest revision",
     });
     expect(mark.closest('[data-column="Status"]')).not.toBeNull();
     expect(mark.parentElement?.title).toContain(

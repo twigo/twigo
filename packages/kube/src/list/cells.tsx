@@ -1,11 +1,11 @@
-import { TriangleAlert } from "lucide-react";
 import type { Cell, Row } from "@twigo/protocol";
 import { cn, StatusDot, type Tone } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
 import { ageRole, printedAge, printedAt, restartedRecently } from "../age";
 import { IN_FLIGHT, type ColumnRule } from "../columns";
 import { ProblemWord } from "../helm/ProblemWord";
-import { requestFailedWhy, UNREADABLE } from "../helm/status";
+import { RequestFailed } from "../helm/RequestFailed";
+import { UNREADABLE } from "../helm/status";
 import { ObjectName } from "../ObjectName";
 import { Quantity } from "../Quantity";
 import { isTabular } from "../tabular";
@@ -135,10 +135,9 @@ export function CellView({
         </span>
       );
       return rule.health && problem !== undefined ? (
-        <span className="inline-flex max-w-full items-center gap-1.5 align-top">
-          <span className="min-w-0 truncate">{shown}</span>
-          <RequestFailed code={problem} />
-        </span>
+        <RequestFailed code={problem} what="this release's latest revision">
+          {shown}
+        </RequestFailed>
       ) : (
         shown
       );
@@ -204,19 +203,6 @@ export function CellView({
       );
     }
   }
-}
-
-/** The mark beside a status that a request for the row's latest revision failed for, which leaves the status the label's. */
-function RequestFailed({ code }: { code: string }) {
-  return (
-    <span title={requestFailedWhy(code)} className="inline-flex shrink-0">
-      <TriangleAlert
-        role="img"
-        aria-label="Could not fetch the latest revision"
-        className="size-3.5 text-warn-foreground"
-      />
-    </span>
-  );
 }
 
 /**

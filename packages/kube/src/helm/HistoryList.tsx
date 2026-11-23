@@ -17,7 +17,8 @@ import {
 } from "@twigo/workbench";
 import { Age } from "../object/values";
 import { ProblemWord } from "./ProblemWord";
-import { IN_FLIGHT_RELEASE, isQuiet, statusTone } from "./status";
+import { RequestFailed } from "./RequestFailed";
+import { IN_FLIGHT_RELEASE, isQuiet, statusTone, UNREADABLE } from "./status";
 import type { ReleaseStates } from "./states";
 
 const COLUMNS: readonly GridColumn[] = [
@@ -33,7 +34,8 @@ const COLUMNS: readonly GridColumn[] = [
  * The revisions of a release newest first, with the columns `helm history`
  * prints (ARCHITECTURE 4.3): the revision the cluster runs marked where it is
  * not the latest, the description as Helm wrote it with a value of the
- * revision's Secrets taken out, and a row that cannot be read saying why.
+ * revision's Secrets taken out, a row that cannot be read saying why, and one
+ * whose request failed marked, as the list's row is.
  * Marking two rows offers their comparisons; the menu of the selected row
  * opens one revision or compares it.
  */
@@ -83,7 +85,7 @@ export function HistoryList({
       type: "row",
       id: String(line.revision),
       data: line,
-      ...(line.problem && { tone: "error" as const }),
+      ...(line.status === UNREADABLE && { tone: "error" as const }),
     };
   };
   return (
@@ -145,7 +147,28 @@ function StatusWord({
   line: RevisionLine;
   latest: number | undefined;
 }) {
-  if (line.problem) return <ProblemWord code={line.problem.code} />;
+  if (line.problem && line.status === UNREADABLE)
+    return <ProblemWord code={line.problem.code} />;
+  const word = <Status line={line} latest={latest} />;
+  return line.problem ? (
+    <RequestFailed
+      code={line.problem.code}
+      what={`revision ${String(line.revision)}`}
+    >
+      {word}
+    </RequestFailed>
+  ) : (
+    word
+  );
+}
+
+function Status({
+  line,
+  latest,
+}: {
+  line: RevisionLine;
+  latest: number | undefined;
+}) {
   const tone = statusTone(line.status);
   if (tone) {
     return (

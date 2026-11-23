@@ -432,6 +432,50 @@ async function menuOf(revision: number) {
   return items;
 }
 
+const truncated = {
+  code: "helm.truncated",
+  kind: "invalidInput",
+  message: "",
+} as const;
+const forbidden = {
+  code: "server.forbidden",
+  kind: "forbidden",
+  message: "",
+} as const;
+
+test("History draws a line as the list draws a row: Truncated in the error band where its revision cannot be read, the label's status with a mark where the request for it failed", async () => {
+  const { backend, send } = core();
+  await openHistory(backend);
+  act(() => {
+    send({
+      seq: 90,
+      history: [
+        { ...line(3, "unreadable"), problem: truncated },
+        { ...line(2, "deployed"), problem: forbidden },
+        { ...line(1, "failed"), problem: forbidden },
+      ],
+    });
+  });
+  await settle(4);
+  expect(cellOf(revisionRow(3), "status")).toBe("Truncated");
+  expect(revisionRow(3).dataset.tone).toBe("error");
+  expect(within(revisionRow(3)).queryByRole("img")).toBeNull();
+  for (const [revision, status] of [
+    [2, "deployed"],
+    [1, "failed"],
+  ] as const) {
+    const row = revisionRow(revision);
+    expect(cellOf(row, "status")).toBe(status);
+    expect(row.dataset.tone).toBeUndefined();
+    const mark = within(row).getByRole("img", {
+      name: `Could not fetch revision ${String(revision)}`,
+    });
+    expect(mark.parentElement?.title).toContain(
+      `could not fetch revision ${String(revision)} (server.forbidden)`,
+    );
+  }
+});
+
 test("the revisions marked in History stay marked when the release moves to a new revision", async () => {
   const { backend, send } = core();
   await openHistory(backend);

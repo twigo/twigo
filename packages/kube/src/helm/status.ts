@@ -78,11 +78,6 @@ export function problemWords(code: string): {
   );
 }
 
-/** What the mark beside a row's status says when a request for its latest revision failed: the status is the label's, and the code is the request's. */
-export function requestFailedWhy(code: string): string {
-  return `Twigo could not fetch this release's latest revision (${code}), so its status is the one on the Secret's label. Twigo asks again.`;
-}
-
 /** What a list of releases stands in for beside discovery's resources: namespaced, with no verbs or subresources of its own. */
 export const HELM_RESOURCE: Resource = {
   gvr: HELM_RELEASES,
