@@ -14,19 +14,25 @@ use super::{Field, Held, contents, decoded, whole_tokens_replaced};
 pub const HIDDEN: &str = "<hidden>";
 
 /// Takes every value in `secrets` out of `text`, where it stands as a whole
-/// token, so that a short value does not garble the words around it. For a
-/// Secret the patched object a refusal quotes goes whole, as no token matches
-/// what the server wrote of its values: JSON, HTML characters escaped, quoted
-/// again as a string ([`applyPatchToCurrentObject`]'s `field.Invalid`).
+/// token, so that a short value does not garble the words around it. A value
+/// with no letter or digit is no token, as it cannot be told from the
+/// punctuation and the spaces around it. For a Secret each patched object a
+/// refusal quotes goes whole, as no token matches what the server wrote of
+/// its values: JSON, HTML characters escaped, quoted again as a string
+/// ([`applyPatchToCurrentObject`]'s `field.Invalid`).
 ///
 /// [`applyPatchToCurrentObject`]: https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/patch.go#L356-L358
 pub fn scrub(text: &str, secrets: &[String]) -> String {
     let text = if secrets.is_empty() {
         text.to_owned()
     } else {
-        without_quoted_object(text)
+        without_quoted_objects(text)
     };
-    whole_tokens_replaced(&text, secrets, |_| HIDDEN.to_owned())
+    let tokens: Vec<&String> = secrets
+        .iter()
+        .filter(|value| value.chars().any(char::is_alphanumeric))
+        .collect();
+    whole_tokens_replaced(&text, &tokens, |_| HIDDEN.to_owned())
 }
 
 /// A release's notes or a revision's description scrubbed of `values`, its
@@ -53,28 +59,38 @@ impl Held<Vec<String>> {
     }
 }
 
-/// `text` with the object of a `patch: Invalid value: "…"` left out.
-fn without_quoted_object(text: &str) -> String {
+/// `text` with the object of each `patch: Invalid value: "…"` left out:
+/// Helm joins the refusals of every object an upgrade could not update
+/// with ` && `
+/// ([client.go](https://github.com/helm/helm/blob/v4.3.2/pkg/kube/client.go#L654)).
+fn without_quoted_objects(text: &str) -> String {
     const OPENING: &str = "patch: Invalid value: \"";
-    let Some(start) = text.find(OPENING).map(|at| at + OPENING.len()) else {
-        return text.to_owned();
-    };
+    let mut kept = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find(OPENING).map(|at| at + OPENING.len())
+        && let Some(end) = closing_quote(&rest[start..])
+    {
+        kept.push_str(&rest[..start - 1]);
+        kept.push_str(HIDDEN);
+        rest = &rest[start + end + 1..];
+    }
+    kept.push_str(rest);
+    kept
+}
+
+/// Where the quoted string whose text starts `text` ends: its closing
+/// quote's index.
+fn closing_quote(text: &str) -> Option<usize> {
     let mut escaped = false;
-    for (index, c) in text[start..].char_indices() {
+    for (index, c) in text.char_indices() {
         match c {
             _ if escaped => escaped = false,
             '\\' => escaped = true,
-            '"' => {
-                return format!(
-                    "{}{HIDDEN}{}",
-                    &text[..start - 1],
-                    &text[start + index + 1..]
-                );
-            }
+            '"' => return Some(index),
             _ => {}
         }
     }
-    text.to_owned()
+    None
 }
 
 /// `error` with its message scrubbed of `secrets`; for a Secret the causes
@@ -224,6 +240,39 @@ mod tests {
         assert_eq!(
             scrub("hunter2 or s3cret", &secret_values(&[&loose])),
             format!("{HIDDEN} or {HIDDEN}")
+        );
+    }
+
+    #[test]
+    fn each_quoted_object_of_refusals_joined_goes() {
+        let quoted = |name: &str, value: &str| {
+            format!(
+                r#"cannot patch "{name}" with kind Secret:  "" is invalid: patch: Invalid value: "{{\"data\":{{\"k\":\"{value}\"}},\"kind\":\"Secret\"}}": illegal base64 data at input byte 3"#
+            )
+        };
+        let message = format!(
+            "Upgrade \"app\" failed: {} && {}",
+            quoted("one", "not base64!"),
+            quoted("two", "bGl2ZS1vbmx5")
+        );
+        let scrubbed = scrub(&message, &["unrelated".to_owned()]);
+        assert_eq!(
+            scrubbed,
+            format!(
+                r#"Upgrade "app" failed: cannot patch "one" with kind Secret:  "" is invalid: patch: Invalid value: {HIDDEN}: illegal base64 data at input byte 3 && cannot patch "two" with kind Secret:  "" is invalid: patch: Invalid value: {HIDDEN}: illegal base64 data at input byte 3"#
+            )
+        );
+    }
+
+    #[test]
+    fn a_value_with_no_letter_or_digit_is_no_token() {
+        let secrets = vec!["hunter2".to_owned(), "/".to_owned(), " ".to_owned()];
+        assert_eq!(
+            scrub(
+                "Open http://example.com/login/ and log in with hunter2.",
+                &secrets
+            ),
+            format!("Open http://example.com/login/ and log in with {HIDDEN}.")
         );
     }
 
