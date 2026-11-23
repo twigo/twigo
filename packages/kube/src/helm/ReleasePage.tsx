@@ -190,6 +190,7 @@ export function ReleasePage({
   const { releases: states } = services;
   useChanges(states.changes);
   useChanges(menus.changes);
+  useChanges(keys.changes);
   useChanges(spaces.changes);
   useChanges(colors.changes);
   const tab = states.tab(uri);

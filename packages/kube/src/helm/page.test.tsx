@@ -348,6 +348,38 @@ const NO_PARTS = {
   history: null,
 } as const;
 
+test("the header's More offers Reveal All as soon as the Manifest has values hidden, and Hide All as soon as they are shown", async () => {
+  await open(release("alpha"));
+  fireEvent.click(screen.getByRole("tab", { name: "Manifest" }));
+  await settle(6);
+  const more = async () => {
+    const row = within(page("alpha")).getByRole("toolbar", {
+      name: "Release actions",
+    });
+    fireEvent.pointerDown(within(row).getByRole("button", { name: "More" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    await settle(2);
+    const items = screen
+      .getAllByRole("menuitem")
+      .map((item) => item.textContent);
+    fireEvent.keyDown(document.activeElement ?? document.body, {
+      key: "Escape",
+    });
+    await settle(2);
+    return items;
+  };
+  expect(await more()).toContain("Reveal All");
+  expect(await more()).not.toContain("Hide All");
+  fireEvent.click(screen.getByRole("button", { name: "Reveal All" }));
+  await settle(3);
+  fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
+  await settle(6);
+  expect(await more()).toContain("Hide All");
+  expect(await more()).not.toContain("Reveal All");
+});
+
 test("a revision that Twigo cannot read is a stopped page, whichever of the four codes says it: the words the list gives for its code, the icon in the error tone, and the block's own padding", async () => {
   const { backend, send } = core();
   const workbench = await mountKube(backend);
