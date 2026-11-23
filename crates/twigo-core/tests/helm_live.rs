@@ -428,7 +428,6 @@ const ALL: ReleaseParts = ReleaseParts {
 struct Shown {
     revision: Option<u32>,
     overview: bool,
-    /// The namespace of each object the overview lists.
     placed: Vec<String>,
     notes: Option<String>,
     values: bool,
@@ -609,7 +608,6 @@ fn documents(manifest: &str) -> Vec<&str> {
         .collect()
 }
 
-/// The Namespace column of the overview's Objects.
 fn placed(overview: &Overview) -> Vec<String> {
     let objects = overview
         .sections

@@ -175,7 +175,6 @@ async fn an_open_release_shows_its_latest_revision_fetched_once_and_each_part_as
     assert_eq!(shown.revision, 2);
 }
 
-/// The names and namespaces of the overview's Objects.
 fn placed(shown: &Shown) -> Vec<(String, String)> {
     let Some(overview) = &shown.overview else {
         return Vec::new();
