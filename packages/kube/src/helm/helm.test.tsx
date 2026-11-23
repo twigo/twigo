@@ -5,6 +5,7 @@ import {
   screen,
   within,
 } from "@testing-library/react";
+import { GitCompare, History } from "lucide-react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Backend, Column, ListBatch } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
@@ -364,4 +365,18 @@ test("a comparison of two revisions asks the core once, however often the editor
     await settle(6);
   }
   expect(compares).toBe(1);
+});
+
+test("the commands that compare revisions take the compare icon, and the one that opens a revision History's", async () => {
+  const { commands } = await mountKube(createMockBackend("ready"));
+  for (const id of [
+    "helm.revision.compareWithPrevious",
+    "helm.revision.compareWithCurrent",
+    "helm.revisions.values",
+    "helm.revisions.defaults",
+    "helm.revisions.manifest",
+  ]) {
+    expect(commands.get(id)?.icon).toBe(GitCompare);
+  }
+  expect(commands.get("helm.revision.open")?.icon).toBe(History);
 });

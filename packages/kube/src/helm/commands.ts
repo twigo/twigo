@@ -330,21 +330,22 @@ export function registerHelm(
     },
   ]);
 
-  const compare = (
+  const compare = <S extends typeof REVISION | typeof PAIR>(
     id: string,
     title: string,
+    icon: LucideIcon,
     menu: "helm/revision" | "helm/revisions",
-    schema: typeof REVISION | typeof PAIR,
-    run: (arg: never) => void,
+    schema: S,
+    run: (arg: v.InferOutput<S>) => void,
   ) => {
     commands.register({
       id,
       title,
       category: "Helm",
-      icon: id.includes("compare") ? GitCompare : History,
+      icon,
       run: (args) => {
         const parsed = v.safeParse(schema, args);
-        if (parsed.success) run(parsed.output as never);
+        if (parsed.success) run(parsed.output);
       },
     });
     menus.append(menu, { command: id, group: "navigation" });
@@ -354,10 +355,11 @@ export function registerHelm(
   compare(
     "helm.revision.open",
     "Open Revision",
+    History,
     "helm/revision",
     REVISION,
-    (revision: v.InferOutput<typeof REVISION>) => {
-      editors.open(helmUri({ ...revision, revision: revision.revision }));
+    (revision) => {
+      editors.open(helmUri(revision));
     },
   );
   const compareRevisions = (
@@ -371,9 +373,10 @@ export function registerHelm(
   compare(
     "helm.revision.compareWithPrevious",
     "Compare with Previous",
+    GitCompare,
     "helm/revision",
     REVISION,
-    (revision: v.InferOutput<typeof REVISION>) => {
+    (revision) => {
       if (revision.previous !== undefined)
         compareRevisions(
           revision,
@@ -386,9 +389,10 @@ export function registerHelm(
   compare(
     "helm.revision.compareWithCurrent",
     "Compare with Current",
+    GitCompare,
     "helm/revision",
     REVISION,
-    (revision: v.InferOutput<typeof REVISION>) => {
+    (revision) => {
       if (revision.latest !== undefined)
         compareRevisions(
           revision,
@@ -406,9 +410,10 @@ export function registerHelm(
     compare(
       `helm.revisions.${part}`,
       title,
+      GitCompare,
       "helm/revisions",
       PAIR,
-      (pair: v.InferOutput<typeof PAIR>) => {
+      (pair) => {
         compareRevisions(pair, pair.from, pair.to, part);
       },
     );
