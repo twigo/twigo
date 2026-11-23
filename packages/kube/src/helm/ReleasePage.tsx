@@ -900,7 +900,10 @@ function ValuesView({
     [text, defaults, own],
   );
   const hidden = hiddenCount(text);
-  const whole: HelmPart = { kind: "values", defaults, path: [] };
+  const whole = useMemo<HelmPart>(
+    () => ({ kind: "values", defaults, path: [] }),
+    [defaults],
+  );
   const [line, setLine] = useState(1);
   useEffect(() => {
     onText({
@@ -913,7 +916,7 @@ function ValuesView({
     return () => {
       onText(undefined);
     };
-  }, [onText, glyphs, line, hidden, own, defaults]);
+  }, [onText, glyphs, line, hidden, own, whole]);
   return (
     <div className="flex h-full min-h-48 flex-col">
       <TabBar
