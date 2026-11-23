@@ -18,6 +18,10 @@ import {
 import { DWELL_MS } from "../Details";
 import { diffUri, helmUri } from "../uri";
 
+vi.mock("./MaskedText", () => ({
+  default: () => <div data-testid="masked-text" />,
+}));
+
 withScreenSize(1600);
 
 beforeEach(() => {
@@ -291,15 +295,24 @@ test("Copy helm Command is enabled where a command prints the view, and not on t
       "helm.release.copyCommand",
       workbench.keys.lookup(tab),
     );
+  const selected = (name: string) =>
+    vi.waitFor(() => {
+      expect(
+        screen.getByRole("tab", { name }).getAttribute("aria-selected"),
+      ).toBe("true");
+    });
   expect(enabled()).toBe(true);
   fireEvent.click(screen.getByRole("tab", { name: "Values" }));
-  await settle(6);
+  await vi.waitFor(() => {
+    expect(screen.getByRole("tab", { name: "Chart defaults" })).toBeTruthy();
+    expect(screen.getByTestId("masked-text")).toBeTruthy();
+  });
   expect(enabled()).toBe(true);
   fireEvent.click(screen.getByRole("tab", { name: "Chart defaults" }));
-  await settle(6);
+  await selected("Chart defaults");
   expect(enabled()).toBe(false);
   fireEvent.click(screen.getByRole("tab", { name: "Your values" }));
-  await settle(6);
+  await selected("Your values");
   expect(enabled()).toBe(true);
 });
 
