@@ -61,7 +61,7 @@ use twigo_kube::errors;
 use twigo_kube::openapi::Document;
 use twigo_policy::friction::Risk;
 use twigo_policy::redact::{
-    entries, for_view, holds_helm_release, is_mask, scrub, scrubbed, secret_values,
+    Field, entries, for_view, holds_helm_release, is_mask, scrub, scrubbed, secret_values,
 };
 use twigo_policy::{Actor, Attributes};
 
@@ -247,10 +247,18 @@ fn add_answered(secrets: &mut Vec<String>, answer: &Value) {
     secrets.sort_by_key(|value| std::cmp::Reverse(value.len()));
 }
 
-/// Refuses a value of a Secret that still reads as a mask but is not the
-/// one it was opened with, as `<12 bytes>` would be written.
-fn refuse_masks(base: Option<&Value>, edited: &Value) -> Result<(), IpcError> {
+/// Refuses a value of a Secret, or the `release` of a ConfigMap that holds
+/// a Helm release, that still reads as a mask but is not the one it was
+/// opened with, as `<12 bytes>` would be written.
+fn refuse_masks(secret: bool, base: Option<&Value>, edited: &Value) -> Result<(), IpcError> {
+    let release = holds_helm_release(edited) || base.is_some_and(holds_helm_release);
+    if !secret && !release {
+        return Ok(());
+    }
     for entry in entries(edited) {
+        if release && (entry.field != Field::Data || entry.key != "release") {
+            continue;
+        }
         let opened = base.and_then(|base| base[entry.field.name()].get(entry.key));
         if entry.value.as_str().is_some_and(is_mask) && opened != Some(entry.value) {
             let key = entry.key;
@@ -629,9 +637,7 @@ pub(crate) async fn preview(
     let keep = |prepared: Prepared| core.bus.keep_preview(&ticket, started, prepared);
 
     let secret = target.is("", &["secrets"]);
-    if secret {
-        refuse_masks(opened.as_ref().map(|opened| &opened.base), &edited)?;
-    }
+    refuse_masks(secret, opened.as_ref().map(|opened| &opened.base), &edited)?;
     let group = target.resource.group.clone();
     let version = target.resource.version.clone();
     let kind = edited["kind"].as_str().unwrap_or_default().to_owned();
@@ -2174,18 +2180,52 @@ mod tests {
     fn a_mask_is_refused_where_it_would_be_written_and_kept_where_it_was() {
         let base = json!({ "data": { "a": "<12 bytes>" } });
         let same = json!({ "data": { "a": "<12 bytes>" } });
-        assert_eq!(refuse_masks(Some(&base), &same), Ok(()));
+        assert_eq!(refuse_masks(true, Some(&base), &same), Ok(()));
         let renamed = json!({ "data": { "b": "<12 bytes>" } });
         assert_eq!(
-            refuse_masks(Some(&base), &renamed).unwrap_err().kind,
+            refuse_masks(true, Some(&base), &renamed).unwrap_err().kind,
             ErrorKind::InvalidInput
         );
         let changed = json!({ "data": { "a": "<13 bytes>" } });
-        assert!(refuse_masks(Some(&base), &changed).is_err());
+        assert!(refuse_masks(true, Some(&base), &changed).is_err());
         let written = json!({ "stringData": { "t": "<5 bytes>" } });
-        assert!(refuse_masks(None, &written).is_err());
+        assert!(refuse_masks(true, None, &written).is_err());
         let real = json!({ "data": { "a": "aHVudGVyMg==" } });
-        assert_eq!(refuse_masks(Some(&base), &real), Ok(()));
+        assert_eq!(refuse_masks(true, Some(&base), &real), Ok(()));
+    }
+
+    #[test]
+    fn the_mask_of_a_helm_release_is_refused_where_it_would_be_written_and_no_other_value_is() {
+        let config_map = |labels: Value, data: Value| {
+            json!({
+                "apiVersion": "v1",
+                "kind": "ConfigMap",
+                "metadata": { "name": "sh.helm.release.v1.app.v1", "labels": labels },
+                "data": data,
+            })
+        };
+        let helm = json!({ "owner": "helm" });
+        let base = config_map(
+            helm.clone(),
+            json!({ "release": "<9 bytes>", "note": "<3 bytes>" }),
+        );
+        let same = config_map(
+            helm.clone(),
+            json!({ "release": "<9 bytes>", "note": "<4 bytes>" }),
+        );
+        assert_eq!(refuse_masks(false, Some(&base), &same), Ok(()));
+        let another = config_map(helm.clone(), json!({ "release": "<10 bytes>" }));
+        assert_eq!(
+            refuse_masks(false, Some(&base), &another).unwrap_err().kind,
+            ErrorKind::InvalidInput
+        );
+        let unlabelled = config_map(json!({}), json!({ "release": "<10 bytes>" }));
+        assert!(refuse_masks(false, Some(&base), &unlabelled).is_err());
+        let new = config_map(helm, json!({ "release": "<10 bytes>" }));
+        assert!(refuse_masks(false, None, &new).is_err());
+        let ordinary = config_map(json!({}), json!({ "release": "<10 bytes>" }));
+        assert_eq!(refuse_masks(false, Some(&ordinary), &ordinary), Ok(()));
+        assert_eq!(refuse_masks(false, None, &ordinary), Ok(()));
     }
 
     #[test]
