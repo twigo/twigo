@@ -33,6 +33,8 @@ pub struct Head {
     pub api_version: String,
     pub kind: String,
     pub name: String,
+    /// None where its document writes none or an empty one, and Helm
+    /// creates it in the release's.
     pub namespace: Option<String>,
 }
 
@@ -252,7 +254,7 @@ fn heads(value: &Value, objects: &mut Vec<Head>) {
             api_version: text(&value["apiVersion"]).unwrap_or_default(),
             kind,
             name: text(&value["metadata"]["name"]).unwrap_or_default(),
-            namespace: text(&value["metadata"]["namespace"]),
+            namespace: written_namespace(value).map(str::to_owned),
         });
     }
 }
@@ -294,18 +296,25 @@ enum Kept {
     Refused(String),
 }
 
-/// A Secret's namespace and name, as cli-runtime's `SetNamespace` places
-/// it: a namespace not written, or written empty, is the release's
+/// The namespace an object's document writes; none where it writes none or
+/// an empty one, which cli-runtime's `SetNamespace` replaces with the
+/// release's
 /// ([visitor.go](https://github.com/kubernetes/cli-runtime/blob/v0.37.2/pkg/resource/visitor.go#L644-L658)).
+fn written_namespace(object: &Value) -> Option<&str> {
+    object["metadata"]["namespace"]
+        .as_str()
+        .filter(|written| !written.is_empty())
+}
+
+/// A Secret's namespace, its document's or else the release's `namespace`,
+/// and its name.
 fn name(secret: &Value, namespace: &str) -> Name {
-    let metadata = &secret["metadata"];
     (
-        metadata["namespace"]
+        written_namespace(secret).unwrap_or(namespace).to_owned(),
+        secret["metadata"]["name"]
             .as_str()
-            .filter(|written| !written.is_empty())
-            .unwrap_or(namespace)
+            .unwrap_or_default()
             .to_owned(),
-        metadata["name"].as_str().unwrap_or_default().to_owned(),
     )
 }
 
@@ -385,7 +394,7 @@ fn written(
                         document: index as u32,
                         items: place.to_vec(),
                         name: metadata["name"].as_str().unwrap_or_default().to_owned(),
-                        namespace: metadata["namespace"].as_str().map(str::to_owned),
+                        namespace: written_namespace(secret).map(str::to_owned),
                         line,
                         entries: data_entries(secret),
                     });

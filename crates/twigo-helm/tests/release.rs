@@ -345,6 +345,41 @@ fn built(release: &Json) -> Page {
 }
 
 #[test]
+fn an_object_whose_document_writes_an_empty_namespace_links_to_the_release_s() {
+    let release = serde_json::json!({
+        "name": "spread",
+        "namespace": "payments",
+        "version": 1,
+        "info": { "status": "deployed" },
+        "manifest": "---\nkind: ConfigMap\napiVersion: v1\nmetadata: {name: empty, namespace: \"\"}\n---\nkind: ConfigMap\napiVersion: v1\nmetadata: {name: none}\n---\nkind: ConfigMap\napiVersion: v1\nmetadata: {name: elsewhere, namespace: other}\n",
+    });
+    let overview = shown(&built(&release), Some(1));
+    let objects = overview
+        .sections
+        .iter()
+        .find(|section| section.id == "helm.objects")
+        .expect("the objects");
+    let Block::Table { rows, .. } = &objects.blocks[0] else {
+        panic!("the table");
+    };
+    let linked: Vec<(&str, Option<&str>)> = rows
+        .iter()
+        .map(|row| match &row[1] {
+            Value::Link { target, text } => (text.as_str(), target.namespace.as_deref()),
+            other => panic!("a link: {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        linked,
+        [
+            ("empty", Some("payments")),
+            ("none", Some("payments")),
+            ("elsewhere", Some("other"))
+        ]
+    );
+}
+
+#[test]
 fn an_uninstall_that_has_not_ended_says_so() {
     let release = serde_json::json!({
         "name": "leaving",
