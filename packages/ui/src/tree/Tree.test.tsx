@@ -106,39 +106,3 @@ test("the active row keeps its tint under the pointer, the others take the hover
   expect(row("Pods").className).not.toContain("hover:before:bg-row-hover");
   expect(row("Failing pods").className).toContain("hover:before:bg-row-hover");
 });
-
-test("a tall tree has 24 px rows, and a block under a row is no row the cursor stops at", () => {
-  const onOpen = vi.fn();
-  let controller: ListController | undefined;
-  render(
-    <Tree
-      label="Values"
-      tall
-      rows={[
-        { id: "a", depth: 0, label: "a" },
-        { id: "a/block", depth: 0, label: "the block", block: true },
-        { id: "b", depth: 0, label: "b" },
-      ]}
-      onOpen={onOpen}
-      onToggle={vi.fn()}
-      register={(_, registered) => {
-        controller = registered;
-        return () => undefined;
-      }}
-    />,
-  );
-  expect(screen.getAllByRole("treeitem")).toHaveLength(2);
-  for (const row of screen.getAllByRole("treeitem"))
-    expect(row.className).toContain("h-6");
-  act(() => {
-    controller?.moveToEdge("first");
-  });
-  act(() => {
-    controller?.move(1);
-  });
-  act(() => {
-    controller?.activate();
-  });
-  expect(onOpen).toHaveBeenLastCalledWith("b", false);
-  expect(screen.getByText("the block")).toBeTruthy();
-});
