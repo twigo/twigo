@@ -20,7 +20,9 @@ import { isQuiet, statusTone } from "./status";
 import { ReleaseStates } from "./states";
 
 vi.mock("../edit/DiffView", () => ({
-  default: () => <div data-testid="diff" />,
+  default: ({ original, modified }: { original: string; modified: string }) => (
+    <div data-testid="diff" data-original={original} data-modified={modified} />
+  ),
 }));
 
 withScreenSize(1280);
@@ -290,6 +292,42 @@ test("no command is copied for a view that none prints: the chart's defaults", (
   expect(helmCommand(release, "prod-eu", "defaults", 4)).toBeUndefined();
   expect(printsCommand("defaults")).toBe(false);
   expect(printsCommand("values")).toBe(true);
+});
+
+async function compared(from: number, to: number) {
+  const workbench = await mountKube(createMockBackend("ready"));
+  act(() => {
+    workbench.editors.open(
+      diffUri({
+        kind: "release",
+        release: { space: "prod-eu", namespace: "payments", name: "alpha" },
+        from,
+        to,
+        part: "values",
+      }),
+    );
+  });
+  await settle(6);
+  const diff = screen.getByTestId("diff");
+  const sides = {
+    left: diff.dataset["original"] ?? "",
+    right: diff.dataset["modified"] ?? "",
+    said: document.body.textContent,
+  };
+  cleanup();
+  return sides;
+}
+
+test("a comparison says that a value that changed reads before in the older revision and after in the newer, whichever it is asked first", async () => {
+  const straight = await compared(1, 2);
+  expect(straight.said).toContain(
+    "A value that changed reads “before” in the older revision and “after” in the newer.",
+  );
+  expect(straight.left).toContain("password: <16 bytes, before>");
+  expect(straight.right).toContain("password: <16 bytes, after>");
+  const reversed = await compared(2, 1);
+  expect(reversed.left).toContain("password: <16 bytes, after>");
+  expect(reversed.right).toContain("password: <16 bytes, before>");
 });
 
 test("a comparison of two revisions asks the core once, however often the editor area draws again", async () => {

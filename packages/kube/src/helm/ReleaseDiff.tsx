@@ -27,7 +27,8 @@ type Answer =
  * Two revisions of a release in the diff editor (ARCHITECTURE 4.3), their
  * values, the chart's defaults or their manifests, unchanged lines folded.
  * Rust masks both sides and compares the real values: a value that changed
- * reads `<12 bytes, changed>` on both, which says it changed and nothing more.
+ * reads `<12 bytes, before>` in the older revision and `<12 bytes, after>` in
+ * the newer, which says it changed and nothing more.
  */
 export function ReleaseDiff({
   release,
@@ -78,8 +79,8 @@ export function ReleaseDiff({
         icon={GitCompare}
         title={`${release.name} r${String(from)} and r${String(to)}`}
       >
-        Values are hidden as their sizes, and a value that changed is marked:
-        its size reads “changed” on both sides.
+        Values are hidden as their sizes. A value that changed reads “before” in
+        the older revision and “after” in the newer.
       </Banner>
       <TabBar
         label="What to compare"
