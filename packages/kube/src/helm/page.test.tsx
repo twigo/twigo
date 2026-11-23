@@ -339,18 +339,6 @@ test("the Manifest's bar counts every hidden place, an unread document too, and 
   expect(page("alpha").textContent).toContain("4 values hidden");
 });
 
-test("a release whose revision cannot be read is a stopped page: the words the list gives for its code, the icon in the error tone, and the block's own padding", async () => {
-  await open(release("trunc", "auth"));
-  const title = within(page("trunc")).getByText("This revision cannot be read");
-  const state = title.parentElement;
-  expect(state?.textContent).toContain(problemWords("helm.truncated").why);
-  expect(state?.className).toContain("text-error");
-  expect(state?.className).toContain("py-16");
-  expect(state?.querySelector("svg")?.getAttribute("class")).toContain(
-    "opacity-70",
-  );
-});
-
 const NO_PARTS = {
   overview: null,
   notes: null,
@@ -360,7 +348,7 @@ const NO_PARTS = {
   history: null,
 } as const;
 
-test("a revision that Twigo cannot read is the stopped page, whichever of the four codes says it", async () => {
+test("a revision that Twigo cannot read is a stopped page, whichever of the four codes says it: the words the list gives for its code, the icon in the error tone, and the block's own padding", async () => {
   const { backend, send } = core();
   const workbench = await mountKube(backend);
   act(() => {
@@ -382,8 +370,15 @@ test("a revision that Twigo cannot read is the stopped page, whichever of the fo
       });
     });
     await settle(3);
-    expect(page("alpha").textContent).toContain("This revision cannot be read");
-    expect(page("alpha").textContent).toContain(problemWords(code).why);
+    const state = within(page("alpha")).getByText(
+      "This revision cannot be read",
+    ).parentElement;
+    expect(state?.textContent).toContain(problemWords(code).why);
+    expect(state?.className).toContain("text-error");
+    expect(state?.className).toContain("py-16");
+    expect(state?.querySelector("svg")?.getAttribute("class")).toContain(
+      "opacity-70",
+    );
     expect(page("alpha").textContent).not.toContain("could not fetch");
   }
 });
