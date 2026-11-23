@@ -2,7 +2,6 @@ import { Changes } from "@twigo/workbench";
 import type { HelmPart, RevisionLine } from "@twigo/protocol";
 import { partKey, type Glyph, type Shown } from "./reveals";
 
-/** The views of a release. */
 export type ReleaseTab = "overview" | "values" | "manifest" | "history";
 
 /** Which of a revision's two values documents is shown: the person's, or the chart's defaults. */
