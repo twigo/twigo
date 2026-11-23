@@ -575,3 +575,110 @@ async fn no_more_than_four_release_secrets_are_fetched_at_once() {
     .await;
     assert_eq!(rig.fake.state().gets_overlap, 4);
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_release_whose_get_fails_says_so_while_it_does_and_fills_once_it_answers() {
+    let path = format!("/api/v1/namespaces/a/secrets/{}", secret_name("app", 1));
+    let mut rig = Rig::over(&["a"], |fake| {
+        revision(fake, "a", "app", 1, "deployed");
+        fake.state().no_endpoints.insert(path.clone());
+    })
+    .await;
+    rig.until("the failure", |seen| {
+        seen.text("a", "app", "Problem") == ErrorCode::ServerUnavailable.wire()
+    })
+    .await;
+    assert_eq!(rig.seen.text("a", "app", "Status"), "deployed");
+
+    rig.fake.state().no_endpoints.remove(&path);
+    rig.until("the chart", |seen| seen.charted("a", "app"))
+        .await;
+    assert_eq!(rig.seen.text("a", "app", "Problem"), "-");
+    assert!(testing::gets(&rig.fake, "a", "app", 1) >= 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_status_change_keeps_the_row_s_chart_until_its_new_decode_lands() {
+    let mut rig = Rig::over(&["a"], |fake| {
+        revision(fake, "a", "app", 1, "pending-install");
+    })
+    .await;
+    rig.until("the chart", |seen| seen.charted("a", "app"))
+        .await;
+
+    rig.fake.state().gets_take = Duration::from_secs(1);
+    revision(&rig.fake, "a", "app", 1, "deployed");
+    let mut blank = Vec::new();
+    for _ in 0..60 {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        while let Ok(batch) = rig.batches.try_recv() {
+            rig.list.ack(batch.seq);
+            rig.seen.apply(batch);
+            if !rig.seen.charted("a", "app") || rig.seen.of("a", "app").unwrap().created.is_none() {
+                blank.push(rig.seen.table());
+            }
+        }
+    }
+    assert!(blank.is_empty(), "{blank:?}");
+    assert_eq!(testing::gets(&rig.fake, "a", "app", 1), 2);
+    assert_eq!(rig.seen.text("a", "app", "Status"), "deployed");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_decode_under_way_when_its_release_moves_on_is_dropped() {
+    let mut rig = Rig::over(&["a"], |fake| {
+        fake.state().gets_take = Duration::from_secs(10);
+        revision(fake, "a", "app", 1, "deployed");
+    })
+    .await;
+    rig.shows(&["app 1 deployed -"]).await;
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    revision(&rig.fake, "a", "app", 2, "deployed");
+    let mut wrong = Vec::new();
+    while rig.seen.text("a", "app", "Chart") != "demo-1.2.0" {
+        let batch = rig.next().await;
+        rig.seen.apply(batch);
+        if rig.seen.text("a", "app", "Revision") == "2" && rig.seen.charted("a", "app") {
+            wrong.push(rig.seen.text("a", "app", "Chart"));
+        }
+    }
+    wrong.retain(|chart| chart != "demo-1.2.0");
+    assert!(wrong.is_empty(), "revision 2 showed {wrong:?}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_relist_asks_a_failed_release_again_at_once() {
+    let path = format!("/api/v1/namespaces/a/secrets/{}", secret_name("app", 1));
+    let mut rig = Rig::over(&["a"], |fake| {
+        revision(fake, "a", "app", 1, "deployed");
+        fake.state().no_endpoints.insert(path.clone());
+    })
+    .await;
+    let mut failed_at = tokio::time::Instant::now();
+    while testing::gets(&rig.fake, "a", "app", 1) < 4
+        || failed_at.elapsed() < Duration::from_millis(100)
+    {
+        if testing::gets(&rig.fake, "a", "app", 1) < 4 {
+            failed_at = tokio::time::Instant::now();
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        while let Ok(batch) = rig.batches.try_recv() {
+            rig.list.ack(batch.seq);
+            rig.seen.apply(batch);
+        }
+    }
+
+    rig.fake.state().no_endpoints.remove(&path);
+    revision(&rig.fake, "b", "elsewhere", 1, "deployed");
+    rig.fake.compact();
+    rig.fake.end_watches();
+    let relisted = tokio::time::Instant::now();
+    rig.until("the chart", |seen| seen.charted("a", "app"))
+        .await;
+    assert!(
+        relisted.elapsed() < Duration::from_secs(1),
+        "asked again {:?} after the relist, where its fourth failure waits at least 2.5 s",
+        relisted.elapsed()
+    );
+}

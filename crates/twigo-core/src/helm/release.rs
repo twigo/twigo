@@ -4,7 +4,10 @@
 //! The revision it shows, the latest unless one is pinned, is fetched with
 //! one `GET` and decoded to its page once, held while it is shown and
 //! dropped with the editor; History decodes each revision once per uid and
-//! `resourceVersion` while it is shown, keeping only its line. Batches go
+//! `resourceVersion` while it is shown, keeping only its line. A revision's
+//! page and line stay while its Secret, written again, is decoded anew, the
+//! status the label's meanwhile. A request that fails is said while it does
+//! and asked again after the hub's backoff and at every relist. Batches go
 //! with flow control, as an open object's do (3.5).
 
 use std::collections::{BTreeMap, HashMap};
@@ -19,14 +22,14 @@ use twigo_cache::batcher::FLUSH;
 use twigo_cache::hub::{Delta, Hub, Subscription};
 use twigo_cache::store::RowKey;
 use twigo_cache::table::Row;
-use twigo_helm::{Page, Stored};
+use twigo_helm::{Page, Stored, Summary};
 use twigo_ipc::{
     ErrorCode, IpcError, ReleaseBatch, ReleaseParts, RevisionLine, Scrubbed, ViewState,
 };
 use twigo_panic::contain;
 
-use super::fetch;
-use super::releases::{Decoded, Stamp, cells, printed};
+use super::fetch::{self, Failed};
+use super::releases::{Decoded, Failing, Known, Stamp, cells, printed};
 
 /// The seam of an open release, as `TWIGO_PANIC` names it.
 pub(crate) const ITEM: &str = "helm release";
@@ -200,9 +203,9 @@ struct Shown {
 
 /// What a fetch under way answers.
 enum Answer {
-    Page(u32, Stamp, Result<Arc<Page>, IpcError>),
-    Line(u32, Stamp, Result<RevisionLine, IpcError>),
-    Latest(Stamp, Decoded),
+    Page(u32, Stamp, Result<Arc<Page>, Failed>),
+    Line(u32, Stamp, Result<RevisionLine, Failed>),
+    Latest(Stamp, Result<Summary, Failed>),
 }
 
 /// What changed since the last batch, for the parts that show it.
@@ -233,10 +236,13 @@ async fn run(
     let mut placed: HashMap<RowKey, u32> = HashMap::new();
     let mut shown: Option<Shown> = None;
     let mut asked_page: Option<(u32, Stamp)> = None;
+    let mut page_failed: Option<(u32, Failing)> = None;
     let mut lines: HashMap<u32, (Stamp, RevisionLine)> = HashMap::new();
     let mut asked_lines: HashMap<u32, Stamp> = HashMap::new();
+    let mut lines_failed: HashMap<u32, Failing> = HashMap::new();
     let mut newest: Option<(Stamp, Decoded)> = None;
     let mut asked_newest: Option<Stamp> = None;
+    let mut newest_failed: Option<Failing> = None;
     let mut dirty = Dirty {
         page: true,
         values: true,
@@ -255,24 +261,58 @@ async fn run(
                     Answer::Page(revision, stamp, page) => {
                         if asked_page.as_ref() == Some(&(revision, stamp.clone())) {
                             asked_page = None;
-                            shown = Some(Shown { revision, stamp: Some(stamp), page });
-                            dirty.page = true;
-                            dirty.values = true;
-                            dirty.manifest = true;
+                            match page {
+                                Err(Failed::Request(error)) => {
+                                    let last = page_failed
+                                        .take()
+                                        .filter(|(at, _)| *at == revision)
+                                        .map(|(_, failing)| failing);
+                                    page_failed =
+                                        Some((revision, Failing::after(last, stamp, error)));
+                                }
+                                page => {
+                                    page_failed = None;
+                                    let page = page.map_err(Failed::error);
+                                    shown = Some(Shown { revision, stamp: Some(stamp), page });
+                                    dirty.page = true;
+                                    dirty.values = true;
+                                    dirty.manifest = true;
+                                }
+                            }
                         }
                     }
                     Answer::Line(revision, stamp, line) => {
                         if asked_lines.get(&revision) == Some(&stamp) {
                             asked_lines.remove(&revision);
-                            let line = line
-                                .unwrap_or_else(|error| unread(&revisions, revision, error));
-                            lines.insert(revision, (stamp, line));
+                            let last = lines_failed.remove(&revision);
+                            match line {
+                                Err(Failed::Request(error)) => {
+                                    lines_failed
+                                        .insert(revision, Failing::after(last, stamp, error));
+                                }
+                                line => {
+                                    let line = line.unwrap_or_else(|failed| {
+                                        unread(&revisions, revision, failed.error())
+                                    });
+                                    lines.insert(revision, (stamp, line));
+                                }
+                            }
                         }
                     }
                     Answer::Latest(stamp, decoded) => {
                         if asked_newest.as_ref() == Some(&stamp) {
                             asked_newest = None;
-                            newest = Some((stamp, decoded));
+                            match decoded {
+                                Err(Failed::Request(error)) => {
+                                    newest_failed =
+                                        Some(Failing::after(newest_failed.take(), stamp, error));
+                                }
+                                decoded => {
+                                    newest_failed = None;
+                                    let decoded = decoded.map_err(|failed| failed.error().code);
+                                    newest = Some((stamp, decoded));
+                                }
+                            }
                         }
                     }
                 }
@@ -304,6 +344,14 @@ async fn run(
         if reset {
             revisions.clear();
             placed.clear();
+            for failing in page_failed
+                .iter_mut()
+                .map(|(_, failing)| failing)
+                .chain(lines_failed.values_mut())
+                .chain(newest_failed.iter_mut())
+            {
+                failing.relisted();
+            }
         }
         for key in &removed {
             if let Some(revision) = placed.remove(key) {
@@ -326,11 +374,17 @@ async fn run(
         let wanted = pinned.or(latest);
         match wanted.map(|revision| (revision, revisions.get(&revision))) {
             Some((revision, Some(held))) => {
+                if page_failed.as_ref().is_some_and(|(at, _)| *at != revision) {
+                    page_failed = None;
+                }
                 let current = shown.as_ref().is_some_and(|shown| {
                     shown.revision == revision && shown.stamp.as_ref() == Some(&held.stamp)
                 });
                 let asked = asked_page.as_ref() == Some(&(revision, held.stamp.clone()));
-                if !current && !asked {
+                let waits = page_failed
+                    .as_ref()
+                    .is_some_and(|(_, failing)| failing.waits(&held.stamp));
+                if !current && !asked && !waits {
                     asked_page = Some((revision, held.stamp.clone()));
                     fetching.push(page_of(&target, &held.row, revision, held.stamp.clone()));
                 }
@@ -352,70 +406,72 @@ async fn run(
                         )),
                     });
                     asked_page = None;
+                    page_failed = None;
                 }
             }
             _ => {
                 shown = None;
                 asked_page = None;
+                page_failed = None;
             }
         }
-        *control.shown.lock().expect("release lock") = shown.as_ref().and_then(|shown| {
-            shown
-                .page
-                .as_ref()
-                .ok()
-                .map(|page| (shown.revision, Arc::clone(page)))
-        });
+        let page = shown
+            .as_ref()
+            .filter(|_| page_failed.is_none())
+            .and_then(|shown| shown.page.as_ref().ok().map(|page| (shown.revision, page)));
+        *control.shown.lock().expect("release lock") =
+            page.map(|(revision, page)| (revision, Arc::clone(page)));
+        let page = page.map(|(_, page)| page);
 
         // The newest revision's summary, which the overview's header prints
-        // as the list's row does: the shown page's when it is that revision,
-        // else decoded on its own.
+        // as the list's row does: the page's where the editor shows that
+        // revision, else decoded on its own.
         let newest_row =
             latest.and_then(|latest| revisions.get(&latest).map(|held| (latest, held)));
-        let newest_decoded: Option<Decoded> = match (&newest_row, &shown) {
-            (
-                Some((latest, held)),
-                Some(Shown {
-                    revision,
-                    stamp: Some(stamp),
-                    page,
-                }),
-            ) if revision == latest && *stamp == held.stamp => Some(
-                page.as_ref()
-                    .map(|page| page.summary().clone())
-                    .map_err(|error| error.code),
-            ),
-            (Some((latest, held)), _) => {
-                let paged = asked_page.as_ref() == Some(&(*latest, held.stamp.clone()));
+        let known = match newest_row {
+            None => Known::default(),
+            Some((latest, held)) if wanted == Some(latest) => {
+                let paged = shown.as_ref().and_then(|shown| {
+                    let stamp = shown.stamp.as_ref()?;
+                    let summary = shown.page.as_ref().map(|page| page.summary());
+                    (shown.revision == latest).then(|| (stamp, summary.map_err(|error| error.code)))
+                });
+                let failed = page_failed.as_ref().map(|(_, failing)| failing);
+                Known::of(&held.stamp, paged, failed)
+            }
+            Some((_, held)) => {
                 let decoded = newest
                     .as_ref()
-                    .filter(|(stamp, _)| *stamp == held.stamp)
-                    .map(|(_, decoded)| decoded.clone());
-                if decoded.is_none()
-                    && parts.overview
-                    && !paged
-                    && asked_newest.as_ref() != Some(&held.stamp)
-                {
+                    .map(|(stamp, decoded)| (stamp, decoded.as_ref().map_err(|code| *code)));
+                let read = decoded.is_some_and(|(stamp, _)| *stamp == held.stamp);
+                let asked = asked_newest.as_ref() == Some(&held.stamp);
+                let waits = newest_failed
+                    .as_ref()
+                    .is_some_and(|failing| failing.waits(&held.stamp));
+                if !read && !asked && !waits && parts.overview {
                     asked_newest = Some(held.stamp.clone());
                     fetching.push(newest_of(&target, &held.row, held.stamp.clone()));
                 }
-                decoded
+                Known::of(&held.stamp, decoded, newest_failed.as_ref())
             }
-            (None, _) => None,
         };
 
         if parts.history {
             lines.retain(|revision, (stamp, _)| {
                 revisions
                     .get(revision)
-                    .is_some_and(|held| held.stamp == *stamp)
+                    .is_some_and(|held| stamp.same_secret(&held.stamp))
             });
+            lines_failed.retain(|revision, _| revisions.contains_key(revision));
             for (&revision, held) in &revisions {
+                let read = lines
+                    .get(&revision)
+                    .is_some_and(|(stamp, _)| *stamp == held.stamp);
                 let paged = asked_page.as_ref() == Some(&(revision, held.stamp.clone()));
-                if paged
-                    || lines.contains_key(&revision)
-                    || asked_lines.get(&revision) == Some(&held.stamp)
-                {
+                let waits = lines_failed
+                    .get(&revision)
+                    .is_some_and(|failing| failing.waits(&held.stamp));
+                if read || paged || waits || asked_lines.get(&revision) == Some(&held.stamp) {
                     continue;
                 }
                 match &shown {
@@ -426,6 +482,7 @@ async fn run(
                     }) if *at == revision && *stamp == held.stamp => {
                         let line = twigo_helm::line(page.summary(), Some(page.description()));
                         lines.insert(revision, (held.stamp.clone(), line));
+                        lines_failed.remove(&revision);
                     }
                     _ => {
                         asked_lines.insert(revision, held.stamp.clone());
@@ -442,21 +499,15 @@ async fn run(
         } else {
             lines.clear();
             asked_lines.clear();
+            lines_failed.clear();
         }
 
         let printed = newest_row
             .map(|(latest, held)| {
-                printed(
-                    &cells(
-                        &target.name,
-                        Some(latest),
-                        &held.row.meta,
-                        newest_decoded.as_ref(),
-                    )
-                    .0,
-                )
+                printed(&cells(&target.name, Some(latest), &held.row.meta, &known).0)
             })
             .unwrap_or_default();
+        let header_read = known.summary.is_some() || known.problem.is_some();
         let deployed = revisions
             .iter()
             .rev()
@@ -466,26 +517,42 @@ async fn run(
             revisions
                 .iter()
                 .rev()
-                .map(|(&revision, held)| match lines.get(&revision) {
-                    Some((_, line)) => line.clone(),
-                    None => labelled(revision, &held.row, None),
+                .map(|(&revision, held)| {
+                    let failed = lines_failed
+                        .get(&revision)
+                        .map(|failing| failing.error().clone());
+                    match lines.get(&revision) {
+                        Some((stamp, line)) if *stamp == held.stamp => line.clone(),
+                        Some((_, line)) => RevisionLine {
+                            status: label(&held.row, "status").unwrap_or_default().to_owned(),
+                            problem: failed,
+                            ..line.clone()
+                        },
+                        None => labelled(revision, &held.row, failed),
+                    }
                 })
                 .collect::<Vec<_>>()
         });
         let now = Sent {
             status,
             exists: !revisions.is_empty(),
-            revision: shown.as_ref().map(|shown| shown.revision),
+            revision: match &page_failed {
+                Some((revision, _)) => Some(*revision),
+                None => shown.as_ref().map(|shown| shown.revision),
+            },
             latest,
-            problem: shown
-                .as_ref()
-                .and_then(|shown| shown.page.as_ref().err().cloned()),
+            problem: match &page_failed {
+                Some((_, failing)) => Some(failing.error().clone()),
+                None => shown
+                    .as_ref()
+                    .and_then(|shown| shown.page.as_ref().err().cloned()),
+            },
             header: (printed, deployed),
             history,
         };
         let header_changed = sent.as_ref().is_none_or(|sent| sent.header != now.header);
-        let page = shown.as_ref().and_then(|shown| shown.page.as_ref().ok());
-        let overview_due = parts.overview && page.is_some() && (dirty.page || header_changed);
+        let overview_due =
+            parts.overview && page.is_some() && header_read && (dirty.page || header_changed);
         let values_due = parts.values && page.is_some() && dirty.values;
         let manifest_due = parts.manifest && page.is_some() && dirty.manifest;
         let history_due = now.history.is_some()
@@ -537,7 +604,7 @@ async fn run(
             manifest: page.filter(|_| manifest_due).map(|page| page.manifest()),
             history: now.history.clone().filter(|_| history_due),
         };
-        dirty.page &= !parts.overview;
+        dirty.page &= !overview_due;
         dirty.values &= !parts.values;
         dirty.manifest &= !parts.manifest;
         dirty.history &= !parts.history;
@@ -612,10 +679,9 @@ async fn decoded<T: Send + 'static>(
     target: (Hub, String, String),
     secret: Box<str>,
     decode: fn(&Stored<'_>) -> Result<T, IpcError>,
-) -> Result<T, IpcError> {
+) -> Result<T, Failed> {
     let (hub, context, namespace) = target;
-    let clients = hub.clients(&context).await?;
-    fetch::decoded(&clients, &namespace, &secret, decode).await
+    fetch::decoded(&hub, &context, &namespace, &secret, decode).await
 }
 
 fn where_of(target: &Target) -> (Hub, String, String) {
@@ -639,10 +705,7 @@ fn page_of(target: &Target, row: &Row, revision: u32, stamp: Stamp) -> BoxFuture
 
 fn newest_of(target: &Target, row: &Row, stamp: Stamp) -> BoxFuture<'static, Answer> {
     let (at, secret) = (where_of(target), row.meta.name.clone());
-    Box::pin(async move {
-        let summary = decoded(at, secret, twigo_helm::summary).await;
-        Answer::Latest(stamp, summary.map_err(|error| error.code))
-    })
+    Box::pin(async move { Answer::Latest(stamp, decoded(at, secret, twigo_helm::summary).await) })
 }
 
 fn line_of(

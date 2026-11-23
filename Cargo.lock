@@ -6040,6 +6040,7 @@ name = "twigo-core"
 version = "0.1.0"
 dependencies = [
  "atomic-write-file",
+ "backon",
  "base64 0.23.1",
  "bytes",
  "fastrand",

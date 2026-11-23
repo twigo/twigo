@@ -6,7 +6,11 @@
 //! which `helm get` reads. That revision is fetched and decoded to its
 //! summary once per uid and `resourceVersion`, four at a time, and its row
 //! then has Chart, App Version, Updated and the status its payload says, or
-//! the code that keeps it from being read in Problem.
+//! the code that keeps it from being read in Problem. Helm writes a
+//! revision's Secret again when its status changes: its last summary stays
+//! until the new one lands, the status the label's meanwhile. A request that
+//! fails is said in Problem while it does, and asked again after the hub's
+//! backoff and at every relist.
 //!
 //! The decodes need no wake of their own: the batcher drains its source at
 //! every flush while nothing is unacknowledged, and a summary that lands is
@@ -15,17 +19,19 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use backon::ExponentialBackoff;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
+use tokio::time::Instant;
 use twigo_cache::batcher::Source;
-use twigo_cache::hub::{Delta, Hub, Shown, Subscription};
+use twigo_cache::hub::{Delta, Hub, Shown, Subscription, backoff};
 use twigo_cache::meta::Meta;
 use twigo_cache::store::RowKey;
 use twigo_cache::table::{Cell, Column, ColumnKind, Row};
 use twigo_helm::Summary;
-use twigo_ipc::{ErrorCode, Printed};
+use twigo_ipc::{ErrorCode, IpcError, Printed};
 
-use super::fetch;
+use super::fetch::{self, Failed};
 
 /// How many release Secrets a list fetches at once, as the metrics poller
 /// keeps to four requests (ARCHITECTURE 3.6).
@@ -74,8 +80,8 @@ impl Source for Releases {
         let (delta, touched) = match delta {
             Delta::Reset { rows, .. } => {
                 held.reset(rows);
-                for (release, stamp, decoded) in answers {
-                    held.answered(release, stamp, decoded);
+                for (release, stamp, read) in answers {
+                    held.answered(release, stamp, read);
                 }
                 let rows = held.rows();
                 let touched: Vec<Release> = held.releases.keys().cloned().collect();
@@ -87,8 +93,8 @@ impl Source for Releases {
             }
             Delta::Changed { upserted, removed } => {
                 let mut touched = held.change(upserted, &removed);
-                for (release, stamp, decoded) in answers {
-                    touched.extend(held.answered(release, stamp, decoded));
+                for (release, stamp, read) in answers {
+                    touched.extend(held.answered(release, stamp, read));
                 }
                 let (mut upserted, mut removed) = (Vec::new(), Vec::new());
                 for release in &touched {
@@ -103,8 +109,10 @@ impl Source for Releases {
                 )
             }
         };
+        let due = held.due();
         let unread: Vec<Unread> = touched
             .into_iter()
+            .chain(due)
             .filter_map(|release| held.unread(release))
             .collect();
         drop(held);
@@ -216,10 +224,101 @@ impl Stamp {
             resource_version: meta.resource_version.clone(),
         }
     }
+
+    /// Whether `other` is a version of the same Secret.
+    pub(super) fn same_secret(&self, other: &Stamp) -> bool {
+        self.uid.is_some() && self.uid == other.uid
+    }
 }
 
 /// A revision's summary, or the code that keeps it from being read.
 pub(super) type Decoded = Result<Summary, ErrorCode>;
+
+/// A request for a version of a revision's Secret that failed, which says
+/// nothing of the revision: it is asked again once the hub's backoff has
+/// passed, or at once after a relist.
+pub(super) struct Failing {
+    stamp: Stamp,
+    error: IpcError,
+    backoff: ExponentialBackoff,
+    due: Instant,
+}
+
+impl Failing {
+    /// `error` of the request for `stamp`; after `last`, the pause grows.
+    pub(super) fn after(last: Option<Failing>, stamp: Stamp, error: IpcError) -> Self {
+        let mut backoff = last.map_or_else(backoff, |last| last.backoff);
+        let pause = backoff
+            .next()
+            .expect("the backoff has no maximum of attempts");
+        Self {
+            stamp,
+            error,
+            backoff,
+            due: Instant::now() + pause,
+        }
+    }
+
+    /// Whether `stamp` waits for the pause before it is asked again.
+    pub(super) fn waits(&self, stamp: &Stamp) -> bool {
+        self.stamp == *stamp && !self.due()
+    }
+
+    pub(super) fn due(&self) -> bool {
+        Instant::now() >= self.due
+    }
+
+    /// The server listed again: ask at once.
+    pub(super) fn relisted(&mut self) {
+        self.due = Instant::now();
+    }
+
+    pub(super) fn error(&self) -> &IpcError {
+        &self.error
+    }
+}
+
+/// What a row shows of its newest revision beyond the labels.
+#[derive(Default)]
+pub(super) struct Known<'a> {
+    /// Its summary, and whether it was decoded from its Secret as it stands:
+    /// one decoded from an earlier version of the same Secret gives all but
+    /// the status, which the label then says.
+    pub(super) summary: Option<(&'a Summary, bool)>,
+    /// What keeps it from being read: what its decode decided, or why a
+    /// request for it fails, while it does.
+    pub(super) problem: Option<ErrorCode>,
+}
+
+impl<'a> Known<'a> {
+    /// What is known of the revision whose Secret stands at `stamp`, from
+    /// the last decode of its Secret and the `failed` request for it.
+    pub(super) fn of(
+        stamp: &Stamp,
+        decoded: Option<(&Stamp, Result<&'a Summary, ErrorCode>)>,
+        failed: Option<&Failing>,
+    ) -> Self {
+        let mut known = match decoded {
+            Some((at, Ok(summary))) if at == stamp => Known {
+                summary: Some((summary, true)),
+                problem: None,
+            },
+            Some((at, Err(code))) if at == stamp => Known {
+                summary: None,
+                problem: Some(code),
+            },
+            Some((at, Ok(summary))) if at.same_secret(stamp) => Known {
+                summary: Some((summary, false)),
+                problem: None,
+            },
+            _ => Known::default(),
+        };
+        if let Some(failed) = failed {
+            known.problem = Some(failed.error().code);
+        }
+        known
+    }
+}
 
 /// A newest revision that wants its decode.
 struct Unread {
@@ -235,11 +334,13 @@ struct Held {
     /// The Secrets of each release by revision, the one that is no revision
     /// first.
     releases: HashMap<Release, BTreeMap<Option<u32>, Arc<Row>>>,
-    /// The summary of each release's newest revision, by the version of its
-    /// Secret decoded.
+    /// What the last decode of each release's newest revision decided, by
+    /// the version of its Secret decoded.
     decoded: HashMap<Release, (Stamp, Decoded)>,
     /// The version of each release's newest revision being fetched.
     asked: HashMap<Release, Stamp>,
+    /// Each release whose newest revision's request failed.
+    failed: HashMap<Release, Failing>,
 }
 
 impl Held {
@@ -254,6 +355,11 @@ impl Held {
             .retain(|release, _| releases.contains_key(release));
         self.asked
             .retain(|release, _| releases.contains_key(release));
+        self.failed
+            .retain(|release, _| releases.contains_key(release));
+        for failing in self.failed.values_mut() {
+            failing.relisted();
+        }
     }
 
     fn rows(&self) -> Vec<Arc<Row>> {
@@ -293,6 +399,7 @@ impl Held {
                 self.releases.remove(&release);
                 self.decoded.remove(&release);
                 self.asked.remove(&release);
+                self.failed.remove(&release);
             }
         }
         Some(release)
@@ -306,9 +413,14 @@ impl Held {
         }
     }
 
-    /// Keeps a decode of the release's newest revision as it stands, and
-    /// says which release's row it changed.
-    fn answered(&mut self, release: Release, stamp: Stamp, decoded: Decoded) -> Option<Release> {
+    /// Keeps what a fetch of the release's newest revision as it stands
+    /// answered, and says which release's row it changed.
+    fn answered(
+        &mut self,
+        release: Release,
+        stamp: Stamp,
+        read: Result<Summary, Failed>,
+    ) -> Option<Release> {
         if self.asked.get(&release) == Some(&stamp) {
             self.asked.remove(&release);
         }
@@ -316,19 +428,45 @@ impl Held {
         if Stamp::of(&newest.meta) != stamp {
             return None;
         }
-        self.decoded.insert(release.clone(), (stamp, decoded));
+        match read {
+            Err(Failed::Request(error)) => {
+                let last = self.failed.remove(&release);
+                let failing = Failing::after(last, stamp, error);
+                self.failed.insert(release.clone(), failing);
+            }
+            read => {
+                self.failed.remove(&release);
+                let decoded = read.map_err(|failed| failed.error().code);
+                self.decoded.insert(release.clone(), (stamp, decoded));
+            }
+        }
         Some(release)
     }
 
+    /// The releases whose failed request is due to be asked again.
+    fn due(&self) -> Vec<Release> {
+        self.failed
+            .iter()
+            .filter(|(_, failing)| failing.due())
+            .map(|(release, _)| release.clone())
+            .collect()
+    }
+
     /// The release's newest revision when no decode of it as it stands is
-    /// held or under way, which marks it asked.
+    /// held or under way and no failed request for it waits, which marks it
+    /// asked.
     fn unread(&mut self, release: Release) -> Option<Unread> {
         let secret = self.newest(&release)?;
         let stamp = Stamp::of(&secret.meta);
         let name = secret.meta.name.clone();
         let read = |held: Option<&Stamp>| held == Some(&stamp);
+        let waits = self
+            .failed
+            .get(&release)
+            .is_some_and(|failing| failing.waits(&stamp));
         if read(self.decoded.get(&release).map(|(stamp, _)| stamp))
             || read(self.asked.get(&release))
+            || waits
         {
             return None;
         }
@@ -340,16 +478,16 @@ impl Held {
         })
     }
 
-    /// The row of a release, from its newest revision's Secret and, once it
-    /// is decoded, its summary.
+    /// The row of a release, from its newest revision's Secret and what is
+    /// known of that revision.
     fn row(&self, release: &Release) -> Option<Arc<Row>> {
         let (revision, secret) = self.releases.get(release)?.last_key_value()?;
         let decoded = self
             .decoded
             .get(release)
-            .filter(|(stamp, _)| *stamp == Stamp::of(&secret.meta))
-            .map(|(_, decoded)| decoded);
-        let (cells, created) = cells(&release.name, *revision, &secret.meta, decoded);
+            .map(|(stamp, decoded)| (stamp, decoded.as_ref().map_err(|code| *code)));
+        let known = Known::of(&Stamp::of(&secret.meta), decoded, self.failed.get(release));
+        let (cells, created) = cells(&release.name, *revision, &secret.meta, &known);
         Some(Arc::new(Row {
             meta: Meta {
                 name: release.name.clone(),
@@ -367,14 +505,14 @@ impl Held {
     }
 }
 
-/// A release's cells, from its newest revision's Secret and that revision
-/// decoded, if it is; and when the revision was deployed, which Updated
+/// A release's cells, from its newest revision's Secret and what is `known`
+/// of that revision; and when the revision was deployed, which Updated
 /// counts from.
 pub(super) fn cells(
     name: &str,
     revision: Option<u32>,
     secret: &Meta,
-    decoded: Option<&Decoded>,
+    known: &Known<'_>,
 ) -> (Box<[Cell]>, Option<i64>) {
     let label = secret
         .labels
@@ -385,8 +523,8 @@ pub(super) fn cells(
         text.filter(|text| !text.is_empty())
             .map_or(Cell::Null, |text| Cell::Text(text.into()))
     };
-    let (revision, status, chart, app_version, created, problem) = match (revision, decoded) {
-        (None, _) => (
+    let (revision, status, chart, app_version, created, problem) = match revision {
+        None => (
             Cell::Null,
             label,
             Cell::Null,
@@ -394,30 +532,24 @@ pub(super) fn cells(
             None,
             Cell::Text(ErrorCode::HelmNotARelease.wire().into()),
         ),
-        (Some(revision), Some(Ok(summary))) => (
-            Cell::Int(i64::from(revision)),
-            Cell::Text(summary.status().word().into()),
-            text(summary.chart().as_deref()),
-            text(summary.app_version()),
-            summary.last_deployed().map(|at| at.as_millisecond()),
-            Cell::Null,
-        ),
-        (Some(revision), Some(Err(code))) => (
-            Cell::Int(i64::from(revision)),
-            label,
-            Cell::Null,
-            Cell::Null,
-            None,
-            Cell::Text(code.wire().into()),
-        ),
-        (Some(revision), None) => (
-            Cell::Int(i64::from(revision)),
-            label,
-            Cell::Null,
-            Cell::Null,
-            None,
-            Cell::Null,
-        ),
+        Some(revision) => {
+            let summary = known.summary.map(|(summary, _)| summary);
+            (
+                Cell::Int(i64::from(revision)),
+                match known.summary {
+                    Some((summary, true)) => Cell::Text(summary.status().word().into()),
+                    _ => label,
+                },
+                text(summary.and_then(Summary::chart).as_deref()),
+                text(summary.and_then(Summary::app_version)),
+                summary
+                    .and_then(Summary::last_deployed)
+                    .map(|at| at.as_millisecond()),
+                known
+                    .problem
+                    .map_or(Cell::Null, |code| Cell::Text(code.wire().into())),
+            )
+        }
     };
     let cells = Box::new([
         Cell::Text(name.into()),
@@ -454,7 +586,7 @@ pub(super) fn printed(cells: &[Cell]) -> Vec<Printed> {
 struct Fetches {
     hub: Hub,
     context: String,
-    running: JoinSet<(Release, Stamp, Decoded)>,
+    running: JoinSet<(Release, Stamp, Result<Summary, Failed>)>,
     permits: Arc<Semaphore>,
 }
 
@@ -476,20 +608,16 @@ impl Fetches {
                 .await
                 .expect("a list's permits are never closed");
             let namespace = release.namespace.as_deref().unwrap_or_default();
-            let decoded = match hub.clients(&context).await {
-                Ok(clients) => fetch::decoded(&clients, namespace, &secret, twigo_helm::summary)
-                    .await
-                    .map_err(|error| error.code),
-                Err(error) => Err(error.code),
-            };
-            (release, stamp, decoded)
+            let read =
+                fetch::decoded(&hub, &context, namespace, &secret, twigo_helm::summary).await;
+            (release, stamp, read)
         });
     }
 
     /// The decodes that ended since the last call. One whose task panicked
     /// outside its decode panics here, in the list's own task, which ends
     /// the list.
-    fn answers(&mut self) -> Vec<(Release, Stamp, Decoded)> {
+    fn answers(&mut self) -> Vec<(Release, Stamp, Result<Summary, Failed>)> {
         let mut answers = Vec::new();
         while let Some(ended) = self.running.try_join_next() {
             answers.push(twigo_panic::joined(ended));

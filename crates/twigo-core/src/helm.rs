@@ -114,14 +114,15 @@ pub(crate) async fn compare(
     context: &str,
     request: CompareRevisions,
 ) -> Result<ComparedRevisions, IpcError> {
-    let clients = hub.clients(context).await?;
     let namespace = &request.release.namespace;
     let [from, to] = [request.from, request.to]
         .map(|revision| fetch::secret_name(&request.release.name, revision));
-    let (from, to) = futures::try_join!(
-        fetch::decoded(&clients, namespace, &from, twigo_helm::page),
-        fetch::decoded(&clients, namespace, &to, twigo_helm::page),
-    )?;
+    let page = |name| async move {
+        fetch::decoded(hub, context, namespace, name, twigo_helm::page)
+            .await
+            .map_err(fetch::Failed::error)
+    };
+    let (from, to) = futures::try_join!(page(&from), page(&to))?;
     let part = request.part;
     Ok(twigo_panic::blocking(move || twigo_helm::compared(&from, &to, part)).await)
 }

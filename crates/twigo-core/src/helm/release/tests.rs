@@ -7,7 +7,8 @@ use serde_json::{Value, json};
 use twigo_cache::fake::Fake;
 use twigo_cache::hub::Hub;
 use twigo_ipc::{
-    CompareRevisions, ComparedPart, ErrorCode, OpenRelease, ReleaseParts, ReleaseRef, ViewState,
+    CompareRevisions, ComparedPart, ErrorCode, IpcError, OpenRelease, ReleaseParts, ReleaseRef,
+    ViewState,
 };
 use twigo_kube::client::{Budgets, Clients};
 
@@ -301,6 +302,195 @@ async fn history_decodes_each_revision_once_while_shown_and_scrubs_its_descripti
     );
     rig.until("three lines", decoded(3)).await;
     assert_eq!((rig.gets(1), rig.gets(2), rig.gets(3)), (1, 1, 1));
+}
+
+#[tokio::test(start_paused = true)]
+async fn requests_that_fail_are_said_while_they_do_and_the_revisions_shown_once_they_answer() {
+    let fake = Fake::default();
+    revision(&fake, 1, "superseded");
+    revision(&fake, 2, "deployed");
+    let paths = [1, 2].map(|version| {
+        format!(
+            "/api/v1/namespaces/a/secrets/{}",
+            secret_name("app", version)
+        )
+    });
+    fake.state().forbidden.extend(paths.clone());
+    let mut rig = Rig::open(fake, None, ALL).await;
+    let refused = |problem: Option<&IpcError>| {
+        problem.is_some_and(|problem| problem.code == ErrorCode::ServerForbidden)
+    };
+    rig.until("the refusals", |shown| {
+        refused(shown.problem.as_ref())
+            && shown
+                .history
+                .as_ref()
+                .is_some_and(|lines| refused(lines[1].problem.as_ref()))
+    })
+    .await;
+    assert_eq!(rig.watched.shown.revision, Some(2));
+    assert!(rig.opened.showing().now().is_none());
+
+    for path in &paths {
+        rig.fake.state().forbidden.remove(path);
+    }
+    rig.until("the revision and its history", |shown| {
+        shown.overview.is_some()
+            && shown.history.as_ref().is_some_and(|lines| {
+                lines.len() == 2 && lines.iter().all(|line| line.chart.is_some())
+            })
+    })
+    .await;
+    assert!(rig.watched.shown.problem.is_none());
+    assert_eq!(notes(&rig.watched.shown), Some("Revision 2 of app"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_relist_asks_a_failed_revision_again_at_once() {
+    let fake = Fake::default();
+    revision(&fake, 1, "deployed");
+    let path = format!("/api/v1/namespaces/a/secrets/{}", secret_name("app", 1));
+    fake.state().no_endpoints.insert(path.clone());
+    let mut rig = Rig::open(fake, None, OVERVIEW).await;
+    rig.until("the failure", |shown| shown.problem.is_some())
+        .await;
+    while rig.gets(1) < 4 {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    rig.fake.state().no_endpoints.remove(&path);
+    testing::put(
+        &rig.fake,
+        &testing::release("b", "elsewhere", 1, "deployed"),
+        "deployed",
+    );
+    rig.fake.compact();
+    rig.fake.end_watches();
+    let relisted = tokio::time::Instant::now();
+    rig.until("the overview", |shown| shown.overview.is_some())
+        .await;
+    assert!(
+        relisted.elapsed() < Duration::from_secs(1),
+        "asked again {:?} after the relist, where its fourth failure waits at least 2.5 s",
+        relisted.elapsed()
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_overview_keeps_its_header_through_a_status_change() {
+    let fake = Fake::default();
+    revision(&fake, 1, "pending-install");
+    let mut rig = Rig::open(fake, None, OVERVIEW).await;
+    rig.until("the overview", |shown| {
+        shown.printed().contains(&"Chart=demo-1.1.0".to_owned())
+    })
+    .await;
+
+    rig.fake.state().gets_take = Duration::from_secs(1);
+    revision(&rig.fake, 1, "deployed");
+    let written = tokio::time::Instant::now();
+    let blank = rig
+        .overviews_until("Status=deployed", "Chart=demo-1.1.0")
+        .await;
+    assert!(blank.is_empty(), "{blank:?}");
+    assert!(
+        written.elapsed() < Duration::from_secs(1),
+        "the label's status shows while the page is fetched again"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_history_line_keeps_its_chart_through_a_status_change() {
+    let fake = Fake::default();
+    revision(&fake, 1, "deployed");
+    revision(&fake, 2, "pending-upgrade");
+    let parts = ReleaseParts {
+        history: true,
+        ..OVERVIEW
+    };
+    let mut rig = Rig::open(fake, None, parts).await;
+    rig.until("both lines", |shown| {
+        shown
+            .history
+            .as_ref()
+            .is_some_and(|lines| lines.len() == 2 && lines.iter().all(|line| line.chart.is_some()))
+    })
+    .await;
+
+    rig.fake.state().gets_take = Duration::from_secs(1);
+    revision(&rig.fake, 1, "superseded");
+    let opened = &rig.opened;
+    let mut blank = Vec::new();
+    loop {
+        let batch = rig.watched.next(|seq| opened.ack(seq)).await;
+        let Some(lines) = &batch.history else {
+            continue;
+        };
+        let first = &lines[1];
+        if first.chart.is_none() {
+            blank.push(first.clone());
+        } else if first.status == "superseded" {
+            break;
+        }
+    }
+    assert!(blank.is_empty(), "{blank:?}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_pinned_revision_s_overview_waits_for_the_newest_s_header_and_asks_it_again() {
+    let fake = Fake::default();
+    revision(&fake, 1, "deployed");
+    let mut rig = Rig::open(fake, Some(1), OVERVIEW).await;
+    rig.until("the overview", |shown| shown.overview.is_some())
+        .await;
+
+    rig.fake.state().gets_take = Duration::from_secs(1);
+    revision(&rig.fake, 2, "deployed");
+    let blank = rig.overviews_until("Revision=2", "Chart=demo-1.2.0").await;
+    assert!(blank.is_empty(), "{blank:?}");
+
+    let path = format!("/api/v1/namespaces/a/secrets/{}", secret_name("app", 3));
+    rig.fake.state().forbidden.insert(path.clone());
+    revision(&rig.fake, 3, "deployed");
+    rig.until("the refusal", |shown| {
+        shown
+            .printed()
+            .contains(&format!("Problem={}", ErrorCode::ServerForbidden.wire()))
+    })
+    .await;
+    rig.fake.state().forbidden.remove(&path);
+    rig.until("the newest's chart", |shown| {
+        shown.printed().contains(&"Chart=demo-1.3.0".to_owned())
+    })
+    .await;
+    assert_eq!(rig.watched.shown.revision, Some(1));
+}
+
+impl Rig {
+    /// The headers of the overviews sent until one holds `shown` and
+    /// `chart`, that lacked `chart`.
+    async fn overviews_until(&mut self, shown: &str, chart: &str) -> Vec<Vec<String>> {
+        let opened = &self.opened;
+        let mut blank = Vec::new();
+        loop {
+            let batch = self.watched.next(|seq| opened.ack(seq)).await;
+            let Some(overview) = &batch.overview else {
+                continue;
+            };
+            let printed: Vec<String> = overview
+                .header
+                .printed
+                .iter()
+                .map(|cell| format!("{}={}", cell.column, cell.value))
+                .collect();
+            if !printed.iter().any(|cell| cell == chart) {
+                blank.push(printed);
+            } else if printed.iter().any(|cell| cell == shown) {
+                return blank;
+            }
+        }
+    }
 }
 
 #[tokio::test(start_paused = true)]

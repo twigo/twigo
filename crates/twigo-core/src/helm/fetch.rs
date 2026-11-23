@@ -1,6 +1,7 @@
 //! One revision of a release, fetched with one `GET` of its Secret through
 //! the UI's clients and decoded on the blocking pool, where a panic marks
-//! that revision alone. The Secret's bytes go once it is decoded.
+//! that revision alone. The Secret's bytes go once it is decoded. A request
+//! that fails says nothing of the revision, so it is asked again.
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -14,7 +15,7 @@ use http_body_util::BodyExt;
 use kube::client::Body;
 use serde::Deserialize;
 use twigo_cache::encoding;
-use twigo_cache::hub::Resource;
+use twigo_cache::hub::{Hub, Resource};
 use twigo_helm::Stored;
 use twigo_ipc::{ErrorCode, IpcError};
 use twigo_kube::client::Clients;
@@ -28,15 +29,35 @@ pub(crate) fn secret_name(release: &str, revision: u32) -> String {
     format!("sh.helm.release.v1.{release}.v{revision}")
 }
 
-/// The revision the Secret `name` of `namespace` holds, read by `decode`;
-/// `helm.revision-gone` once the Secret is gone.
+/// Why a revision was not read.
+pub(crate) enum Failed {
+    /// The request failed: no clients for the context, a lost connection, a
+    /// refusal or a server's error. It says nothing of the revision.
+    Request(IpcError),
+    /// The Secret is gone, or what it holds cannot be read, which stands
+    /// until it changes.
+    Read(IpcError),
+}
+
+impl Failed {
+    pub(crate) fn error(self) -> IpcError {
+        match self {
+            Failed::Request(error) | Failed::Read(error) => error,
+        }
+    }
+}
+
+/// The revision the Secret `name` of `namespace` holds in `context`, read
+/// by `decode`; `helm.revision-gone` once the Secret is gone.
 pub(crate) async fn decoded<T: Send + 'static>(
-    clients: &Clients,
+    hub: &Hub,
+    context: &str,
     namespace: &str,
     name: &str,
     decode: fn(&Stored<'_>) -> Result<T, IpcError>,
-) -> Result<T, IpcError> {
-    let (headers, body) = fetched(clients, namespace, name).await?;
+) -> Result<T, Failed> {
+    let clients = hub.clients(context).await.map_err(Failed::Request)?;
+    let (headers, body) = fetched(&clients, namespace, name).await?;
     let read = move || {
         read(
             encoding::page(&headers, body).map_err(|_| damaged())?,
@@ -46,6 +67,7 @@ pub(crate) async fn decoded<T: Send + 'static>(
     twigo_panic::contain(DECODE, twigo_panic::blocking(read))
         .await
         .unwrap_or_else(|_| Err(IpcError::panicked("reading this revision")))
+        .map_err(Failed::Read)
 }
 
 fn damaged() -> IpcError {
@@ -60,19 +82,22 @@ async fn fetched(
     clients: &Clients,
     namespace: &str,
     name: &str,
-) -> Result<(HeaderMap, Bytes), IpcError> {
+) -> Result<(HeaderMap, Bytes), Failed> {
     let secrets = Resource {
         group: String::new(),
         version: "v1".to_owned(),
         resource: "secrets".to_owned(),
         namespaced: true,
     };
-    let request = Request::get(secrets.object_path(Some(namespace), name)?)
+    let path = secrets
+        .object_path(Some(namespace), name)
+        .map_err(Failed::Read)?;
+    let request = Request::get(path)
         .header(ACCEPT, "application/json")
         .header(ACCEPT_ENCODING, encoding::GZIP)
         .body(Body::from(Vec::new()))
         .expect("a checked path and constant headers form a valid request");
-    let failed = |error: kube::Error| twigo_kube::errors::request(&error);
+    let failed = |error: kube::Error| Failed::Request(twigo_kube::errors::request(&error));
     let (parts, body) = clients
         .api
         .send(request)
@@ -82,12 +107,13 @@ async fn fetched(
     let body = body.collect().await.map_err(failed)?.to_bytes();
     match parts.status {
         status if status.is_success() => Ok((parts.headers, body)),
-        StatusCode::NOT_FOUND => Err(IpcError::new(
+        StatusCode::NOT_FOUND => Err(Failed::Read(IpcError::new(
             ErrorCode::HelmRevisionGone,
             format!("Helm no longer keeps the revision in {name}"),
-        )),
+        ))),
         status => {
-            let body = encoding::page(&parts.headers, body).map_err(|_| damaged())?;
+            let body =
+                encoding::page(&parts.headers, body).map_err(|_| Failed::Request(damaged()))?;
             Err(failed(twigo_kube::errors::refused(status, &body)))
         }
     }
