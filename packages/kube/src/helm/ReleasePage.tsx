@@ -201,19 +201,20 @@ export function ReleasePage({
   const tab = states.tab(uri);
   const view =
     tab === "values" && states.plate(uri) === "defaults" ? "defaults" : tab;
-  const { snapshot, id } = useRelease(
-    backend,
-    { space: release.space, namespace: release.namespace, name: release.name },
-    {
-      revision: release.revision ?? null,
-      parts: {
-        overview: true,
-        values: tab === "values",
-        manifest: tab === "manifest",
-        history: tab === "history",
-      },
+  const ref = {
+    space: release.space,
+    namespace: release.namespace,
+    name: release.name,
+  };
+  const { snapshot, id } = useRelease(backend, ref, {
+    revision: release.revision ?? null,
+    parts: {
+      overview: true,
+      values: tab === "values",
+      manifest: tab === "manifest",
+      history: tab === "history",
     },
-  );
+  });
   const { revision, previous, epoch } = snapshot;
   const shown = states.shown(uri, epoch);
   const marked =
@@ -356,6 +357,12 @@ export function ReleasePage({
     if (next) workbench.editors.open(next);
   };
   const lookup = keys.lookup(element);
+  const compared = (marked: readonly number[]) =>
+    workbench.actions("helm/revisions", lookup, {
+      ...ref,
+      from: Math.min(...marked),
+      to: Math.max(...marked),
+    });
   const body = (
     <Body
       view={tab}
@@ -379,39 +386,20 @@ export function ReleasePage({
       onOpen={open}
       onOpenRevision={onOpenRevision}
       markedBar={(marked) => [
-        ...(marked.length === 2
-          ? workbench.actions("helm/revisions", lookup, {
-              space: release.space,
-              namespace: release.namespace,
-              name: release.name,
-              from: Math.min(...marked),
-              to: Math.max(...marked),
-            })
-          : []),
+        ...(marked.length === 2 ? compared(marked) : []),
         ...workbench.actions("helm/marked", (key) =>
           key === "helm.marked" ? true : lookup(key),
         ),
       ]}
       revisionMenu={(at, marked) => {
-        const names = {
-          space: release.space,
-          namespace: release.namespace,
-          name: release.name,
-        };
-        if (marked.length === 2 && marked.includes(at)) {
-          return workbench.actions("helm/revisions", lookup, {
-            ...names,
-            from: Math.min(...marked),
-            to: Math.max(...marked),
-          });
-        }
+        if (marked.length === 2 && marked.includes(at)) return compared(marked);
         const previous = (snapshot.history ?? [])
           .map((each) => each.revision)
           .filter((each) => each < at)
           .sort((a, b) => b - a)[0];
         return workbench
           .actions("helm/revision", lookup, {
-            ...names,
+            ...ref,
             revision: at,
             ...(previous !== undefined && { previous }),
             ...(snapshot.latest !== undefined && { latest: snapshot.latest }),
