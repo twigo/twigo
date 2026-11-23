@@ -63,7 +63,6 @@ export function HistoryList({
     },
     [register],
   );
-  const marked = states.marks(uri, life);
   if (lines.length === 0) {
     return (
       <EmptyState icon={HistoryIcon} title="No revisions">
@@ -73,6 +72,9 @@ export function HistoryList({
   }
   const current = selected ?? lines[0]?.revision;
   const byId = new Map(lines.map((line) => [String(line.revision), line]));
+  const marked = [...states.marks(uri, life)].filter((revision) =>
+    byId.has(String(revision)),
+  );
   const item = (index: number): GridItem<RevisionLine, never> | undefined => {
     const line = lines[index];
     if (!line) return undefined;
@@ -100,14 +102,14 @@ export function HistoryList({
       onOpen={(id) => {
         onOpen(Number(id));
       }}
-      marked={new Set([...marked].map(String))}
+      marked={new Set(marked.map(String))}
       onMark={(ids, on) => {
         states.mark(uri, life, ids.map(Number), on);
       }}
       menu={
         current === undefined || !byId.has(String(current))
           ? []
-          : menu(current, [...marked])
+          : menu(current, marked)
       }
       loading={false}
       cell={(line, column) => {

@@ -131,6 +131,17 @@ function core(): {
   };
 }
 
+const line = (revision: number, status: string) => ({
+  revision,
+  status,
+  chart: "demo-0.1.0",
+  appVersion: "1.0.0",
+  description: { text: "", hidden: false },
+  rollbackOf: null,
+  problem: null,
+  updated: "2026-11-22T20:14:04.237774Z",
+});
+
 const NOTHING_LEFT = {
   exists: false,
   revision: null,
@@ -301,16 +312,6 @@ test("History pulses the dot of a revision that waits for Helm to end, uninstall
   await settle(8);
   fireEvent.click(screen.getByRole("tab", { name: "History" }));
   await settle(6);
-  const line = (revision: number, status: string) => ({
-    revision,
-    status,
-    chart: "demo-0.1.0",
-    appVersion: "1.0.0",
-    description: { text: "", hidden: false },
-    rollbackOf: null,
-    problem: null,
-    updated: "2026-11-22T20:14:04.237774Z",
-  });
   act(() => {
     send({
       seq: 70,
@@ -334,4 +335,76 @@ test("History pulses the dot of a revision that waits for Helm to end, uninstall
     ["2", true],
     ["1", false],
   ]);
+});
+
+async function openHistory(backend: Backend) {
+  const workbench = await mountKube(backend);
+  act(() => {
+    workbench.editors.open(release("alpha"));
+  });
+  await settle(8);
+  fireEvent.click(screen.getByRole("tab", { name: "History" }));
+  await settle(6);
+}
+
+const revisionRow = (revision: number) => {
+  const found = screen
+    .getAllByRole("row")
+    .slice(1)
+    .find((row) => cellOf(row, "revision") === String(revision));
+  if (!found) throw new Error(`no row of revision ${String(revision)}`);
+  return found;
+};
+
+const markedRevisions = () =>
+  screen
+    .getAllByRole("row")
+    .slice(1)
+    .filter(
+      (row) =>
+        within(row).queryByRole("checkbox", { name: "Unmark row" }) !== null,
+    )
+    .map((row) => Number(cellOf(row, "revision")));
+
+async function mark(revision: number) {
+  fireEvent.click(
+    within(revisionRow(revision)).getByRole("checkbox", { name: "Mark row" }),
+  );
+  await settle(2);
+}
+
+async function menuOf(revision: number) {
+  fireEvent.contextMenu(revisionRow(revision));
+  await settle(2);
+  const items = screen
+    .getAllByRole("menuitem")
+    .map((item) => item.textContent ?? "");
+  fireEvent.keyDown(document.activeElement ?? document.body, {
+    key: "Escape",
+  });
+  await settle(2);
+  return items;
+}
+
+test("a marked revision that Helm prunes is no longer marked, so two marked rows on screen offer their comparisons and one does not", async () => {
+  const { backend, send } = core();
+  await openHistory(backend);
+  await mark(1);
+  await mark(2);
+
+  act(() => {
+    send({
+      seq: 83,
+      revision: 3,
+      latest: 3,
+      history: [line(3, "deployed"), line(2, "superseded")],
+    });
+  });
+  await settle(4);
+  expect(markedRevisions()).toEqual([2]);
+  expect(await menuOf(2)).not.toContain("Compare Values");
+
+  await mark(3);
+  expect(markedRevisions()).toEqual([3, 2]);
+  expect(await menuOf(3)).toContain("Compare Values");
 });
