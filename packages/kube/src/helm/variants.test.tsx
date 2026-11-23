@@ -250,7 +250,7 @@ test("a release's page has the page's filter, which searches the notes and opens
   expect(screen.getAllByText("Notes").length).toBeGreaterThan(0);
 });
 
-test("Reveal All Values and Hide All Values are commands of the page, enabled while there is something to reveal or to hide", async () => {
+test("Reveal All and Hide All are commands of the page, enabled while there is something to reveal or to hide", async () => {
   variant("mask:tree");
   const workbench = await open(alpha);
   fireEvent.click(screen.getByRole("tab", { name: "Values" }));
@@ -258,20 +258,18 @@ test("Reveal All Values and Hide All Values are commands of the page, enabled wh
   const tab = screen.getByRole("tab", { name: "Values" });
   const lookup = () => workbench.keys.lookup(tab);
   const enabled = (id: string) => workbench.commands.enabled(id, lookup());
-  expect(enabled("helm.values.revealAll")).toBe(true);
-  expect(enabled("helm.values.hideAll")).toBe(false);
-  await act(() =>
-    workbench.commands.execute("helm.values.revealAll", lookup()),
-  );
+  expect(enabled("helm.text.revealAll")).toBe(true);
+  expect(enabled("helm.text.hideAll")).toBe(false);
+  await act(() => workbench.commands.execute("helm.text.revealAll", lookup()));
   await settle(3);
   fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
   await settle(4);
   const tree = screen.getByRole("tree", { name: "Values" });
   expect(tree.textContent).toContain("user-password-r2");
-  expect(enabled("helm.values.revealAll")).toBe(false);
-  expect(enabled("helm.values.hideAll")).toBe(true);
-  await act(() => workbench.commands.execute("helm.values.hideAll", lookup()));
+  expect(enabled("helm.text.revealAll")).toBe(false);
+  expect(enabled("helm.text.hideAll")).toBe(true);
+  await act(() => workbench.commands.execute("helm.text.hideAll", lookup()));
   await settle(2);
   expect(tree.textContent).not.toContain("user-password-r2");
-  expect(enabled("helm.values.hideAll")).toBe(false);
+  expect(enabled("helm.text.hideAll")).toBe(false);
 });

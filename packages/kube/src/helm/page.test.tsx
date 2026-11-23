@@ -215,6 +215,90 @@ test("the Notes section holds the notes as its text, with no field that says Not
   expect(reveal.className).toContain("size-6");
 });
 
+function withUnreadDocument(): Backend {
+  const mock = createMockBackend("ready");
+  return {
+    invoke: (command, request) => mock.invoke(command, request),
+    subscribe: ((
+      command: string,
+      request: never,
+      onMessage: (message: unknown) => void,
+    ) =>
+      mock.subscribe(
+        command as never,
+        request,
+        command === "helm_release_open"
+          ? (batch: ReleaseBatch) => {
+              const { manifest } = batch;
+              if (!manifest) {
+                onMessage(batch);
+                return;
+              }
+              const body = manifest.text.replace(/\n+$/, "");
+              onMessage({
+                ...batch,
+                manifest: {
+                  ...manifest,
+                  text: `${body}\n---\n# Source: demo/templates/broken.yaml\n# Twigo could not read this document (line 3, column 7).\n`,
+                  unread: [
+                    {
+                      document: 4,
+                      line: body.split("\n").length + 2,
+                      source: "demo/templates/broken.yaml",
+                    },
+                  ],
+                },
+              });
+            }
+          : onMessage,
+      )) as Backend["subscribe"],
+  };
+}
+
+test("the Values bar is the YAML view's: what is hidden at its left, and Reveal All and Hide All as toolbar buttons at its right, each only where it has something to do", async () => {
+  await open(release("alpha"));
+  fireEvent.click(screen.getByRole("tab", { name: "Values" }));
+  await settle(6);
+  const scope = page("alpha");
+  const bar = () => within(scope).getAllByRole("toolbar").pop();
+  expect(scope.textContent).toMatch(/\d+ values? hidden/);
+  expect(within(scope).queryByRole("button", { name: "Hide All" })).toBeNull();
+  fireEvent.click(within(scope).getByRole("button", { name: "Reveal All" }));
+  await settle(3);
+  fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
+  await settle(4);
+  expect(scope.textContent).toContain("No value is hidden");
+  expect(
+    within(scope).queryByRole("button", { name: "Reveal All" }),
+  ).toBeNull();
+  expect(bar()?.textContent).toBe("Hide All");
+  expect(bar()?.parentElement?.className).toContain("pr-2 pl-3");
+});
+
+test("the Manifest's bar counts every hidden place, an unread document too, and Reveal All asks for each in turn, ending where one is not given", async () => {
+  const workbench = await mountKube(withUnreadDocument());
+  act(() => {
+    workbench.editors.open(release("alpha"));
+  });
+  await settle(8);
+  fireEvent.click(screen.getByRole("tab", { name: "Manifest" }));
+  await settle(6);
+  expect(page("alpha").textContent).toContain("4 values hidden");
+  fireEvent.click(screen.getByRole("button", { name: "Reveal All" }));
+  for (let place = 0; place < 3; place++) {
+    await settle(3);
+    expect(screen.getByRole("dialog").textContent).toContain("Reveal");
+    fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
+  }
+  await settle(6);
+  expect(page("alpha").textContent).toContain("1 value hidden");
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.getByRole("button", { name: "Hide All" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Hide All" }));
+  await settle(3);
+  expect(page("alpha").textContent).toContain("4 values hidden");
+});
+
 test("a release in a namespace whose Secrets the person may not list says so, naming them, where one they may list shows whole", async () => {
   const workbench = await open(release("alpha"), "rbacNamespaces");
   expect(page("alpha").textContent).toContain(

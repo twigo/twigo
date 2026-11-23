@@ -21,8 +21,8 @@ export interface TextState {
   readonly line: number;
   readonly hidden: number;
   readonly revealed: readonly HelmPart[];
-  /** The part that reveals the whole text, none for a manifest. */
-  readonly whole: HelmPart | undefined;
+  /** What Reveal All asks for, one request each: the whole of the values, and for a manifest each place still hidden. */
+  readonly reveal: readonly HelmPart[];
 }
 
 /** What the commands Reveal and Hide do on a page. */

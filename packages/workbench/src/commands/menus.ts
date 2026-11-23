@@ -16,6 +16,7 @@ export type MenuId =
   | "helm/release"
   | "helm/revision"
   | "helm/revisions"
+  | "helm/text"
   | "view/title"
   | "panel/title"
   | "panel/empty"

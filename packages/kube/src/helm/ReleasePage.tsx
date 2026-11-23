@@ -57,6 +57,7 @@ import {
 } from "./keys";
 import {
   hiddenCount,
+  hiddenWords,
   manifestOf,
   partKey,
   spliced,
@@ -65,6 +66,7 @@ import {
   type Shown,
 } from "./reveals";
 import type { Plate, ReleaseTab, TextState } from "./states";
+import { TextBar } from "./TextBar";
 import { ValuesTree } from "./ValuesTree";
 import { useRelease } from "./useRelease";
 
@@ -284,13 +286,21 @@ export function ReleasePage({
     [id],
   );
   const reveal = useReveal(request);
+  const showOne = async (part: HelmPart): Promise<boolean> => {
+    if (revision === undefined || reveal === undefined) return false;
+    const answer = await reveal({ at: revision, part });
+    if (!answer || latest.current.epoch !== epoch) return false;
+    states.reveal(uri, epoch, { part, ...answer });
+    return true;
+  };
   const show = (part: HelmPart) => {
-    if (revision === undefined || reveal === undefined) return;
-    void reveal({ at: revision, part }).then((answer) => {
-      if (answer && latest.current.epoch === epoch) {
-        states.reveal(uri, epoch, { part, ...answer });
-      }
-    });
+    void showOne(part);
+  };
+  /** One request after another, each with the mode's friction, ending at the first the person does not confirm. */
+  const showAll = async (parts: readonly HelmPart[]) => {
+    for (const part of parts) {
+      if (!(await showOne(part))) return;
+    }
   };
   const hide = (parts: readonly HelmPart[]) => {
     states.hide(uri, epoch, parts.map(partKey));
@@ -327,7 +337,7 @@ export function ReleasePage({
   const filterable = layout !== "page" && tab === "overview";
   const filtered = useFiltered(services.pages, uri) && filterable;
   const under = text?.glyphs.find((each) => each.line === text.line);
-  const latest = useRef({ text, under, show, hide, epoch });
+  const latest = useRef({ text, under, show, showAll, hide, epoch });
   const subject = JSON.stringify(releaseSubject(release));
   useEffect(() => {
     if (!element) return;
@@ -344,10 +354,7 @@ export function ReleasePage({
     scope.set("helm.page", uri);
     scope.set("helm.canReveal", under !== undefined && !under.revealed);
     scope.set("helm.canHide", under?.revealed === true);
-    scope.set(
-      "helm.canRevealAll",
-      (text?.hidden ?? 0) > 0 && text?.whole !== undefined,
-    );
+    scope.set("helm.canRevealAll", (text?.reveal.length ?? 0) > 0);
     scope.set("helm.canHideAll", (text?.revealed.length ?? 0) > 0);
     scope.set("pageFocus", filterable);
     scope.set(OBJECT_URI, filterable ? uri : undefined);
@@ -369,7 +376,7 @@ export function ReleasePage({
     filtered,
   ]);
   useEffect(() => {
-    latest.current = { text, under, show, hide, epoch };
+    latest.current = { text, under, show, showAll, hide, epoch };
   });
   useEffect(
     () =>
@@ -383,8 +390,8 @@ export function ReleasePage({
           if (at?.revealed) run([at.part]);
         },
         revealAll: () => {
-          const { text: now, show: run } = latest.current;
-          if (now?.whole) run(now.whole);
+          const { text: now, showAll: run } = latest.current;
+          if (now) void run(now.reveal);
         },
         hideAll: () => {
           const { text: now, hide: run } = latest.current;
@@ -673,8 +680,6 @@ function Body({
           states={states}
           onGlyph={onGlyph}
           onText={onText}
-          onReveal={onReveal}
-          onHide={onHide}
         />
       ) : null;
     case "manifest":
@@ -854,15 +859,6 @@ function NotesBody(props: {
   return <Scrubbed {...props} what="the notes" />;
 }
 
-/** A bar over a text: what is hidden in it, and the ways to show or hide it. */
-function Bar({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex h-8 flex-none items-center gap-2 border-b border-border-subtle px-3.5 text-xs text-support">
-      {children}
-    </div>
-  );
-}
-
 function ValuesView({
   uri,
   values,
@@ -870,8 +866,6 @@ function ValuesView({
   states,
   onGlyph,
   onText,
-  onReveal,
-  onHide,
 }: {
   uri: string;
   values: { user: string; defaults: string };
@@ -879,8 +873,6 @@ function ValuesView({
   states: ListServices["releases"];
   onGlyph: (glyph: Glyph) => void;
   onText: (state: TextState | undefined) => void;
-  onReveal: (part: HelmPart) => void;
-  onHide: (parts: readonly HelmPart[]) => void;
 }) {
   useChanges(states.changes);
   const plate: Plate = states.plate(uri);
@@ -917,7 +909,7 @@ function ValuesView({
       line,
       hidden,
       revealed: [...own.values()].map(({ part }) => part),
-      whole,
+      reveal: hidden > 0 ? [whole] : [],
     });
     return () => {
       onText(undefined);
@@ -957,37 +949,12 @@ function ValuesView({
         </EmptyState>
       ) : (
         <>
-          <Bar>
-            {hidden > 0 ? (
-              <>
-                <span>
-                  {hidden} {hidden === 1 ? "value" : "values"} hidden
-                </span>
-                <span aria-hidden>·</span>
-                <LinkButton
-                  onClick={() => {
-                    onReveal(whole);
-                  }}
-                >
-                  Reveal all
-                </LinkButton>
-              </>
-            ) : (
-              <span>No value is hidden</span>
-            )}
-            {own.size > 0 && (
-              <>
-                <span aria-hidden>·</span>
-                <LinkButton
-                  onClick={() => {
-                    onHide([...own.values()].map(({ part }) => part));
-                  }}
-                >
-                  Hide all
-                </LinkButton>
-              </>
-            )}
-          </Bar>
+          <TextBar
+            uri={uri}
+            note={hiddenWords(hidden)}
+            canReveal={hidden > 0}
+            canHide={own.size > 0}
+          />
           <div className="min-h-0 flex-1 overflow-auto">
             {tree ? (
               <ValuesTree
@@ -1031,33 +998,41 @@ function ManifestView({
     () => manifestOf(manifest, shown),
     [manifest, shown],
   );
-  const hidden = hiddenCount(text);
+  const hiding = useMemo(
+    () => glyphs.filter(({ revealed }) => !revealed),
+    [glyphs],
+  );
+  const hidden =
+    hiddenCount(text) +
+    hiding.filter(({ part }) => part.kind === "document").length;
+  const revealed = useMemo(
+    () =>
+      [...shown.values()]
+        .map(({ part }) => part)
+        .filter(({ kind }) => kind === "secret" || kind === "document"),
+    [shown],
+  );
   const [line, setLine] = useState(1);
   useEffect(() => {
     onText({
       glyphs,
       line,
       hidden,
-      revealed: [...shown.values()]
-        .map(({ part }) => part)
-        .filter(({ kind }) => kind === "secret" || kind === "document"),
-      whole: undefined,
+      revealed,
+      reveal: hiding.map(({ part }) => part),
     });
     return () => {
       onText(undefined);
     };
-  }, [onText, glyphs, line, hidden, shown]);
+  }, [onText, glyphs, line, hidden, revealed, hiding]);
   return (
     <div className="flex h-full min-h-48 flex-col">
-      <Bar>
-        <span>
-          {hidden === 0
-            ? "No value is hidden"
-            : `${String(hidden)} ${hidden === 1 ? "value" : "values"} of Secrets hidden`}
-        </span>
-        <span aria-hidden>·</span>
-        <span>@ lists the documents</span>
-      </Bar>
+      <TextBar
+        uri={uri}
+        note={`${hiddenWords(hidden)} · @ lists the documents`}
+        canReveal={hiding.length > 0}
+        canHide={revealed.length > 0}
+      />
       <div className="min-h-0 flex-1">
         <Suspense fallback={<Skeleton className="m-3 h-4 w-1/2" />}>
           <MaskedText
