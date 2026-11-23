@@ -104,8 +104,8 @@ pub(crate) fn reveal_helm(
     let (value, binary) = page.revealed(&part)?;
     let words = Words::of(&part, &page);
     let release_words = format!("release {name} (revision {revision}) in {namespace}");
-    let get = |verb: &str| {
-        let revision = revision.to_string();
+    let shown_revision = revision.to_string();
+    let get = |verb: &str, rest: &[&str]| {
         let mut line = vec![
             "helm",
             "get",
@@ -116,28 +116,24 @@ pub(crate) fn reveal_helm(
             "--kube-context",
             &context,
             "--revision",
-            &revision,
+            &shown_revision,
         ];
-        let template;
-        match verb {
-            "values" => line.extend(["-o", "json"]),
-            "all" => {
-                template = format!("{{{{index .Release.Config {}}}}}", index_of(&part));
-                line.extend(["--template", &template]);
-            }
-            _ => {}
-        }
+        line.extend(rest);
         shell_line(&line)
     };
     let command_line = match &part {
         HelmPart::Values {
             defaults: false,
             path,
-        } if path.is_empty() => Some(get("values")?),
+        } if path.is_empty() => Some(get("values", &["-o", "json"])?),
         HelmPart::Values {
-            defaults: false, ..
-        } if prints_as_go_does(&value) => Some(get("all")?),
-        HelmPart::Manifest => Some(get("manifest")?),
+            defaults: false,
+            path,
+        } if prints_as_go_does(&value) => {
+            let template = format!("{{{{index .Release.Config {}}}}}", index_of(path));
+            Some(get("all", &["--template", &template])?)
+        }
+        HelmPart::Manifest => Some(get("manifest", &[])?),
         _ => None,
     };
     let (this, window) = (core.this.clone(), window.to_owned());
@@ -275,10 +271,7 @@ fn prints_as_go_does(value: &str) -> bool {
 
 /// The arguments of `index` that reach a path's leaf from
 /// `.Release.Config`: keys as Go strings, list indexes as numbers.
-fn index_of(part: &HelmPart) -> String {
-    let HelmPart::Values { path, .. } = part else {
-        return String::new();
-    };
+fn index_of(path: &[ValueStep]) -> String {
     path.iter()
         .map(|step| match step {
             ValueStep::Key(key) => go_string(key),
