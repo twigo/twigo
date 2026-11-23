@@ -1,6 +1,9 @@
 use serde_json::json;
 use twigo_cache::fake::Fake;
-use twigo_ipc::{ErrorCode, HelmPart, OperationEvent, PlanRequest, ReleaseParts, ValueStep};
+use twigo_ipc::{
+    ContextAccess, ErrorCode, Friction, HelmPart, Mode, ModeSource, OperationEvent, PlanRequest,
+    ReleaseParts, ValueStep,
+};
 
 use crate::helm::testing::{self, Over};
 
@@ -171,6 +174,35 @@ async fn a_reveal_names_its_place_and_prints_helm_s_command_only_where_it_prints
     let audit = std::fs::read_to_string(dir.path().join("audit.jsonl")).unwrap();
     for value in ["pass-2", "tok-en", "5432"] {
         assert!(!audit.contains(value), "a value in the audit log");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_reveal_asks_for_a_confirmation_outside_read_write() {
+    let fake = Fake::default();
+    revision(&fake, 1, "deployed");
+    let dir = tempfile::tempdir().unwrap();
+    let over = Over::new(&fake, dir.path());
+    let (id, mut watched) = over.open("a", "db", None, OVERVIEW).await;
+    watched
+        .until(over.ack(id), "revision 1", |shown| shown.overview.is_some())
+        .await;
+
+    for (mode, friction) in [
+        (Mode::Guarded, Friction::Confirm),
+        (Mode::ReadOnly, Friction::Confirm),
+        (Mode::ReadWrite, Friction::AtOnce),
+    ] {
+        let planned = super::reveal_helm(&over.core, "main", id, 1, HelmPart::Notes).unwrap();
+        let access = ContextAccess {
+            mode,
+            source: ModeSource::User { overrides: None },
+            environment: None,
+            unlocked_until: None,
+        };
+        let ticket = over.core.bus.ticket("main");
+        let plan = over.core.bus.keep(ticket, planned, &access).unwrap();
+        assert_eq!(plan.friction, friction, "{mode:?}");
     }
 }
 
