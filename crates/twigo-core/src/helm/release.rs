@@ -163,9 +163,16 @@ async fn serve(
     control: Arc<Control>,
     mut send: impl FnMut(ReleaseBatch) -> bool,
 ) {
-    let (mut seq, mut exists, mut revision, mut latest) = (0, false, None, None);
+    let (mut seq, mut exists, mut revision, mut latest, mut previous) =
+        (0, false, None, None, None);
     let mut tell = |batch: ReleaseBatch| {
-        (seq, exists, revision, latest) = (batch.seq, batch.exists, batch.revision, batch.latest);
+        (seq, exists, revision, latest, previous) = (
+            batch.seq,
+            batch.exists,
+            batch.revision,
+            batch.latest,
+            batch.previous,
+        );
         send(batch)
     };
     let ran = contain(
@@ -188,6 +195,7 @@ async fn serve(
         exists,
         revision,
         latest,
+        previous,
         problem: None,
         overview: None,
         notes: None,
@@ -585,14 +593,21 @@ async fn run(
                 })
                 .collect::<Vec<_>>()
         });
+        let revision = match &page_failed {
+            Some((revision, _)) => Some(*revision),
+            None => shown.as_ref().map(|shown| shown.revision),
+        };
         let now = Sent {
             status,
             exists: !revisions.is_empty(),
-            revision: match &page_failed {
-                Some((revision, _)) => Some(*revision),
-                None => shown.as_ref().map(|shown| shown.revision),
-            },
+            revision,
             latest,
+            previous: revision.and_then(|revision| {
+                revisions
+                    .range(..revision)
+                    .next_back()
+                    .map(|(&previous, _)| previous)
+            }),
             problem: match page_failing {
                 Some(failing) => Some(failing.error().clone()),
                 None => shown
@@ -618,12 +633,14 @@ async fn run(
                 sent.exists,
                 sent.revision,
                 sent.latest,
+                sent.previous,
                 &sent.problem,
             ) != (
                 &now.status,
                 now.exists,
                 now.revision,
                 now.latest,
+                now.previous,
                 &now.problem,
             )
         });
@@ -651,6 +668,7 @@ async fn run(
             exists: now.exists,
             revision: now.revision,
             latest: now.latest,
+            previous: now.previous,
             problem: now.problem.clone(),
             overview,
             notes,
@@ -679,6 +697,7 @@ struct Sent {
     exists: bool,
     revision: Option<u32>,
     latest: Option<u32>,
+    previous: Option<u32>,
     problem: Option<IpcError>,
     /// The overview header's printed cells and the deployed revision.
     header: (Vec<twigo_ipc::Printed>, Option<u32>),

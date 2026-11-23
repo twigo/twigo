@@ -164,6 +164,25 @@ async fn an_open_release_follows_the_latest_revision_unless_one_is_pinned() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn previous_is_the_highest_revision_helm_keeps_below_the_one_shown() {
+    let fake = Fake::default();
+    revision(&fake, 2, "superseded");
+    revision(&fake, 4, "deployed");
+    let mut rig = Rig::open(fake, None, OVERVIEW).await;
+    rig.until("revision 4", |shown| shown.overview.is_some())
+        .await;
+    let shown = &rig.watched.shown;
+    assert_eq!((shown.revision, shown.previous), (Some(4), Some(2)));
+
+    rig.opened.set_view(Some(2), OVERVIEW);
+    rig.until("revision 2", |shown| {
+        notes(shown) == Some("Revision 2 of app")
+    })
+    .await;
+    assert_eq!(rig.watched.shown.previous, None);
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_pinned_revision_that_helm_prunes_says_so() {
     let fake = Fake::default();
     revision(&fake, 1, "superseded");

@@ -1694,6 +1694,12 @@ revision: number | null,
  */
 latest: number | null, 
 /**
+ * The highest revision Helm keeps below `revision`, from the labels of
+ * its Secrets, which Compare with Previous compares it with; null where
+ * it keeps none, as after `--history-max` pruned the ones before.
+ */
+previous: number | null, 
+/**
  * Why the shown revision cannot be read; its parts are null then. What
  * its Secret holds says it until the Secret changes: `helm.not-a-release`,
  * `helm.truncated`, `helm.too-large`, `answer.undecodable` for a Secret

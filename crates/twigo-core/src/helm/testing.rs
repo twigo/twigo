@@ -124,6 +124,7 @@ pub(crate) struct Shown {
     pub exists: bool,
     pub revision: Option<u32>,
     pub latest: Option<u32>,
+    pub previous: Option<u32>,
     pub problem: Option<IpcError>,
     pub overview: Option<Overview>,
     pub notes: Option<Scrubbed>,
@@ -146,6 +147,7 @@ impl Shown {
         self.exists = batch.exists;
         self.revision = batch.revision;
         self.latest = batch.latest;
+        self.previous = batch.previous;
         self.problem = batch.problem;
         if batch.overview.is_some() {
             self.overview = batch.overview;
