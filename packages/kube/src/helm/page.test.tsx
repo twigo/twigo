@@ -272,3 +272,23 @@ test("the page's filter finds what Helm wrote of a failed revision, and keeps th
   expect(found).toContain('Upgrade "epsilon" failed');
   expect(found).not.toContain("Nothing here matches");
 });
+
+test("Copy helm Command is enabled where a command prints the view, and not on the chart's defaults", async () => {
+  const workbench = await open(release("alpha"));
+  const tab = screen.getByRole("tab", { name: "Overview" });
+  const enabled = () =>
+    workbench.commands.enabled(
+      "helm.release.copyCommand",
+      workbench.keys.lookup(tab),
+    );
+  expect(enabled()).toBe(true);
+  fireEvent.click(screen.getByRole("tab", { name: "Values" }));
+  await settle(6);
+  expect(enabled()).toBe(true);
+  fireEvent.click(screen.getByRole("tab", { name: "Chart defaults" }));
+  await settle(6);
+  expect(enabled()).toBe(false);
+  fireEvent.click(screen.getByRole("tab", { name: "Your values" }));
+  await settle(6);
+  expect(enabled()).toBe(true);
+});

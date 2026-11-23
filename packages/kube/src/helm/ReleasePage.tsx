@@ -46,7 +46,8 @@ import type { ListServices } from "../services";
 import type { ReleaseInput } from "../uri";
 import { ViewStatus } from "../ViewStatus";
 import { HistoryList } from "./HistoryList";
-import { HELM_REVISION, HELM_TAB } from "./keys";
+import { printsCommand } from "./commands";
+import { HELM_NO_COMMAND, HELM_REVISION, HELM_TAB } from "./keys";
 import {
   hiddenCount,
   manifestOf,
@@ -223,7 +224,13 @@ export function ReleasePage({
   const { tabs: layout } = variants();
   const asked = layout === "page" ? "page" : states.tab(uri);
   const tab: ReleaseTab = asked === "page" ? "overview" : asked;
-  const wanted = (view: ReleaseTab) => layout === "page" || tab === view;
+  const view =
+    layout === "page"
+      ? "page"
+      : tab === "values" && states.plate(uri) === "defaults"
+        ? "defaults"
+        : tab;
+  const wanted = (shown: ReleaseTab) => layout === "page" || tab === shown;
   const { snapshot, id } = useRelease(
     backend,
     { space: release.space, namespace: release.namespace, name: release.name },
@@ -327,7 +334,8 @@ export function ReleasePage({
     scope.set("resource.group", HELM_RELEASES.group);
     scope.set("resource.kind", "HelmRelease");
     scope.set("resource.namespaced", true);
-    scope.set(HELM_TAB, layout === "page" ? "page" : tab);
+    scope.set(HELM_TAB, view);
+    scope.set(HELM_NO_COMMAND, !printsCommand(view));
     scope.set(HELM_REVISION, revision === undefined ? "" : String(revision));
     scope.set("helm.page", uri);
     scope.set("helm.canReveal", under !== undefined && !under.revealed);
@@ -347,8 +355,7 @@ export function ReleasePage({
     keys,
     element,
     subject,
-    layout,
-    tab,
+    view,
     revision,
     uri,
     under,

@@ -9,7 +9,7 @@ import {
   withScreenSize,
 } from "../../test/workbench";
 import { diffUri, helmUri } from "../uri";
-import { helmCommand } from "./commands";
+import { helmCommand, printsCommand } from "./commands";
 import { isQuiet, statusTone } from "./status";
 import { ReleaseStates } from "./states";
 
@@ -204,6 +204,18 @@ test("Copy helm Command prints what helm prints for the view shown, with the con
   expect(at("history", 4)).toBe(
     "helm history api --namespace payments --kube-context prod-eu",
   );
+  expect(at("notes", 4)).toBe(
+    "helm get notes api --namespace payments --kube-context prod-eu --revision 4",
+  );
+});
+
+test("no command is copied for a view that none prints: the chart's defaults, the hooks and the objects", () => {
+  const release = { space: "prod-eu", namespace: "payments", name: "api" };
+  for (const view of ["defaults", "hooks", "objects"]) {
+    expect(helmCommand(release, "prod-eu", view, 4)).toBeUndefined();
+    expect(printsCommand(view)).toBe(false);
+  }
+  expect(printsCommand("values")).toBe(true);
 });
 
 test("a comparison of two revisions asks the core once, however often the editor area draws again", async () => {
