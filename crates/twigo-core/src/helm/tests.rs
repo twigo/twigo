@@ -870,3 +870,36 @@ async fn a_new_revision_s_row_never_shows_the_last_one_s_chart() {
     wrong.retain(|chart| chart != "demo-1.2.0");
     assert!(wrong.is_empty(), "revision 2 showed {wrong:?}");
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_new_revision_s_row_never_says_the_last_one_unreadable() {
+    let mut rig = Rig::over(&["a"], |fake| {
+        let whole = testing::encoded(&testing::release("a", "app", 1, "failed"));
+        let gzip = STANDARD.decode(&whole).unwrap();
+        let cut = STANDARD.encode(&gzip[..gzip.len() / 2]);
+        testing::put_payload(fake, "a", "app", 1, "failed", cut.as_bytes());
+    })
+    .await;
+    rig.until("revision 1 unreadable", |seen| {
+        seen.text("a", "app", "Problem") == ErrorCode::HelmTruncated.wire()
+    })
+    .await;
+
+    rig.fake.state().gets_take = Duration::from_secs(1);
+    revision(&rig.fake, "a", "app", 2, "pending-upgrade");
+    let mut rows = Vec::new();
+    while rig.seen.text("a", "app", "Chart") != "demo-1.2.0" {
+        let batch = rig.next().await;
+        rig.seen.apply(batch);
+        let row = rig.seen.table();
+        if rows.last() != Some(&row) {
+            rows.push(row);
+        }
+    }
+    assert!(
+        rows.iter()
+            .flatten()
+            .all(|row| !row.starts_with("app 2 unreadable")),
+        "{rows:?}"
+    );
+}
