@@ -1,11 +1,10 @@
 import { landmarksOf, outlineOf } from "../edit/outline";
 
-/** A document of a release's manifest: where it starts and ends, and the file its `# Source:` comment names. */
+/** A document of a release's manifest: where it starts, and the file its `# Source:` comment names. */
 export interface Document {
   readonly name: string;
-  /** 1-based, inclusive. */
+  /** 1-based. */
   readonly from: number;
-  readonly to: number;
 }
 
 /**
@@ -29,7 +28,6 @@ export function documentsOf(text: string): readonly Document[] {
           {
             name: source ?? `Document ${String(at + 1)}`,
             from: start + 2,
-            to: end,
           },
         ]
       : [];

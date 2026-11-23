@@ -194,9 +194,9 @@ test("the documents of a manifest are listed by the file their Source comment na
     "kind: C",
   ].join("\n");
   expect(documentsOf(text)).toEqual([
-    { name: "a/one.yaml", from: 2, to: 3 },
-    { name: "Document 3", from: 7, to: 7 },
-    { name: "a/three.yaml", from: 9, to: 10 },
+    { name: "a/one.yaml", from: 2 },
+    { name: "Document 3", from: 7 },
+    { name: "a/three.yaml", from: 9 },
   ]);
 });
 
