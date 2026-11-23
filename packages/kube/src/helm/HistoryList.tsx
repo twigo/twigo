@@ -15,6 +15,7 @@ import {
   useListRegistration,
 } from "@twigo/workbench";
 import { Age } from "../object/values";
+import { CutWord } from "./CutWord";
 import { ProblemWord } from "./ProblemWord";
 import { RequestFailed } from "./RequestFailed";
 import { IN_FLIGHT_RELEASE, isQuiet, statusTone, UNREADABLE } from "./status";
@@ -23,7 +24,7 @@ import type { ReleaseStates } from "./states";
 const COLUMNS: readonly GridColumn[] = [
   { id: "revision", title: "Revision", width: 80, align: "end", numeric: true },
   { id: "updated", title: "Updated", width: 72, align: "end", coverable: true },
-  { id: "status", title: "Status", width: 152, coverable: false },
+  { id: "status", title: "Status", width: 160, coverable: false },
   { id: "chart", title: "Chart", width: 180 },
   { id: "appVersion", title: "App Version", width: 112 },
   { id: "description", title: "Description", width: 360, grow: true },
@@ -176,7 +177,7 @@ function Status({
         pulse={IN_FLIGHT_RELEASE.test(line.status)}
         className="max-w-full align-top font-semibold"
       >
-        {line.status}
+        <CutWord text={line.status} />
       </StatusLabel>
     );
   }

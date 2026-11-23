@@ -3,6 +3,7 @@ import { cn, StatusLabel, type Tone } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
 import { ageRole, printedAge, printedAt, restartedRecently } from "../age";
 import { IN_FLIGHT, type ColumnRule } from "../columns";
+import { CutWord } from "../helm/CutWord";
 import { ProblemWord } from "../helm/ProblemWord";
 import { RequestFailed } from "../helm/RequestFailed";
 import { UNREADABLE } from "../helm/status";
@@ -126,6 +127,8 @@ export function CellView({
               {merged}
               {text}
             </span>
+          ) : rule.cutInMiddle ? (
+            <CutWord text={text} />
           ) : (
             text
           )}

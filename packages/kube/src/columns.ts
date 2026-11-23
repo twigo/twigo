@@ -79,6 +79,8 @@ export interface ColumnRule {
    * column is drawn nowhere.
    */
   readonly problem: boolean;
+  /** Its words narrow at their last `-`, so that the tail that tells them apart stays and the tooltip has the whole word. */
+  readonly cutInMiddle: boolean;
 }
 
 /** The order columns leave a narrowing list: `ColumnRule.drop`. */
@@ -235,7 +237,8 @@ const BY_RESOURCE: Readonly<Record<string, Partial<ColumnRule>>> = {
   "helm.sh/releases/Revision": { width: 80, drop: 5 },
   "helm.sh/releases/Status": {
     cell: "status",
-    width: 152,
+    width: 160,
+    cutInMiddle: true,
     groups: true,
     health: true,
     tone: statusTone,
@@ -290,6 +293,7 @@ export function columnRule(gvr: Gvr, column: Column): ColumnRule {
     drop: 0,
     coverable: true,
     problem: false,
+    cutInMiddle: false,
     ...BY_KIND[column.kind],
     ...BY_NAME[column.name],
     ...BY_RESOURCE[key(gvr, column.name)],

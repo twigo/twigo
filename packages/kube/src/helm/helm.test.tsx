@@ -75,6 +75,16 @@ test("the list draws each release as a row of Helm's columns, and says why one c
   expect(document.body.textContent).not.toContain("helm.truncated");
 });
 
+test("a pending status is cut at its last dash where its column narrows: the tail stays whole, and the word is in its tooltip", async () => {
+  await openList(createMockBackend("ready"), "helm-list://prod-eu");
+  const word = within(rowOf("stuck", "auth")).getByTitle("pending-upgrade");
+  const [head, tail] = [...word.children];
+  expect(head?.textContent).toBe("pending-");
+  expect(head?.className).toContain("truncate");
+  expect(tail?.textContent).toBe("upgrade");
+  expect(tail?.className).toContain("shrink-0");
+});
+
 function failingRequests(...names: readonly string[]): Backend {
   const mock = createMockBackend("ready");
   let columns: readonly Column[] = [];
