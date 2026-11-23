@@ -700,7 +700,7 @@ function Loading() {
   );
 }
 
-/** What a scrubbed text offers: the Reveal of a Secret's key, where a value of the revision's Secrets was taken out, and Hide once it is shown. */
+/** What a scrubbed text offers: the Reveal of the whole text, where a value of the revision's Secrets was taken out of it, and Hide once it is shown. */
 function RevealControl({
   hidden,
   revealed,
