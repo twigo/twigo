@@ -1,6 +1,9 @@
 import type { Resource } from "@twigo/protocol";
 import { HELM_RELEASES } from "@twigo/protocol";
 
+/** The status the core gives a row whose latest revision it cannot read. */
+export const UNREADABLE = "unreadable";
+
 /**
  * Helm's release statuses
  * ([`common/status.go`](https://github.com/helm/helm/blob/v4.3.2/pkg/release/common/status.go#L25-L41)):
@@ -19,7 +22,7 @@ const WORDS: Readonly<
   superseded: { quiet: true },
   uninstalled: { quiet: true },
   failed: { tone: "error" },
-  unreadable: { tone: "error" },
+  [UNREADABLE]: { tone: "error" },
   unknown: { tone: "warn" },
   uninstalling: { tone: "warn" },
   "pending-install": { tone: "warn" },
@@ -73,6 +76,11 @@ export function problemWords(code: string): {
       why: "Twigo could not read this release.",
     }
   );
+}
+
+/** What the mark beside a row's status says when a request for its latest revision failed: the status is the label's, and the code is the request's. */
+export function requestFailedWhy(code: string): string {
+  return `Twigo could not fetch this release's latest revision (${code}), so its status is the one on the Secret's label. Twigo asks again.`;
 }
 
 /** What a list of releases stands in for beside discovery's resources: namespaced, with no verbs or subresources of its own. */

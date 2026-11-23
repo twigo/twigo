@@ -1,9 +1,10 @@
+import { TriangleAlert } from "lucide-react";
 import type { Cell, Row } from "@twigo/protocol";
 import { cn, StatusDot, type Tone } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
 import { ageRole, printedAge, printedAt, restartedRecently } from "../age";
 import { IN_FLIGHT, type ColumnRule } from "../columns";
-import { problemWords } from "../helm/status";
+import { problemWords, requestFailedWhy, UNREADABLE } from "../helm/status";
 import { ObjectName } from "../ObjectName";
 import { Quantity } from "../Quantity";
 import { isTabular } from "../tabular";
@@ -66,7 +67,7 @@ export function CellView({
   tone: Tone | undefined;
   alarmed: boolean;
   finished: boolean;
-  /** Why the row's object cannot be read, which its health column says in place of its word. */
+  /** The code in the row's Problem column: why its object cannot be read, which its health column says in place of its word, or why a request for it failed, which a mark beside the word says. */
   problem?: string | undefined;
 }) {
   const { rule } = column;
@@ -92,7 +93,7 @@ export function CellView({
     case "name":
       return <ObjectName name={text} generated={row.generated} />;
     case "status": {
-      if (rule.health && problem !== undefined) {
+      if (rule.health && problem !== undefined && text === UNREADABLE) {
         const { word, why } = problemWords(problem);
         return (
           <span
@@ -118,14 +119,12 @@ export function CellView({
           </span>{" "}
         </>
       );
-      if (!tone)
-        return (
-          <>
-            {merged}
-            {rule.recedes ? <span className="text-support">{text}</span> : text}
-          </>
-        );
-      return (
+      const shown = !tone ? (
+        <>
+          {merged}
+          {rule.recedes ? <span className="text-support">{text}</span> : text}
+        </>
+      ) : (
         <span
           className={cn(
             "inline-flex items-center gap-1.5 align-top font-semibold",
@@ -143,6 +142,14 @@ export function CellView({
             text
           )}
         </span>
+      );
+      return rule.health && problem !== undefined ? (
+        <span className="inline-flex max-w-full items-center gap-1.5 align-top">
+          <span className="min-w-0 truncate">{shown}</span>
+          <RequestFailed code={problem} />
+        </span>
+      ) : (
+        shown
       );
     }
     case "ratio":
@@ -206,6 +213,19 @@ export function CellView({
       );
     }
   }
+}
+
+/** The mark beside a status that a request for the row's latest revision failed for, which leaves the status the label's. */
+function RequestFailed({ code }: { code: string }) {
+  return (
+    <span title={requestFailedWhy(code)} className="inline-flex shrink-0">
+      <TriangleAlert
+        role="img"
+        aria-label="Could not fetch the latest revision"
+        className="size-3.5 text-warn-foreground"
+      />
+    </span>
+  );
 }
 
 /**
