@@ -762,7 +762,7 @@ function ValuesView({
     () => valueGlyphs(text, defaults, own),
     [text, defaults, own],
   );
-  const hidden = hiddenCount(text);
+  const hidden = useMemo(() => hiddenCount(text), [text]);
   const whole = useMemo<HelmPart>(
     () => ({ kind: "values", defaults, path: [] }),
     [defaults],
@@ -840,12 +840,16 @@ function ManifestView({
     () => (all ? manifestRevealed(all.value) : manifestOf(manifest, shown)),
     [all, manifest, shown],
   );
-  const hidden = all
-    ? 0
-    : hiddenCount(text) +
-      glyphs.filter(
-        ({ part, revealed }) => !revealed && part.kind === "document",
-      ).length;
+  const hidden = useMemo(
+    () =>
+      all
+        ? 0
+        : hiddenCount(text) +
+          glyphs.filter(
+            ({ part, revealed }) => !revealed && part.kind === "document",
+          ).length,
+    [all, text, glyphs],
+  );
   const revealed = useMemo(
     () =>
       [...shown.values()]
