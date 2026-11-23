@@ -20,7 +20,9 @@ import { diffUri, helmUri } from "../uri";
 import { problemWords } from "./status";
 
 vi.mock("./MaskedText", () => ({
-  default: () => <div data-testid="masked-text" />,
+  default: ({ text }: { text: string }) => (
+    <div data-testid="masked-text" data-text={text} />
+  ),
 }));
 
 const screenSize = withScreenSize(1600);
@@ -216,10 +218,13 @@ test("the Notes section holds the notes as its text, with no field that says Not
   expect(reveal.className).toContain("size-6");
 });
 
-function withUnreadDocument(): Backend {
+function withUnreadDocument(sent: unknown[] = []): Backend {
   const mock = createMockBackend("ready");
   return {
-    invoke: (command, request) => mock.invoke(command, request),
+    invoke: (command, request) => {
+      if (command === "command_plan") sent.push(request);
+      return mock.invoke(command, request);
+    },
     subscribe: ((
       command: string,
       request: never,
@@ -276,27 +281,43 @@ test("the Values bar is the YAML view's: what is hidden at its left, and Reveal 
   expect(bar()?.parentElement?.className).toContain("pr-2 pl-3");
 });
 
-test("the Manifest's bar counts every hidden place, an unread document too, and Reveal All asks for each in turn, ending where one is not given", async () => {
-  const workbench = await mountKube(withUnreadDocument());
+test("the Manifest's bar counts every hidden place, an unread document too, and Reveal All asks once for the whole manifest, which is the view's text until Hide All", async () => {
+  const sent: unknown[] = [];
+  const workbench = await mountKube(withUnreadDocument(sent));
   act(() => {
     workbench.editors.open(release("alpha"));
   });
   await settle(8);
   fireEvent.click(screen.getByRole("tab", { name: "Manifest" }));
   await settle(6);
+  const text = () => screen.getByTestId("masked-text").dataset.text ?? "";
+  const masked = text();
   expect(page("alpha").textContent).toContain("4 values hidden");
   fireEvent.click(screen.getByRole("button", { name: "Reveal All" }));
-  for (let place = 0; place < 3; place++) {
-    await settle(3);
-    expect(screen.getByRole("dialog").textContent).toContain("Reveal");
-    fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
-  }
+  await settle(3);
+  expect(screen.getByRole("dialog").textContent).toContain(
+    "Reveal all of the manifest's Secrets of release alpha (revision 2) in payments from prod-eu?",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
   await settle(6);
-  expect(page("alpha").textContent).toContain("1 value hidden");
   expect(screen.queryByRole("dialog")).toBeNull();
-  expect(screen.getByRole("button", { name: "Hide All" })).toBeTruthy();
+  expect(sent).toEqual([
+    {
+      action: "revealHelm",
+      release: expect.any(Number) as number,
+      revision: 2,
+      part: { kind: "manifest" },
+    },
+  ]);
+  expect(text()).toContain('password: "user-password-r2"');
+  expect(text()).not.toContain("bytes>");
+  expect(page("alpha").textContent).toContain("No value is hidden");
+  expect(
+    within(page("alpha")).queryByRole("button", { name: "Reveal All" }),
+  ).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Hide All" }));
   await settle(3);
+  expect(text()).toBe(masked);
   expect(page("alpha").textContent).toContain("4 values hidden");
 });
 

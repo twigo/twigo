@@ -288,21 +288,13 @@ export function ReleasePage({
     [id],
   );
   const reveal = useReveal(request);
-  const showOne = async (part: HelmPart): Promise<boolean> => {
-    if (revision === undefined || reveal === undefined) return false;
-    const answer = await reveal({ at: revision, part });
-    if (!answer || latest.current.epoch !== epoch) return false;
-    states.reveal(uri, epoch, { part, ...answer });
-    return true;
-  };
   const show = (part: HelmPart) => {
-    void showOne(part);
-  };
-  /** One request after another, each with the mode's friction, ending at the first the person does not confirm. */
-  const showAll = async (parts: readonly HelmPart[]) => {
-    for (const part of parts) {
-      if (!(await showOne(part))) return;
-    }
+    if (revision === undefined || reveal === undefined) return;
+    void reveal({ at: revision, part }).then((answer) => {
+      if (answer && latest.current.epoch === epoch) {
+        states.reveal(uri, epoch, { part, ...answer });
+      }
+    });
   };
   const hide = (parts: readonly HelmPart[]) => {
     states.hide(uri, epoch, parts.map(partKey));
@@ -339,7 +331,7 @@ export function ReleasePage({
   const filterable = layout !== "page" && tab === "overview";
   const filtered = useFiltered(services.pages, uri) && filterable;
   const under = text?.glyphs.find((each) => each.line === text.line);
-  const latest = useRef({ text, under, show, showAll, hide, epoch });
+  const latest = useRef({ text, under, show, hide, epoch });
   const subject = JSON.stringify(releaseSubject(release));
   useEffect(() => {
     if (!element) return;
@@ -356,7 +348,7 @@ export function ReleasePage({
     scope.set("helm.page", uri);
     scope.set("helm.canReveal", under !== undefined && !under.revealed);
     scope.set("helm.canHide", under?.revealed === true);
-    scope.set("helm.canRevealAll", (text?.reveal.length ?? 0) > 0);
+    scope.set("helm.canRevealAll", text?.whole !== undefined);
     scope.set("helm.canHideAll", (text?.revealed.length ?? 0) > 0);
     scope.set("helm.marked", marks.size > 0);
     scope.set("pageFocus", filterable);
@@ -380,7 +372,7 @@ export function ReleasePage({
     filtered,
   ]);
   useEffect(() => {
-    latest.current = { text, under, show, showAll, hide, epoch };
+    latest.current = { text, under, show, hide, epoch };
   });
   useEffect(
     () =>
@@ -394,8 +386,8 @@ export function ReleasePage({
           if (at?.revealed) run([at.part]);
         },
         revealAll: () => {
-          const { text: now, showAll: run } = latest.current;
-          if (now) void run(now.reveal);
+          const { text: now, show: run } = latest.current;
+          if (now?.whole) run(now.whole);
         },
         hideAll: () => {
           const { text: now, hide: run } = latest.current;
@@ -936,7 +928,7 @@ function ValuesView({
       glyphs,
       line,
       revealed: [...own.values()].map(({ part }) => part),
-      reveal: hidden > 0 ? [whole] : [],
+      whole: hidden > 0 ? whole : undefined,
     });
     return () => {
       onText(undefined);
@@ -1008,6 +1000,9 @@ function ValuesView({
   );
 }
 
+/** What Reveal All asks of a manifest: the whole of it, whose answer is the view's text until Hide All. */
+const WHOLE_MANIFEST: HelmPart = { kind: "manifest" };
+
 function ManifestView({
   uri,
   manifest,
@@ -1021,22 +1016,25 @@ function ManifestView({
   onGlyph: (glyph: Glyph) => void;
   onText: (state: TextState | undefined) => void;
 }) {
+  const all = shown.get(partKey(WHOLE_MANIFEST));
   const { text, glyphs } = useMemo(
-    () => manifestOf(manifest, shown),
-    [manifest, shown],
+    () => (all ? { text: all.value, glyphs: [] } : manifestOf(manifest, shown)),
+    [all, manifest, shown],
   );
-  const hiding = useMemo(
-    () => glyphs.filter(({ revealed }) => !revealed),
-    [glyphs],
-  );
-  const hidden =
-    hiddenCount(text) +
-    hiding.filter(({ part }) => part.kind === "document").length;
+  const hidden = all
+    ? 0
+    : hiddenCount(text) +
+      glyphs.filter(
+        ({ part, revealed }) => !revealed && part.kind === "document",
+      ).length;
   const revealed = useMemo(
     () =>
       [...shown.values()]
         .map(({ part }) => part)
-        .filter(({ kind }) => kind === "secret" || kind === "document"),
+        .filter(
+          ({ kind }) =>
+            kind === "secret" || kind === "document" || kind === "manifest",
+        ),
     [shown],
   );
   const [line, setLine] = useState(1);
@@ -1045,18 +1043,18 @@ function ManifestView({
       glyphs,
       line,
       revealed,
-      reveal: hiding.map(({ part }) => part),
+      whole: hidden > 0 ? WHOLE_MANIFEST : undefined,
     });
     return () => {
       onText(undefined);
     };
-  }, [onText, glyphs, line, revealed, hiding]);
+  }, [onText, glyphs, line, revealed, hidden]);
   return (
     <div className="flex h-full min-h-48 flex-col">
       <TextBar
         uri={uri}
         note={`${hiddenWords(hidden)} · @ lists the documents`}
-        canReveal={hiding.length > 0}
+        canReveal={hidden > 0}
         canHide={revealed.length > 0}
       />
       <div className="min-h-0 flex-1">

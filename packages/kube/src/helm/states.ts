@@ -20,8 +20,8 @@ export interface TextState {
   readonly glyphs: readonly Glyph[];
   readonly line: number;
   readonly revealed: readonly HelmPart[];
-  /** What Reveal All asks for, one request each: the whole of the values, and for a manifest each place still hidden. */
-  readonly reveal: readonly HelmPart[];
+  /** What Reveal All asks for in one request: the whole of the values or of the manifest; none once nothing is hidden. */
+  readonly whole: HelmPart | undefined;
 }
 
 /** What the commands Reveal and Hide do on a page. */
