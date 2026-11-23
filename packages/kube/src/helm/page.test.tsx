@@ -376,9 +376,7 @@ async function mark(revision: number) {
 async function menuOf(revision: number) {
   fireEvent.contextMenu(revisionRow(revision));
   await settle(2);
-  const items = screen
-    .getAllByRole("menuitem")
-    .map((item) => item.textContent ?? "");
+  const items = screen.getAllByRole("menuitem").map((item) => item.textContent);
   fireEvent.keyDown(document.activeElement ?? document.body, {
     key: "Escape",
   });
