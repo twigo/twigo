@@ -47,11 +47,12 @@ const UNMARKED: ReadonlySet<number> = new Set();
 
 /**
  * What each open release editor, and each list's inspector, holds apart from
- * the release itself, by URI: the view shown, the values plate, and, of one
- * epoch of the view only, the revisions marked in History and what the person
- * revealed. An epoch is one release's one revision in one open, so a value
- * lasts until it is hidden, the editor closes, or the view leaves its
- * release or revision (ARCHITECTURE 3.6), and is never written anywhere.
+ * the release itself, by URI: the view shown, the values plate, the revisions
+ * marked in History, of one life of the release only, and what the person
+ * revealed, of one epoch of the view only. An epoch is one release's one
+ * revision in one open, so a value lasts until it is hidden, the editor
+ * closes, or the view leaves its release or revision (ARCHITECTURE 3.6), and
+ * is never written anywhere; a life outlasts the revision moving.
  */
 export class ReleaseStates {
   readonly changes = new Changes();
@@ -104,23 +105,23 @@ export class ReleaseStates {
     this.changes.emit();
   }
 
-  marks(uri: string, epoch: number): ReadonlySet<number> {
+  marks(uri: string, life: number): ReadonlySet<number> {
     const held = this.#marks.get(uri);
-    return held?.epoch === epoch ? held.value : UNMARKED;
+    return held?.epoch === life ? held.value : UNMARKED;
   }
 
   mark(
     uri: string,
-    epoch: number,
+    life: number,
     revisions: readonly number[],
     marked: boolean,
   ): void {
-    const next = new Set(this.marks(uri, epoch));
+    const next = new Set(this.marks(uri, life));
     for (const revision of revisions) {
       if (marked) next.add(revision);
       else next.delete(revision);
     }
-    this.#marks.set(uri, { epoch, value: next });
+    this.#marks.set(uri, { epoch: life, value: next });
     this.changes.emit();
   }
 
@@ -148,7 +149,6 @@ export class ReleaseStates {
 
   /** The page leaves `epoch`: what it held there goes, and no read of another epoch gives it back. */
   leave(uri: string, epoch: number): void {
-    if (this.#marks.get(uri)?.epoch === epoch) this.#marks.delete(uri);
     if (this.#reveals.get(uri)?.epoch === epoch) this.#reveals.delete(uri);
   }
 

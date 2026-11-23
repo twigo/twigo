@@ -45,6 +45,8 @@ test("a part stays while its revision is shown, and never stands beside another 
   expect(pinned.values).toBeUndefined();
   expect(pinned.manifest).toBeUndefined();
   expect(pinned.history).toBe(latest.history);
+  expect(pinned.epoch).not.toBe(latest.epoch);
+  expect(pinned.life).toBe(latest.life);
   view.close();
 });
 
@@ -58,6 +60,20 @@ test("a release that is gone has no parts, and a revision it does not keep says 
   expect(gone.getSnapshot().exists).toBe(false);
   expect(gone.getSnapshot().overview).toBeUndefined();
   gone.close();
+
+  const again = new ReleaseView(createMockBackend(), ref, {
+    revision: null,
+    parts: ALL,
+  });
+  await later();
+  const first = new ReleaseView(createMockBackend(), ref, {
+    revision: null,
+    parts: ALL,
+  });
+  await later();
+  expect(again.getSnapshot().life).not.toBe(first.getSnapshot().life);
+  again.close();
+  first.close();
 
   const pinned = new ReleaseView(createMockBackend(), ref, {
     revision: 9,

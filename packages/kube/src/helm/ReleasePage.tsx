@@ -683,7 +683,7 @@ function Body({
         <div className="h-full min-h-48">
           <HistoryList
             uri={uri}
-            epoch={snapshot.epoch}
+            life={snapshot.life}
             lines={snapshot.history}
             latest={snapshot.latest}
             states={states}

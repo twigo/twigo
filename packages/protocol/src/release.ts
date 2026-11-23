@@ -24,6 +24,13 @@ export interface ReleaseSnapshot {
    * is read for another.
    */
   readonly epoch: number;
+  /**
+   * Names one life of the release in this view: another number for another
+   * view and for a release that went and came back, the same across its
+   * revisions, so that what a person chose of the release as a whole, such as
+   * the revisions marked in History, holds while it moves.
+   */
+  readonly life: number;
   readonly status: ViewState;
   /** False until a revision is listed, and once none is left. */
   readonly exists: boolean;
@@ -43,6 +50,7 @@ export interface ReleaseSnapshot {
 export const INITIAL_RELEASE: ReleaseSnapshot = {
   seq: 0,
   epoch: 0,
+  life: 0,
   status: { state: "connecting" },
   exists: false,
   revision: undefined,
@@ -76,6 +84,7 @@ export class ReleaseView {
   readonly #listeners = new Set<() => void>();
   #snapshot = INITIAL_RELEASE;
   #epoch = 0;
+  #life = 0;
   #id: SubscriptionId | undefined;
   readonly #opened: Promise<SubscriptionId>;
   #ask: ReleaseAsk;
@@ -166,9 +175,11 @@ export class ReleaseView {
     const previous = this.#snapshot;
     const kept = batch.exists && batch.revision === previous.revision;
     if (!kept) this.#epoch = ++epochs;
+    if (batch.exists && !previous.exists) this.#life = ++epochs;
     this.#publish({
       seq: batch.seq,
       epoch: this.#epoch,
+      life: this.#life,
       status: batch.status,
       exists: batch.exists,
       revision: batch.revision ?? undefined,

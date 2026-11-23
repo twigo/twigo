@@ -38,7 +38,7 @@ const COLUMNS: readonly GridColumn[] = [
  */
 export function HistoryList({
   uri,
-  epoch,
+  life,
   lines,
   latest,
   states,
@@ -46,7 +46,7 @@ export function HistoryList({
   onOpen,
 }: {
   uri: string;
-  epoch: number;
+  life: number;
   lines: readonly RevisionLine[];
   latest: number | undefined;
   states: ReleaseStates;
@@ -63,7 +63,7 @@ export function HistoryList({
     },
     [register],
   );
-  const marked = states.marks(uri, epoch);
+  const marked = states.marks(uri, life);
   if (lines.length === 0) {
     return (
       <EmptyState icon={HistoryIcon} title="No revisions">
@@ -102,7 +102,7 @@ export function HistoryList({
       }}
       marked={new Set([...marked].map(String))}
       onMark={(ids, on) => {
-        states.mark(uri, epoch, ids.map(Number), on);
+        states.mark(uri, life, ids.map(Number), on);
       }}
       menu={
         current === undefined || !byId.has(String(current))
