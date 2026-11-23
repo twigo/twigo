@@ -39,7 +39,10 @@ Helm, k9s, Freelens, Headlamp and Rancher show values and manifests in clear; Ar
 
 - Reading a release's values costs a Reveal for each setting the person wants to read, a dialog outside `read-write` (6.4).
 - A masked document shows key names, list lengths, which scalars are booleans or nulls, and sizes; a comparison shows which values changed.
-- A value of a Secret that the notes also print elsewhere in another spelling, or a value of the values that is no Secret's, stays in the notes; a number is taken out as stored, as Go's `%v` prints it, which is how Helm's templates print it, and as its integer digits, and in no other spelling.
+- A value of the values that is no Secret's stays in the notes, and so does a value of a Secret that the notes print in a spelling Twigo does not take out.
+  A number, and a Secret's text that reads whole as a JSON number, is taken out as stored, as Go's `%v` prints it as a float64, which is how Helm's templates print a value read from YAML, as Go's `encoding/json` writes it, which `toJson` prints, and as its integer digits where it is whole.
+  No other spelling is: a `printf` of its own verb or precision, such as `%.2f` or `%x`, a number that `| int` cut where it was not whole, digits padded or led by zeros, a number that stands inside a longer value of the Secret, such as a port in a URL, and any text a template makes of a value, such as `| upper` or `| b64enc` of a part of it.
+  A whole number takes its integer digits out too, so a Secret that holds `1`, or the text `1.0`, takes every `1` that stands alone out of the notes.
 - A value of a Secret with no letter or digit, such as `/` or a space, is never taken out of a text, as it cannot be told from the punctuation and the spaces around it: it stays in the notes, the descriptions and the words of a refusal.
 - The mock's releases are written from the decoder's own output by `twigo-helm`'s `mock` test, which checks that they hold no value of a Secret, in clear or as base64.
 
