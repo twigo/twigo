@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use serde_json::Value;
+use serde_json::{Number, Value};
 use twigo_ipc::{IpcError, Scrubbed};
 
 use super::{Field, Held, contents, decoded, holds_helm_release, whole_tokens_replaced};
@@ -156,11 +156,12 @@ pub fn secret_values(objects: &[&Value]) -> Vec<String> {
     values
 }
 
-/// The strings and numbers in `value`, at any depth, as text.
+/// The strings and numbers in `value`, at any depth, as text: a number in
+/// each spelling it may be printed in.
 fn scalars(value: &Value, found: &mut Vec<String>) {
     match value {
         Value::String(text) => found.push(text.clone()),
-        Value::Number(number) => found.push(number.to_string()),
+        Value::Number(number) => found.extend(spellings(number)),
         Value::Array(items) => {
             for item in items {
                 scalars(item, found);
@@ -173,6 +174,63 @@ fn scalars(value: &Value, found: &mut Vec<String>) {
         }
         Value::Bool(_) | Value::Null => {}
     }
+}
+
+/// A number as serde_json writes it, as Go's `%v` prints it as a float64,
+/// which Helm's templates print a value read from YAML as, such as
+/// `1.234567e+06`, and as its integer digits where it is whole, as a
+/// refusal of an object Helm sent prints it.
+fn spellings(number: &Number) -> Vec<String> {
+    let mut spellings = vec![number.to_string()];
+    if let Some(float) = number.as_f64().filter(|float| float.is_finite()) {
+        spellings.push(go_float(float));
+        if float.fract() == 0.0 && float.abs() < 1e21 {
+            spellings.push(format!("{float:.0}"));
+        }
+    }
+    spellings.dedup();
+    spellings
+}
+
+/// Go's `%v` of a float64: the shortest digits that read back as it, of 17
+/// the nearest, a tie to the even, with an exponent of at least two digits
+/// where it is under -4 or 6 and over
+/// ([ftoa.go](https://github.com/golang/go/blob/go1.27.1/src/internal/strconv/ftoa.go#L347-L373)).
+fn go_float(float: f64) -> String {
+    let (sign, digits, exponent) = scientific(&format!("{float:e}"));
+    let (sign, digits, exponent) = if digits.len() < 17 {
+        (sign, digits, exponent)
+    } else {
+        scientific(&format!("{float:.16e}"))
+    };
+    if float == 0.0 {
+        return format!("{sign}0");
+    }
+    if !(-4..6).contains(&exponent) {
+        let (first, rest) = digits.split_at(1);
+        let point = if rest.is_empty() { "" } else { "." };
+        let at = if exponent < 0 { '-' } else { '+' };
+        return format!("{sign}{first}{point}{rest}e{at}{:02}", exponent.abs());
+    }
+    let point = usize::try_from(exponent + 1).unwrap_or(0);
+    if exponent < 0 {
+        let zeros = "0".repeat(usize::try_from(-exponent - 1).unwrap_or(0));
+        format!("{sign}0.{zeros}{digits}")
+    } else if point >= digits.len() {
+        format!("{sign}{digits}{}", "0".repeat(point - digits.len()))
+    } else {
+        format!("{sign}{}.{}", &digits[..point], &digits[point..])
+    }
+}
+
+/// Rust's `{:e}` of a float: its sign, its digits and its exponent.
+fn scientific(written: &str) -> (&'static str, String, i32) {
+    let (mantissa, exponent) = written.split_once('e').expect("Rust writes an exponent");
+    let (sign, mantissa) = mantissa
+        .strip_prefix('-')
+        .map_or(("", mantissa), |mantissa| ("-", mantissa));
+    let exponent = exponent.parse().expect("Rust writes a whole exponent");
+    (sign, mantissa.replace('.', ""), exponent)
 }
 
 #[cfg(test)]
@@ -255,6 +313,48 @@ mod tests {
         assert!(
             secret_values(&[&json!({ "kind": "ConfigMap", "data": { "k": "v1" } })]).is_empty(),
             "only a Secret's values"
+        );
+    }
+
+    #[test]
+    fn a_number_is_spelled_as_go_prints_it() {
+        let printed = [
+            (0.0, "0"),
+            (1.5, "1.5"),
+            (0.1, "0.1"),
+            (123_456.0, "123456"),
+            (999_999.0, "999999"),
+            (1_000_000.0, "1e+06"),
+            (1_234_567.0, "1.234567e+06"),
+            (-1_234_567.0, "-1.234567e+06"),
+            (1_234_567.8, "1.2345678e+06"),
+            (4_294_967_296.0, "4.294967296e+09"),
+            (1e21, "1e+21"),
+            (1e100, "1e+100"),
+            (0.0001, "0.0001"),
+            (0.000_123, "0.000123"),
+            (1e-5, "1e-05"),
+            (5e-324, "5e-324"),
+            (1.797_693_134_862_315_7e308, "1.7976931348623157e+308"),
+            (25_864_340_602_886.812, "2.5864340602886812e+13"),
+        ];
+        for (value, go) in printed {
+            assert_eq!(go_float(value), go, "{value:e}");
+        }
+    }
+
+    #[test]
+    fn a_number_is_scrubbed_in_each_spelling_it_is_printed_in() {
+        let secrets = secret_values(&[&json!({
+            "kind": "Secret",
+            "stringData": { "pin": 1_234_567.0, "port": 5432 },
+        })]);
+        assert_eq!(
+            scrub(
+                "PIN 1.234567e+06, got &value.valueUnstructured{Value:1234567}, port 5432.",
+                &secrets
+            ),
+            format!("PIN {HIDDEN}, got &value.valueUnstructured{{Value:{HIDDEN}}}, port {HIDDEN}.")
         );
     }
 

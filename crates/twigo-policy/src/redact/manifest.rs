@@ -675,6 +675,18 @@ stringData: {broken: pw-unread
     }
 
     #[test]
+    fn a_number_of_a_secret_is_scrubbed_as_helm_s_templates_print_it() {
+        let Masked { values, .. } = masked(&held(
+            "---\n# Source: a.yaml\nkind: Secret\nmetadata: {name: a}\nstringData:\n  pin: 1.234567e+06\n",
+        ));
+        let notes = held("Your PIN is 1.234567e+06.");
+        assert_eq!(
+            super::super::scrubbed_text(&notes, &values).text,
+            format!("Your PIN is {}.", super::super::HIDDEN)
+        );
+    }
+
+    #[test]
     fn a_value_written_over_several_lines_is_the_value_it_decodes_to() {
         let from = held(
             "---\n# Source: a.yaml\nkind: Secret\nmetadata: {name: db}\ndata:\n  password: |\n    aHVu\n    dGVyMg==\n  key.der: |\n    MIIBCgKC\n    AQEA/w==\n",
