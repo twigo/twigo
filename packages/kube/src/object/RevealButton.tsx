@@ -11,7 +11,6 @@ export function RevealButton({
 }: {
   /** What it reveals, for its name: `password`. */
   label: string;
-  /** Whether the value shows, which the button then hides. */
   showing: boolean;
   loading?: boolean;
   onClick: (event: MouseEvent<HTMLButtonElement>) => void;

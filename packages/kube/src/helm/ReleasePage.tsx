@@ -686,7 +686,6 @@ function Body({
   onOpen: (target: ObjectRef) => void;
   onOpenRevision: (revision: number) => void;
   revisionMenu: (revision: number, marked: readonly number[]) => ActionGroups;
-  /** What the bar over marked revisions offers. */
   markedBar: (marked: readonly number[]) => ActionGroups;
   split: boolean;
 }) {

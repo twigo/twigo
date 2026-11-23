@@ -13,7 +13,6 @@ export function TextBar({
   canReveal,
   canHide,
 }: {
-  /** The release page's, which the commands act on. */
   uri: string;
   note: ReactNode;
   canReveal: boolean;

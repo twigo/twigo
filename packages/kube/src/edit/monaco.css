@@ -12,7 +12,6 @@
   background-color: var(--muted);
 }
 
-/* An eye in the gutter of a Helm release's masked line. */
 .twigo-eye,
 .twigo-eye-off {
   cursor: pointer;

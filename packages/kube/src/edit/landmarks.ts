@@ -1,6 +1,5 @@
 import type { editor } from "./monaco";
 
-/** The top-level keys at weight 600, by their class in `monaco.css`. */
 export function topKeyMarks(
   keys: readonly (readonly [number, number])[],
   model: editor.ITextModel,

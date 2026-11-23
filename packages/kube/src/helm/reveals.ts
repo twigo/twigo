@@ -154,7 +154,6 @@ function pathAtLine(outline: readonly Entry[], line: number): string[] {
   return path;
 }
 
-/** What a bar says of the values a text hides. */
 export function hiddenWords(count: number): string {
   return count === 0
     ? "No value is hidden"

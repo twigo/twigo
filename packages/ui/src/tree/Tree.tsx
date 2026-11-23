@@ -28,7 +28,6 @@ export interface TreeRow {
   readonly block?: boolean;
 }
 
-/** A row the cursor passes by. */
 const passive = (row: TreeRow | undefined): boolean =>
   row?.heading === true || row?.block === true;
 

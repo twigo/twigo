@@ -11,10 +11,8 @@ import {
 import { KindIcon } from "../KindIcon";
 import { IN_FLIGHT_RELEASE, isQuiet, problemWords, UNREADABLE } from "./status";
 
-/** Head and tail of a chart together never go under this. */
 const CHART_FLOOR = 12;
 
-/** What the line says of a release that waits or cannot be read, in place of what its dot says alone. */
 function wordOf(
   status: string,
   problem: string | undefined,

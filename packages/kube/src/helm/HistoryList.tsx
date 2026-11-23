@@ -57,7 +57,6 @@ export function HistoryList({
   states: ReleaseStates;
   /** The menu of the selected revision, and of the marked ones. */
   menu: (revision: number, marked: readonly number[]) => ActionGroups;
-  /** The actions of the bar over the marked revisions. */
   bar: (marked: readonly number[]) => ActionGroups;
   onOpen: (revision: number) => void;
 }) {

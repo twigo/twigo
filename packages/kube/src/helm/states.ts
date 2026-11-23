@@ -124,7 +124,6 @@ export class ReleaseStates {
     this.changes.emit();
   }
 
-  /** The marks of the revisions History shows, all at once. */
   clearMarks(uri: string): void {
     if (this.#marks.delete(uri)) this.changes.emit();
   }
