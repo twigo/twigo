@@ -65,15 +65,17 @@ pub struct ApprovalAsk {
 )]
 pub enum ApprovalDetail {
     /// The object as it is and as a dry run of the same request would store
-    /// it, both masked for a Secret.
+    /// it, both masked for a Secret and for a ConfigMap that holds a Helm
+    /// release.
     Diff {
         /// Null for a create.
         #[ts(type = "unknown")]
         live: Value,
         #[ts(type = "unknown")]
         result: Value,
-        /// The server's `Warning` headers on the dry run; for a Secret, one
-        /// line of Twigo's in their place, as they may quote its values.
+        /// The server's `Warning` headers on the dry run; for a Secret or a
+        /// ConfigMap that holds a Helm release, one line of Twigo's in their
+        /// place, as they may quote its values or the release.
         warnings: Vec<String>,
     },
     /// What an exec runs or an attach joins; `command` is empty for an
@@ -88,7 +90,8 @@ pub enum ApprovalDetail {
     /// for.
     Delete { propagation: Option<String> },
     /// No dry run could say what it does, and why; the request's body as
-    /// sent where it can be shown, never a Secret's.
+    /// sent where it can be shown, never a Secret's or one of a ConfigMap
+    /// that holds a Helm release.
     Unknown {
         reason: NoDiff,
         body: Option<String>,
@@ -109,9 +112,10 @@ pub enum NoDiff {
     Aggregated,
     /// Whether an aggregated API server serves it could not be read.
     Unverified,
-    /// The server refused the dry run, in its words, or for a Secret in
-    /// Twigo's, as the server's may quote its values, while the write itself
-    /// may pass: a webhook that does not support dry runs.
+    /// The server refused the dry run, in its words, or for a Secret or a
+    /// ConfigMap that holds a Helm release in Twigo's, as the server's may
+    /// quote its values or the release, while the write itself may pass: a
+    /// webhook that does not support dry runs.
     Refused { error: IpcError },
     /// Not a resource Twigo can read: a path outside the API's resources, or
     /// a write that no dry run covers, as a review of authorization.k8s.io

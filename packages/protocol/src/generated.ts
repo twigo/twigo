@@ -179,8 +179,9 @@ export type ApprovalDetail = { "kind": "diff",
  */
 live: unknown, result: unknown, 
 /**
- * The server's `Warning` headers on the dry run; for a Secret, one
- * line of Twigo's in their place, as they may quote its values.
+ * The server's `Warning` headers on the dry run; for a Secret or a
+ * ConfigMap that holds a Helm release, one line of Twigo's in their
+ * place, as they may quote its values or the release.
  */
 warnings: Array<string>, } | { "kind": "session", container: string | null, command: Array<string>, tty: boolean, stdin: boolean, } | { "kind": "delete", propagation: string | null, } | { "kind": "unknown", reason: NoDiff, body: string | null, };
 
