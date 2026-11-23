@@ -1,6 +1,12 @@
-import { act, cleanup, fireEvent, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { Backend } from "@twigo/protocol";
+import type { Backend, Column, ListBatch } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import {
   mountKube,
@@ -63,6 +69,63 @@ test("the list draws each release as a row of Helm's columns, and says why one c
   const unreadable = cellOf(rowOf("trunc", "auth"), "Status");
   expect(unreadable).toBe("Truncated");
   expect(document.body.textContent).not.toContain("helm.truncated");
+});
+
+function failingRequests(...names: readonly string[]): Backend {
+  const mock = createMockBackend("ready");
+  let columns: readonly Column[] = [];
+  return {
+    invoke: (command, request) => mock.invoke(command, request),
+    subscribe: ((
+      command: string,
+      request: never,
+      onMessage: (message: unknown) => void,
+    ) => {
+      if (command !== "helm_list_subscribe") {
+        return mock.subscribe(command as never, request, onMessage);
+      }
+      return mock.subscribe(command as never, request, (batch: ListBatch) => {
+        if (batch.columns) columns = batch.columns;
+        const at = columns.findIndex((column) => column.name === "Problem");
+        onMessage({
+          ...batch,
+          upserts: batch.upserts.map((row) =>
+            names.some((name) => row.id.endsWith(`/${name}`))
+              ? {
+                  ...row,
+                  cells: row.cells.map((cell, index) =>
+                    index === at ? "server.forbidden" : cell,
+                  ),
+                }
+              : row,
+          ),
+        });
+      });
+    }) as Backend["subscribe"],
+  };
+}
+
+test("a release whose request failed keeps the label's status and tone, with a mark that says the request failed", async () => {
+  await openList(
+    failingRequests("payments/alpha", "payments/epsilon"),
+    "helm-list://prod-eu",
+  );
+  for (const [name, status] of [
+    ["alpha", "deployed"],
+    ["epsilon", "failed"],
+  ] as const) {
+    const row = rowOf(name, "payments");
+    expect(cellOf(row, "Status")).toBe(status);
+    const mark = within(row).getByRole("img", {
+      name: "Could not fetch the latest revision",
+    });
+    expect(mark.closest('[data-column="Status"]')).not.toBeNull();
+    expect(mark.parentElement?.title).toContain(
+      "could not fetch this release's latest revision (server.forbidden)",
+    );
+  }
+  expect(rowOf("alpha", "payments").dataset.tone).toBeUndefined();
+  expect(rowOf("epsilon", "payments").dataset.tone).toBe("error");
 });
 
 test("a release that cannot be read counts as failing in the health filter and the status bar, and its filter shows it", async () => {

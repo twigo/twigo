@@ -333,12 +333,11 @@ export function rowTone(
   row: Row,
 ): Tone | undefined {
   if (health === undefined) return undefined;
-  if (problemOf(gvr, columns, row) !== undefined) return "error";
   const status = healthText(health, columns, row);
   return status === undefined ? undefined : cellTone(gvr, health, status);
 }
 
-/** Why a row's object cannot be read, as its column that says so carries it; none for a row that can. */
+/** The code in a row's column that says why its object cannot be read, or why a request for it failed; none for a row with neither. */
 export function problemOf(
   gvr: Gvr,
   columns: readonly Column[],

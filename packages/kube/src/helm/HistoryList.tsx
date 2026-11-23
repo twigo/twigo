@@ -16,7 +16,8 @@ import {
   useListRegistration,
 } from "@twigo/workbench";
 import { Age } from "../object/values";
-import { IN_FLIGHT_RELEASE, problemWords, isQuiet, statusTone } from "./status";
+import { ProblemWord } from "./ProblemWord";
+import { IN_FLIGHT_RELEASE, isQuiet, statusTone } from "./status";
 import type { ReleaseStates } from "./states";
 
 const COLUMNS: readonly GridColumn[] = [
@@ -63,7 +64,6 @@ export function HistoryList({
     },
     [register],
   );
-  const marked = states.marks(uri, life);
   if (lines.length === 0) {
     return (
       <EmptyState icon={HistoryIcon} title="No revisions">
@@ -73,6 +73,9 @@ export function HistoryList({
   }
   const current = selected ?? lines[0]?.revision;
   const byId = new Map(lines.map((line) => [String(line.revision), line]));
+  const marked = [...states.marks(uri, life)].filter((revision) =>
+    byId.has(String(revision)),
+  );
   const item = (index: number): GridItem<RevisionLine, never> | undefined => {
     const line = lines[index];
     if (!line) return undefined;
@@ -100,14 +103,14 @@ export function HistoryList({
       onOpen={(id) => {
         onOpen(Number(id));
       }}
-      marked={new Set([...marked].map(String))}
+      marked={new Set(marked.map(String))}
       onMark={(ids, on) => {
         states.mark(uri, life, ids.map(Number), on);
       }}
       menu={
         current === undefined || !byId.has(String(current))
           ? []
-          : menu(current, [...marked])
+          : menu(current, marked)
       }
       loading={false}
       cell={(line, column) => {
@@ -142,18 +145,7 @@ function StatusWord({
   line: RevisionLine;
   latest: number | undefined;
 }) {
-  if (line.problem) {
-    const { word, why } = problemWords(line.problem.code);
-    return (
-      <span
-        title={why}
-        className="inline-flex items-center gap-1.5 align-top font-semibold text-error"
-      >
-        <StatusDot tone="error" />
-        {word}
-      </span>
-    );
-  }
+  if (line.problem) return <ProblemWord code={line.problem.code} />;
   const tone = statusTone(line.status);
   if (tone) {
     return (
