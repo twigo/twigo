@@ -157,7 +157,50 @@ fn vitals(summary: &Summary, deployed: Option<u32>) -> Vec<Vital> {
     ]
 }
 
-/// What the manifest makes, each a link to its object.
+/// The built-in kinds whose objects live in a namespace, by API group and
+/// kind, as the discovery of Kubernetes 1.37 lists them. A manifest does not
+/// say a custom resource's scope, only the cluster does, so such a kind is
+/// left out and its object is shown with no namespace unless its document
+/// writes one.
+const NAMESPACED: [(&str, &str); 32] = [
+    ("", "ConfigMap"),
+    ("", "Endpoints"),
+    ("", "Event"),
+    ("", "LimitRange"),
+    ("", "PersistentVolumeClaim"),
+    ("", "Pod"),
+    ("", "PodTemplate"),
+    ("", "ReplicationController"),
+    ("", "ResourceQuota"),
+    ("", "Secret"),
+    ("", "Service"),
+    ("", "ServiceAccount"),
+    ("apps", "ControllerRevision"),
+    ("apps", "DaemonSet"),
+    ("apps", "Deployment"),
+    ("apps", "ReplicaSet"),
+    ("apps", "StatefulSet"),
+    ("autoscaling", "HorizontalPodAutoscaler"),
+    ("batch", "CronJob"),
+    ("batch", "Job"),
+    ("certificates.k8s.io", "PodCertificateRequest"),
+    ("coordination.k8s.io", "Lease"),
+    ("discovery.k8s.io", "EndpointSlice"),
+    ("events.k8s.io", "Event"),
+    ("networking.k8s.io", "Ingress"),
+    ("networking.k8s.io", "NetworkPolicy"),
+    ("policy", "PodDisruptionBudget"),
+    ("rbac.authorization.k8s.io", "Role"),
+    ("rbac.authorization.k8s.io", "RoleBinding"),
+    ("resource.k8s.io", "ResourceClaim"),
+    ("resource.k8s.io", "ResourceClaimTemplate"),
+    ("storage.k8s.io", "CSIStorageCapacity"),
+];
+
+/// What the manifest makes, each a link to its object, with the namespace it
+/// lives in: the one its document writes, else the release's where its kind is
+/// namespaced, as cli-runtime's `SetNamespace` places it, and none for a
+/// cluster-scoped kind.
 fn objects(page: &Page) -> Option<Section> {
     if page.objects.is_empty() {
         return None;
@@ -171,6 +214,11 @@ fn objects(page: &Page) -> Option<Section> {
                 .api_version
                 .split_once('/')
                 .unwrap_or(("", &head.api_version));
+            let namespace = head.namespace.as_deref().or_else(|| {
+                NAMESPACED
+                    .contains(&(group, head.kind.as_str()))
+                    .then_some(target)
+            });
             vec![
                 Value::Text {
                     text: head.kind.clone(),
@@ -186,7 +234,7 @@ fn objects(page: &Page) -> Option<Section> {
                     text: head.name.clone(),
                 },
                 Value::Text {
-                    text: head.namespace.clone().unwrap_or_default(),
+                    text: namespace.unwrap_or_default().to_owned(),
                 },
             ]
         })

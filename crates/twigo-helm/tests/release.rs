@@ -380,6 +380,46 @@ fn an_object_whose_document_writes_an_empty_namespace_links_to_the_release_s() {
 }
 
 #[test]
+fn the_objects_say_the_namespace_they_live_in_where_the_manifest_or_the_kind_tells_it() {
+    let release = serde_json::json!({
+        "name": "spread",
+        "namespace": "payments",
+        "version": 1,
+        "info": { "status": "deployed" },
+        "manifest": "---\nkind: ConfigMap\napiVersion: v1\nmetadata: {name: none}\n---\nkind: ConfigMap\napiVersion: v1\nmetadata: {name: empty, namespace: \"\"}\n---\nkind: ConfigMap\napiVersion: v1\nmetadata: {name: elsewhere, namespace: other}\n---\nkind: Deployment\napiVersion: apps/v1\nmetadata: {name: web}\n---\nkind: ClusterRole\napiVersion: rbac.authorization.k8s.io/v1\nmetadata: {name: reader}\n---\nkind: ServiceMonitor\napiVersion: monitoring.coreos.com/v1\nmetadata: {name: scrape}\n",
+    });
+    let overview = shown(&built(&release), Some(1));
+    let objects = overview
+        .sections
+        .iter()
+        .find(|section| section.id == "helm.objects")
+        .expect("the objects");
+    let Block::Table { rows, .. } = &objects.blocks[0] else {
+        panic!("the table");
+    };
+    let lives: Vec<(&str, &str)> = rows
+        .iter()
+        .map(|row| match (&row[1], &row[2]) {
+            (Value::Link { text, .. }, Value::Text { text: namespace }) => {
+                (text.as_str(), namespace.as_str())
+            }
+            other => panic!("a link and a text: {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        lives,
+        [
+            ("none", "payments"),
+            ("empty", "payments"),
+            ("elsewhere", "other"),
+            ("web", "payments"),
+            ("reader", ""),
+            ("scrape", ""),
+        ]
+    );
+}
+
+#[test]
 fn an_uninstall_that_has_not_ended_says_so() {
     let release = serde_json::json!({
         "name": "leaving",
