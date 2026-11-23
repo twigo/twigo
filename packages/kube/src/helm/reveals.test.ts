@@ -111,6 +111,17 @@ describe("a manifest", () => {
     expect(hiddenCount(text)).toBe(1);
   });
 
+  test("a key that is not UTF-8 is written as its base64, with a comment that says so", () => {
+    const binary: Shown = {
+      part: { kind: "secret", document: 0, items: [], key: "token" },
+      value: "AAEC/w==",
+      binary: true,
+    };
+    const { text } = manifestOf(recorded, shown(binary));
+    expect(text).toContain('  token: "AAEC/w==" # base64');
+    expect(text).not.toContain("token: <");
+  });
+
   test("an unread document revealed takes its place, and the eyes below it move with it", () => {
     const manifest: ReleaseManifest = {
       text: [
