@@ -806,3 +806,58 @@ async fn a_pinned_header_s_failure_shows_only_on_the_version_of_the_secret_it_wa
     assert!(stale.is_empty(), "{stale:?}");
     assert_eq!(rig.watched.shown.revision, Some(1));
 }
+
+#[tokio::test(start_paused = true)]
+async fn the_shown_revision_s_and_a_history_line_s_failure_shows_only_on_the_version_of_the_secret_it_was_for()
+ {
+    let fake = Fake::default();
+    revision(&fake, 1, "deployed");
+    revision(&fake, 2, "pending-upgrade");
+    let mut rig = Rig::open(fake, None, ALL).await;
+    rig.until("both lines", |shown| {
+        shown.overview.is_some()
+            && shown.history.as_ref().is_some_and(|lines| {
+                lines.len() == 2 && lines.iter().all(|line| line.chart.is_some())
+            })
+    })
+    .await;
+    let line_1 = |shown: &Shown| shown.history.as_ref().unwrap()[1].clone();
+
+    rig.fake.state().forbidden.extend([path(1), path(2)]);
+    revision(&rig.fake, 1, "superseded");
+    revision(&rig.fake, 2, "failed");
+    rig.until("both refusals", |shown| {
+        shown.problem.is_some() && line_1(shown).problem.is_some()
+    })
+    .await;
+    assert!(rig.opened.showing().now().is_none());
+
+    rig.fake.state().forbidden.remove(&path(2));
+    rig.fake.state().gets_take = Duration::from_secs(2);
+    revision(&rig.fake, 1, "superseded");
+    revision(&rig.fake, 2, "failed");
+    let start = rig.watched.sent.len();
+    rig.drain_for(Duration::from_millis(1500)).await;
+    let said: Vec<_> = rig.watched.sent[start..]
+        .iter()
+        .filter_map(|batch| batch.problem.as_ref().map(|problem| problem.code))
+        .collect();
+    assert!(said.is_empty(), "the first rewrite's refusal: {said:?}");
+    assert!(
+        rig.opened.showing().now().is_some(),
+        "the page of an earlier version of the same Secret is shown again"
+    );
+    let line = line_1(&rig.watched.shown);
+    assert_eq!(
+        (
+            line.status.as_str(),
+            line.problem.map(|problem| problem.code)
+        ),
+        ("superseded", None)
+    );
+
+    rig.until("the new page and line 1's own refusal", |shown| {
+        shown.printed().contains(&"Status=failed".to_owned()) && line_1(shown).problem.is_some()
+    })
+    .await;
+}
