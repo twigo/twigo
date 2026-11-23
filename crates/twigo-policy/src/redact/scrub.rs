@@ -8,7 +8,7 @@ use base64::engine::general_purpose::STANDARD;
 use serde_json::{Number, Value};
 use twigo_ipc::{IpcError, Scrubbed};
 
-use super::{Field, Held, contents, decoded, holds_helm_release, whole_tokens_replaced};
+use super::{Field, Held, contents, decode_base64, holds_helm_release, whole_tokens_replaced};
 
 /// What takes the place of a value in a text.
 pub const HIDDEN: &str = "<hidden>";
@@ -139,7 +139,7 @@ pub fn secret_values(objects: &[&Value]) -> Vec<String> {
                         values.insert(STANDARD.encode(&text));
                     }
                     Field::Data => {
-                        if let Some(bytes) = decoded(&text) {
+                        if let Some(bytes) = decode_base64(text.as_bytes()) {
                             values.insert(String::from_utf8_lossy(&bytes).into_owned());
                         }
                     }

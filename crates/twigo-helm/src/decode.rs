@@ -1,14 +1,13 @@
 //! A release Secret's payload into a revision, as Helm's `decodeRelease`
 //! reads it ([v4.3.2](https://github.com/helm/helm/blob/v4.3.2/pkg/storage/driver/util.go#L62-L91),
-//! the same since v3.10.0): Helm's base64, then gzip where the bytes start
-//! with its magic `1f 8b 08`, else the bytes as JSON. Unlike Helm, Twigo
-//! inflates no more than [`BOUND`].
+//! the same since v3.10.0): Helm's base64 as Go's `base64.StdEncoding`
+//! reads it, then gzip where the bytes start with its magic `1f 8b 08`,
+//! else the bytes as JSON. Unlike Helm, Twigo inflates no more than
+//! [`BOUND`].
 
 use std::collections::BTreeMap;
 use std::io::{ErrorKind, Read};
 
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD;
 use flate2::read::MultiGzDecoder;
 use jiff::Timestamp;
 use serde::de::Error as _;
@@ -16,6 +15,7 @@ use serde::{Deserialize, Deserializer};
 use serde_json::error::Category;
 use serde_json::value::RawValue;
 use twigo_ipc::{ErrorCode, IpcError};
+use twigo_policy::redact::decode_base64;
 
 use crate::Status;
 
@@ -79,9 +79,8 @@ impl Stored<'_> {
         let release = self.release.ok_or_else(|| {
             self.refused(ErrorCode::HelmNotARelease, "the Secret holds no release")
         })?;
-        let bytes = STANDARD
-            .decode(release)
-            .map_err(|_| self.refused(ErrorCode::HelmNotARelease, "its release is not base64"))?;
+        let bytes = decode_base64(release)
+            .ok_or_else(|| self.refused(ErrorCode::HelmNotARelease, "its release is not base64"))?;
         if bytes.len() > GZIP.len() && bytes.starts_with(&GZIP) {
             inflated(&bytes).map_err(|failure| match failure {
                 Failure::TooLarge => {

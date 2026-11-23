@@ -12,7 +12,9 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 use twigo_ipc::{DataEntry, ErrorCode, IpcError, ManifestSecret, ReleaseManifest, UnreadDocument};
 
-use super::{Entry, Field, Held, decoded, entries, mask_secret_with, secret_values, value_of};
+use super::{
+    Entry, Field, Held, decode_base64, entries, mask_secret_with, secret_values, value_of,
+};
 
 /// What [`masked`] gives.
 pub struct Masked {
@@ -298,7 +300,7 @@ fn bytes(entry: &Entry<'_>) -> Vec<u8> {
     let text = entry.text();
     match entry.field {
         Field::StringData => text.as_bytes().to_vec(),
-        Field::Data => decoded(&text).unwrap_or_else(|| text.as_bytes().to_vec()),
+        Field::Data => decode_base64(text.as_bytes()).unwrap_or_else(|| text.as_bytes().to_vec()),
     }
 }
 
@@ -432,7 +434,8 @@ fn data_entries(secret: &Value) -> Vec<DataEntry> {
     let mut keyed = BTreeMap::new();
     for entry in entries(secret) {
         let binary = entry.field == Field::Data
-            && decoded(&entry.text()).is_some_and(|bytes| std::str::from_utf8(&bytes).is_err());
+            && decode_base64(entry.text().as_bytes())
+                .is_some_and(|bytes| std::str::from_utf8(&bytes).is_err());
         keyed.insert(
             entry.key,
             DataEntry {

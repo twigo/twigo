@@ -151,27 +151,29 @@ fn text(value: &Value) -> Cow<'_, str> {
     }
 }
 
-/// Go's `base64.StdEncoding`, which the API server decodes a Secret's
-/// `data` with: padding wanted, the bits after the last byte unchecked.
+/// Go's `base64.StdEncoding`: padding wanted, the bits after the last byte
+/// unchecked.
 const GO_BASE64: GeneralPurpose = GeneralPurpose::new(
     &alphabet::STANDARD,
     PAD.with_decode_allow_trailing_bits(true),
 );
 
-/// The bytes a value of `data` stands for, as the API server decodes it;
-/// None for text it refuses. Go's decoder skips `\r` and `\n` wherever they
-/// stand, as in a value written over several lines
+/// The bytes `text` stands for as Go's `base64.StdEncoding` decodes it,
+/// which the API server reads a Secret's `data` with and Helm the release
+/// it stores; None for text it refuses. Go's decoder skips `\r` and `\n`
+/// wherever they stand, as in a value written over several lines
 /// ([base64.go](https://github.com/golang/go/blob/go1.27.1/src/encoding/base64/base64.go#L307-L401)).
-fn decoded(text: &str) -> Option<Vec<u8>> {
-    let text = if text.contains(['\r', '\n']) {
-        Cow::Owned(text.replace(['\r', '\n'], ""))
+pub fn decode_base64(text: &[u8]) -> Option<Vec<u8>> {
+    let line_break = |byte: &u8| matches!(byte, b'\r' | b'\n');
+    let text = if text.iter().any(line_break) {
+        Cow::Owned(text.iter().copied().filter(|byte| !line_break(byte)).collect())
     } else {
         Cow::Borrowed(text)
     };
-    GO_BASE64.decode(text.as_bytes()).ok()
+    GO_BASE64.decode(&*text).ok()
 }
 
-/// How many bytes [`decoded`] gives of `text`, from its symbols and
+/// How many bytes [`decode_base64`] gives of `text`, from its symbols and
 /// padding, with nothing allocated; None where it gives none.
 fn decoded_len(text: &str) -> Option<usize> {
     let (mut symbols, mut padding) = (0, 0);
@@ -259,7 +261,7 @@ fn value_of(secret: &Value, key: &str) -> Result<(String, bool), IpcError> {
     if entry.field == Field::StringData {
         return Ok((text.into_owned(), false));
     }
-    Ok(match decoded(&text).map(String::from_utf8) {
+    Ok(match decode_base64(text.as_bytes()).map(String::from_utf8) {
         Some(Ok(decoded)) => (decoded, false),
         Some(Err(_)) => (text.into_owned(), true),
         None => (text.into_owned(), false),

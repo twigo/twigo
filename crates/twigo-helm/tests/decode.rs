@@ -75,6 +75,20 @@ fn a_release_stored_without_gzip_or_in_a_config_map_reads_as_any_other() {
 }
 
 #[test]
+fn a_release_whose_base64_is_broken_into_lines_reads_as_helm_reads_it() {
+    let mut alpha = secret("fmt-a.sh.helm.release.v1.alpha.v1");
+    let lines: Vec<&[u8]> = alpha.release.as_deref().unwrap().chunks(76).collect();
+    let mut wrapped = lines.join(&b'\n');
+    wrapped.extend_from_slice(b"\r\n");
+    alpha.release = Some(wrapped);
+    let read = summary(&alpha.stored()).unwrap();
+    assert_eq!(
+        (read.name(), read.revision(), read.status()),
+        ("alpha", 1, &Status::Superseded)
+    );
+}
+
+#[test]
 fn a_type_helm_never_wrote_is_read_and_named_when_it_fails() {
     let mut future = secret("fmt-d.sh.helm.release.v1.future.v1");
     assert_eq!(future.kind, "helm.sh/release.v2");
