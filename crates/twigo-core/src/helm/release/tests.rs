@@ -65,6 +65,18 @@ impl Rig {
     fn gets(&self, version: u32) -> usize {
         testing::gets(&self.fake, "a", "app", version)
     }
+
+    async fn drain_for(&mut self, span: Duration) {
+        let opened = &self.opened;
+        self.watched.drain_for(|seq| opened.ack(seq), span).await;
+    }
+}
+
+fn path(version: u32) -> String {
+    format!(
+        "/api/v1/namespaces/a/secrets/{}",
+        secret_name("app", version)
+    )
 }
 
 fn release_ref() -> ReleaseRef {
@@ -616,4 +628,124 @@ async fn two_revisions_compare_with_a_value_that_changed_marked_on_both_sides() 
     let gone = compare(ComparedPart::Values, 1, 7).await.unwrap_err();
     assert_eq!(gone.code, ErrorCode::HelmRevisionGone);
     tokio::time::sleep(Duration::from_millis(1)).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failing_page_is_asked_again_with_growing_pauses_and_a_refused_one_as_the_hub_asks() {
+    let fake = Fake::default();
+    revision(&fake, 1, "deployed");
+    fake.state().no_endpoints.insert(path(1));
+    let mut rig = Rig::open(fake, None, OVERVIEW).await;
+    rig.until("the failure", |shown| shown.problem.is_some())
+        .await;
+
+    rig.drain_for(Duration::from_secs(150)).await;
+    let down = rig.gets(1);
+    assert!(
+        (25..=64).contains(&down),
+        "{down} GETs in 150 s, where pauses of 0.5 s growing to 2.5-5 s give 26 to 62"
+    );
+
+    rig.fake.state().no_endpoints.remove(&path(1));
+    rig.fake.state().forbidden.insert(path(1));
+    rig.drain_for(Duration::from_secs(150)).await;
+    let refused = rig.gets(1) - down;
+    assert!(
+        (3..=6).contains(&refused),
+        "{refused} GETs in 150 s, where pauses of 30-60 s after the first refusal give 3 to 5"
+    );
+    assert_eq!(
+        rig.watched.shown.problem.as_ref().unwrap().code,
+        ErrorCode::ServerForbidden
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_relist_asks_history_s_failed_lines_and_a_pinned_editor_s_newest_again_at_once() {
+    let fake = Fake::default();
+    revision(&fake, 1, "superseded");
+    revision(&fake, 2, "deployed");
+    fake.state().forbidden.insert(path(2));
+    let parts = ReleaseParts {
+        history: true,
+        ..OVERVIEW
+    };
+    let mut rig = Rig::open(fake, Some(1), parts).await;
+    let refused = format!("Problem={}", ErrorCode::ServerForbidden.wire());
+    rig.until("both refusals", |shown| {
+        shown.printed().contains(&refused)
+            && shown
+                .history
+                .as_ref()
+                .is_some_and(|lines| lines[0].problem.is_some())
+    })
+    .await;
+    rig.drain_for(Duration::from_secs(1)).await;
+
+    rig.fake.state().forbidden.remove(&path(2));
+    testing::put(
+        &rig.fake,
+        &testing::release("b", "elsewhere", 1, "deployed"),
+        "deployed",
+    );
+    rig.fake.compact();
+    rig.fake.end_watches();
+    let relisted = tokio::time::Instant::now();
+    rig.until("the newest's header and line", |shown| {
+        shown.printed().contains(&"Chart=demo-1.2.0".to_owned())
+            && shown
+                .history
+                .as_ref()
+                .is_some_and(|lines| lines[0].chart.is_some())
+    })
+    .await;
+    assert!(
+        relisted.elapsed() < Duration::from_secs(1),
+        "asked again {:?} after the relist, where a refusal waits 30 s",
+        relisted.elapsed()
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_pinned_header_s_failure_shows_only_on_the_version_of_the_secret_it_was_for() {
+    let fake = Fake::default();
+    revision(&fake, 1, "deployed");
+    revision(&fake, 2, "deployed");
+    let mut rig = Rig::open(fake, Some(1), OVERVIEW).await;
+    rig.until("the newest's chart", |shown| {
+        shown.printed().contains(&"Chart=demo-1.2.0".to_owned())
+    })
+    .await;
+    let refused = format!("Problem={}", ErrorCode::ServerForbidden.wire());
+
+    rig.fake.state().forbidden.insert(path(3));
+    revision(&rig.fake, 3, "pending-upgrade");
+    rig.until("the refusal", |shown| shown.printed().contains(&refused))
+        .await;
+    rig.fake
+        .delete("secrets", Some("a"), &secret_name("app", 3));
+    rig.until("revision 2 again", |shown| {
+        let printed = shown.printed();
+        ["Revision=2", "Chart=demo-1.2.0", "Problem="]
+            .iter()
+            .all(|cell| printed.contains(&(*cell).to_owned()))
+    })
+    .await;
+
+    rig.fake.state().forbidden.insert(path(4));
+    revision(&rig.fake, 4, "pending-upgrade");
+    rig.until("the refusal", |shown| shown.printed().contains(&refused))
+        .await;
+    rig.fake.state().forbidden.remove(&path(4));
+    rig.fake.state().gets_take = Duration::from_secs(1);
+    revision(&rig.fake, 4, "deployed");
+    let blank = rig
+        .overviews_until("Status=deployed", "Chart=demo-1.4.0")
+        .await;
+    let stale: Vec<_> = blank
+        .iter()
+        .filter(|printed| printed.contains(&refused))
+        .collect();
+    assert!(stale.is_empty(), "{stale:?}");
+    assert_eq!(rig.watched.shown.revision, Some(1));
 }

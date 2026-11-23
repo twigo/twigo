@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use serde_json::json;
 use twigo_cache::fake::Fake;
 use twigo_ipc::{
@@ -249,4 +251,94 @@ async fn a_reveal_of_a_revision_the_release_no_longer_shows_is_refused() {
         panic!("the run went on: {told:?}");
     };
     assert_eq!(error.code, ErrorCode::ActionObjectChanged);
+}
+
+fn refused(told: &[OperationEvent]) -> ErrorCode {
+    let [OperationEvent::Failed { error }] = told else {
+        panic!("the run went on: {told:?}");
+    };
+    error.code
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_reveal_of_a_page_whose_rewrite_s_request_fails_is_refused_while_it_fails() {
+    let fake = Fake::default();
+    revision(&fake, 1, "pending-install");
+    let dir = tempfile::tempdir().unwrap();
+    let over = Over::new(&fake, dir.path());
+    let (id, mut watched) = over.open("a", "db", None, OVERVIEW).await;
+    watched
+        .until(over.ack(id), "revision 1", |shown| shown.overview.is_some())
+        .await;
+    let notes = PlanRequest::RevealHelm {
+        release: id,
+        revision: 1,
+        part: HelmPart::Notes,
+    };
+    let plan = over.core.command_plan("main", notes).await.unwrap();
+
+    fake.state()
+        .forbidden
+        .insert("/api/v1/namespaces/a/secrets/sh.helm.release.v1.db.v1".to_owned());
+    revision(&fake, 1, "deployed");
+    watched
+        .until(over.ack(id), "the refusal", |shown| shown.problem.is_some())
+        .await;
+    assert_eq!(
+        refused(&over.run(&plan).await),
+        ErrorCode::ActionObjectChanged
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn another_secret_at_the_shown_revision_takes_its_page_at_once_and_refuses_a_reveal_planned_on_the_old_one()
+ {
+    let fake = Fake::default();
+    revision(&fake, 1, "deployed");
+    let dir = tempfile::tempdir().unwrap();
+    let over = Over::new(&fake, dir.path());
+    let (id, mut watched) = over.open("a", "db", None, OVERVIEW).await;
+    watched
+        .until(over.ack(id), "revision 1", |shown| shown.overview.is_some())
+        .await;
+    let notes = || PlanRequest::RevealHelm {
+        release: id,
+        revision: 1,
+        part: HelmPart::Notes,
+    };
+    let early = over.core.command_plan("main", notes()).await.unwrap();
+    let late = over.core.command_plan("main", notes()).await.unwrap();
+
+    fake.state().gets_take = Duration::from_secs(2);
+    let mut again = testing::release("a", "db", 1, "deployed");
+    again["info"]["notes"] = json!("Reinstalled db");
+    testing::reinstall(&fake, &again, "deployed");
+    watched
+        .drain_for(over.ack(id), Duration::from_millis(500))
+        .await;
+    assert_eq!(
+        refused(&over.run(&early).await),
+        ErrorCode::ActionObjectChanged
+    );
+
+    watched
+        .until(over.ack(id), "the new page", |shown| {
+            shown
+                .notes
+                .as_ref()
+                .is_some_and(|notes| notes.text == "Reinstalled db")
+        })
+        .await;
+    assert_eq!(
+        refused(&over.run(&late).await),
+        ErrorCode::ActionObjectChanged
+    );
+    let now = over.core.command_plan("main", notes()).await.unwrap();
+    assert_eq!(
+        over.run(&now).await,
+        [OperationEvent::Revealed {
+            value: "Reinstalled db".to_owned(),
+            binary: false
+        }]
+    );
 }

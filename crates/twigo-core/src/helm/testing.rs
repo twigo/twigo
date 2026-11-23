@@ -69,6 +69,17 @@ pub(crate) fn put(fake: &Fake, release: &Value, status: &str) {
     put_payload(fake, namespace, name, version, status, &encoded(release));
 }
 
+/// `release` stored as [`put`] stores it, in another Secret of the same
+/// name, as an uninstall and an install in one change of the list.
+pub(crate) fn reinstall(fake: &Fake, release: &Value, status: &str) {
+    let namespace = release["namespace"].as_str().unwrap();
+    let name = release["name"].as_str().unwrap();
+    let version = u32::try_from(release["version"].as_u64().unwrap()).unwrap();
+    let uid = format!("{namespace}-{name}-{version}-again");
+    let secret = secret(namespace, name, version, status, &encoded(release), &uid);
+    fake.put("", "secrets", Some(namespace), secret);
+}
+
 /// A release Secret whose `release` key holds `payload` under the API's
 /// base64.
 pub(crate) fn put_payload(
@@ -79,28 +90,36 @@ pub(crate) fn put_payload(
     status: &str,
     payload: &[u8],
 ) {
-    fake.put(
-        "",
-        "secrets",
-        Some(namespace),
-        json!({
-            "kind": "Secret",
-            "apiVersion": "v1",
-            "type": "helm.sh/release.v1",
-            "metadata": {
-                "name": secret_name(name, version),
-                "namespace": namespace,
-                "uid": format!("{namespace}-{name}-{version}"),
-                "labels": {
-                    "owner": "helm",
-                    "name": name,
-                    "version": version.to_string(),
-                    "status": status,
-                },
+    let uid = format!("{namespace}-{name}-{version}");
+    let secret = secret(namespace, name, version, status, payload, &uid);
+    fake.put("", "secrets", Some(namespace), secret);
+}
+
+fn secret(
+    namespace: &str,
+    name: &str,
+    version: u32,
+    status: &str,
+    payload: &[u8],
+    uid: &str,
+) -> Value {
+    json!({
+        "kind": "Secret",
+        "apiVersion": "v1",
+        "type": "helm.sh/release.v1",
+        "metadata": {
+            "name": secret_name(name, version),
+            "namespace": namespace,
+            "uid": uid,
+            "labels": {
+                "owner": "helm",
+                "name": name,
+                "version": version.to_string(),
+                "status": status,
             },
-            "data": { "release": STANDARD.encode(payload) },
-        }),
-    );
+        },
+        "data": { "release": STANDARD.encode(payload) },
+    })
 }
 
 /// How many `GET`s the fake had of a revision's Secret.
@@ -221,6 +240,19 @@ impl Watched {
         };
         let within = tokio::time::timeout(Duration::from_secs(600), reached).await;
         assert!(within.is_ok(), "{what} not within ten minutes");
+    }
+
+    /// Reads and acknowledges every batch for `span`.
+    pub(crate) async fn drain_for(&mut self, ack: impl Fn(u32), span: Duration) {
+        let start = tokio::time::Instant::now();
+        while start.elapsed() < span {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            while let Ok(batch) = self.batches.try_recv() {
+                ack(batch.seq);
+                self.sent.push(batch.clone());
+                self.shown.apply(batch);
+            }
+        }
     }
 }
 

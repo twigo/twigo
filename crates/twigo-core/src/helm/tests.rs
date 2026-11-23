@@ -682,3 +682,121 @@ async fn a_relist_asks_a_failed_release_again_at_once() {
         relisted.elapsed()
     );
 }
+
+impl Rig {
+    /// Reads and acknowledges every batch for `span`.
+    async fn drain_for(&mut self, span: Duration) {
+        let start = tokio::time::Instant::now();
+        while start.elapsed() < span {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            while let Ok(batch) = self.batches.try_recv() {
+                self.list.ack(batch.seq);
+                self.seen.apply(batch);
+            }
+        }
+    }
+}
+
+fn path(release: &str, version: u32) -> String {
+    format!(
+        "/api/v1/namespaces/a/secrets/{}",
+        secret_name(release, version)
+    )
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failing_request_is_asked_again_with_growing_pauses_and_a_refused_one_as_the_hub_asks() {
+    let mut rig = Rig::over(&["a"], |fake| {
+        revision(fake, "a", "down", 1, "deployed");
+        revision(fake, "a", "refused", 1, "deployed");
+        fake.state().no_endpoints.insert(path("down", 1));
+        fake.state().forbidden.insert(path("refused", 1));
+    })
+    .await;
+    rig.until("both failures", |seen| {
+        seen.text("a", "down", "Problem") == ErrorCode::ServerUnavailable.wire()
+            && seen.text("a", "refused", "Problem") == ErrorCode::ServerForbidden.wire()
+    })
+    .await;
+
+    rig.drain_for(Duration::from_secs(150)).await;
+    let down = testing::gets(&rig.fake, "a", "down", 1);
+    assert!(
+        (25..=64).contains(&down),
+        "{down} GETs in 150 s, where pauses of 0.5 s growing to 2.5-5 s give 26 to 62"
+    );
+    let refused = testing::gets(&rig.fake, "a", "refused", 1);
+    assert!(
+        (3..=6).contains(&refused),
+        "{refused} GETs in 150 s, where pauses of 30-60 s give 3 to 6"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_request_s_failure_shows_only_on_the_version_of_the_secret_it_was_for() {
+    let mut rig = Rig::over(&["a"], |fake| {
+        revision(fake, "a", "app", 1, "deployed");
+        fake.state().forbidden.insert(path("app", 1));
+    })
+    .await;
+    let refused = ErrorCode::ServerForbidden.wire();
+    rig.until("the refusal", |seen| {
+        seen.text("a", "app", "Problem") == refused
+    })
+    .await;
+
+    rig.fake.state().gets_take = Duration::from_secs(1);
+    revision(&rig.fake, "a", "app", 2, "pending-upgrade");
+    let mut wrong = Vec::new();
+    while rig.seen.text("a", "app", "Chart") != "demo-1.2.0" {
+        let batch = rig.next().await;
+        rig.seen.apply(batch);
+        if rig.seen.text("a", "app", "Revision") == "2"
+            && rig.seen.text("a", "app", "Problem") != "-"
+        {
+            wrong.push(rig.seen.table());
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:?}");
+
+    rig.fake.state().gets_take = Duration::ZERO;
+    rig.fake.state().forbidden.insert(path("app", 3));
+    revision(&rig.fake, "a", "app", 3, "pending-upgrade");
+    rig.shows(&[&format!("app 3 pending-upgrade {refused}")])
+        .await;
+    gone(&rig.fake, "a", "app", 3);
+    rig.shows(&["app 2 pending-upgrade -"]).await;
+    assert_eq!(rig.seen.text("a", "app", "Chart"), "demo-1.2.0");
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_answer_twigo_cannot_read_keeps_the_label_s_status_and_is_asked_again() {
+    let mut rig = Rig::over(&["a"], |fake| {
+        fake.put(
+            "",
+            "secrets",
+            Some("a"),
+            json!({
+                "kind": "Secret",
+                "apiVersion": "v1",
+                "type": "helm.sh/release.v1",
+                "metadata": {
+                    "name": secret_name("app", 1),
+                    "namespace": "a",
+                    "uid": "a-app-1",
+                    "labels": { "owner": "helm", "name": "app", "version": "1", "status": "deployed" },
+                },
+                "data": { "release": "not base64!" },
+            }),
+        );
+    })
+    .await;
+    rig.until("the failure", |seen| {
+        seen.text("a", "app", "Problem") == ErrorCode::AnswerUndecodable.wire()
+    })
+    .await;
+    assert_eq!(rig.seen.text("a", "app", "Status"), "deployed");
+
+    rig.drain_for(Duration::from_secs(10)).await;
+    assert!(testing::gets(&rig.fake, "a", "app", 1) >= 3);
+}
