@@ -221,9 +221,13 @@ export function sections<T extends { readonly gvr: Gvr }>(
 const kindWords = (kind: string) =>
   kind.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(" ");
 
+/** A title inside a sentence: lower case, but for Helm, a name. */
+export const inText = (title: string): string =>
+  title.toLowerCase().replace(/^helm\b/, "Helm");
+
 /** One object of a kind as its list's title says the kind: `NetworkPolicy` → `network policy`. */
 export const singularTitle = (kind: string): string =>
-  kindWords(kind).join(" ").toLowerCase();
+  inText(kindWords(kind).join(" "));
 
 /**
  * A list's title from its kind's words and its resource, the plural that

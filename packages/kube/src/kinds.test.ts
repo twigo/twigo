@@ -23,6 +23,7 @@ test.each([
 test.each([
   ["Pod", "pod"],
   ["NetworkPolicy", "network policy"],
+  ["HelmRelease", "Helm release"],
 ])("%s counts as %s, as its title's words do", (kind, words) => {
   expect(singularTitle(kind)).toBe(words);
 });

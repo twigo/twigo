@@ -24,7 +24,7 @@ import {
   statusColumn,
   type Health,
 } from "../columns";
-import { singularTitle } from "../kinds";
+import { inText, singularTitle } from "../kinds";
 import type { ListServices } from "../services";
 import { parseListUri } from "../uri";
 import { caused, statusWord } from "./errorWords";
@@ -296,7 +296,7 @@ export function listEntries({
     const rows =
       list.total === 1 && kind !== undefined
         ? singularTitle(kind)
-        : list.title.toLowerCase();
+        : inText(list.title);
     return [
       { id: "rows", text: `${list.total.toLocaleString("en")} ${rows}` },
       ...(counts

@@ -149,6 +149,7 @@ test("a release that cannot be read counts as failing in the health filter and t
   expect(health("Failing").textContent).toBe("Failing2");
   expect(health("Healthy").textContent).toBe("Healthy3");
   expect(screen.getByText("2 failing")).toBeTruthy();
+  expect(screen.getByText("6 Helm releases")).toBeTruthy();
   fireEvent.click(health("Failing"));
   await settle(4);
   expect(

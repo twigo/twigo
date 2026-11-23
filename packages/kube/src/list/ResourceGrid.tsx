@@ -45,7 +45,7 @@ import {
   rowTone,
   statusColumn,
 } from "../columns";
-import { kindIcon } from "../kinds";
+import { inText, kindIcon } from "../kinds";
 import { rowState } from "../rowState";
 import { cellsOf, objectOfRow } from "../selection";
 import type { ListServices } from "../services";
@@ -421,7 +421,7 @@ function Grid({
     return (
       <ViewStatus
         status={snapshot.status}
-        what={title.toLowerCase()}
+        what={inText(title)}
         onRetry={onRetry}
         {...(resource.namespaced &&
           query.namespaces.length === 0 && {
@@ -441,7 +441,7 @@ function Grid({
     );
 
   const Icon = kindIcon(gvr);
-  const things = isHelmList(gvr) ? "Helm releases" : title.toLowerCase();
+  const things = inText(title);
   const filtered = text !== "" || picked !== undefined;
   const scope = resource.namespaced ? query.namespaces : [];
   const narrowed = scope.length > 0;
@@ -635,7 +635,7 @@ function GroupHeader({
         {group.value === "" ? "None" : group.value}
       </span>
       <span className="text-support">
-        <Count value={group.rows} /> {gvrTitle.toLowerCase()}
+        <Count value={group.rows} /> {inText(gvrTitle)}
       </span>
       {counts &&
         (["error", "warn"] as const)
