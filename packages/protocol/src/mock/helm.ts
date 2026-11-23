@@ -397,9 +397,10 @@ export class MockRelease {
     clearTimeout(this.#timer);
   }
 
-  /** The highest revision recorded below the one shown, as the core reads it from the labels. */
+  /** The highest revision recorded below the one shown, as the core reads it from the labels; none where the one shown is not recorded. */
   #previous(): number | null {
     const shown = this.shown;
+    if (!this.revision(shown)) return null;
     const below = (this.#release?.revisions ?? [])
       .map((each) => each.revision)
       .filter((each) => shown !== null && each < shown);

@@ -234,6 +234,7 @@ test("a revision Helm no longer keeps says so, and a release that is gone does n
   expect(batches[0]?.problem?.code).toBe("helm.revision-gone");
   expect(batches[0]?.values).toBeNull();
   expect(batches[0]?.latest).toBe(2);
+  expect(batches[0]?.previous).toBeNull();
   const gone = await open(null, ALL, "nothing");
   expect(gone.batches[0]?.exists).toBe(false);
 });
