@@ -156,7 +156,7 @@ describe("a manifest", () => {
     const before = manifestOf(manifest, shown());
     expect(before.glyphs.map(({ line }) => line)).toEqual([2, 9]);
     expect(before.glyphs[0]?.label).toBe(
-      "Reveal document 0 of the manifest (a/unread.yaml)",
+      "Reveal the document a/unread.yaml in the manifest",
     );
     const after = manifestOf(manifest, shown(document));
     expect(after.text).toContain("kind: ConfigMap\ndata:\n  a: b");
@@ -168,7 +168,7 @@ describe("a manifest", () => {
     ]);
     expect(after.text.split("\n")[9]).toContain("token: <5 bytes>");
     expect(after.glyphs[0]?.label).toBe(
-      "Hide document 0 of the manifest (a/unread.yaml)",
+      "Hide the document a/unread.yaml in the manifest",
     );
   });
 });

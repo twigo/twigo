@@ -262,8 +262,14 @@ export function revealWords(
         );
         return `${part.key} of secret ${secret?.name ?? ""} in the manifest`;
       }
-      case "document":
-        return `document ${String(part.document)} of the manifest`;
+      case "document": {
+        const source = shown?.manifest?.unread.find(
+          (each) => each.document === part.document,
+        )?.source;
+        return source === undefined || source === null
+          ? `document ${String(part.document + 1)} in the manifest`
+          : `the document ${source} in the manifest`;
+      }
       case "notes":
         return "the notes";
       case "description":

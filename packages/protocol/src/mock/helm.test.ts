@@ -458,7 +458,7 @@ test("a Reveal prints a command for a string or a boolean leaf of the values and
       "",
     ).question,
   ).toBe(
-    "Reveal document 3 of the manifest of release alpha (revision 1) in payments from prod-eu?",
+    "Reveal document 4 in the manifest of release alpha (revision 1) in payments from prod-eu?",
   );
 });
 

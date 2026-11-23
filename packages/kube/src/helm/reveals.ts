@@ -261,7 +261,10 @@ export function manifestOf(
       kind: "document",
       line,
       part: { kind: "document", document },
-      name: `document ${String(document)} of the manifest${source ? ` (${source})` : ""}`,
+      name:
+        source === null
+          ? `document ${String(document + 1)} in the manifest`
+          : `the document ${source} in the manifest`,
     });
   }
   edits.sort((a, b) => b.line - a.line);
