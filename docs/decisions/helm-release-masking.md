@@ -14,7 +14,7 @@ Helm, k9s, Freelens, Headlamp and Rancher show values and manifests in clear; Ar
 - **Values: every string and number masked.**
   Keys, booleans and nulls stay as stored, and every string and number reads `<N bytes>`, the chart's defaults as the person's values; a Reveal shows any leaf, any subtree or the whole document.
 - **Notes and descriptions: scrubbed, not hidden.**
-  Each value of the revision's Secrets, the manifest's and the hooks', is taken out where it stands as a whole token, as the apply preview scrubs a refusal, and each patched object a refusal quotes goes whole; a Reveal shows the whole text.
+  Each value of the revision's Secrets, the manifest's and the hooks', of four characters or more, is taken out where it stands as a whole token, as the apply preview scrubs a refusal, and each patched object a refusal quotes goes whole; a Reveal shows the whole text.
 - **A comparison: changed or not.**
   Rust compares the real values, and a masked value that differs from its counterpart reads `<N bytes, changed>` on both sides; values pair by path, a manifest's Secrets by namespace and name, a Secret whose document writes no namespace, or an empty one, in its release's.
 - **The manifest: its Secrets only.**
@@ -42,8 +42,9 @@ Helm, k9s, Freelens, Headlamp and Rancher show values and manifests in clear; Ar
 - A value of the values that is no Secret's stays in the notes, and so does a value of a Secret that the notes print in a spelling Twigo does not take out.
   A number, and a Secret's text that reads whole as a JSON number, is taken out as stored, as Go's `%v` prints it as a float64, which is how Helm's templates print a value read from YAML, as Go's `encoding/json` writes it, which `toJson` prints, and as its integer digits where it is whole.
   No other spelling is: a `printf` of its own verb or precision, such as `%.2f` or `%x`, a number that `| int` cut where it was not whole, digits padded or led by zeros, a number that stands inside a longer value of the Secret, such as a port in a URL, and any text a template makes of a value, such as `| upper` or `| b64enc` of a part of it.
-  A whole number takes its integer digits out too, so a Secret that holds `1`, or the text `1.0`, takes every `1` that stands alone out of the notes.
-- A value of a Secret with no letter or digit, such as `/` or a space, is never taken out of a text, as it cannot be told from the punctuation and the spaces around it: it stays in the notes, the descriptions and the words of a refusal.
+- A value of a Secret shorter than four characters, such as `0`, `1`, `on` or the text `1.0`, and any spelling of a number that short, such as the `1` Go prints for `1.0`, is never taken out of a text, as it cannot be told from the numbers and the words around it and hides no secret worth the garbling: taken out, a Secret's `0` would turn the default notes of `helm create`'s chart, rendered by helm v4.3.2 for a ClusterIP Service, into `{.items[<hidden>].metadata.name}` and `http://127.<hidden>.<hidden>.1:8080`, which give the value back and no longer run.
+  It stays in the notes, the descriptions, an edit's refusal and its preview's warnings, a password or a PIN of three characters among them; its base64, as `MQ==` for `1`, is long enough and still goes.
+- A value of a Secret with no letter or digit, such as `----` or spaces, is never taken out of a text either, as it cannot be told from the punctuation and the spaces around it.
 - The mock's releases are written from the decoder's own output by `twigo-helm`'s `mock` test, which checks that they hold no value of a Secret, in clear or as base64.
 
 ## Where it is implemented
