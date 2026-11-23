@@ -2,10 +2,10 @@
 //! 3.6): v3 and v4 store them alike, one Secret a revision. Pure, as
 //! `twigo-describe` is: no I/O, and no tokio.
 //!
-//! [`summary`] reads what a list row and a history line need, [`page`] what
-//! a release's editor shows: its values, manifest, notes and description
-//! are secret-grade, held in Rust and given out only masked, scrubbed or
-//! through [`Page::revealed`].
+//! [`summary`] reads what a release's row needs, [`page`] what a release's
+//! editor shows, History's lines among it: its values, manifest, notes and
+//! description are secret-grade, held in Rust and given out only masked,
+//! scrubbed or through [`Page::revealed`].
 
 mod decode;
 mod describe;

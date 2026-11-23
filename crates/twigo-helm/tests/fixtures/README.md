@@ -48,4 +48,4 @@ helm v3.22.1 printed the same bytes for those revisions' manifests, notes and va
 
 ## Left out
 
-A release behind 64 MiB of JSON white space is not recorded here: `tests/big.rs` builds that gzip bomb as it runs.
+A release behind 48 MiB of JSON white space is not recorded here: `tests/big.rs` builds that gzip bomb as it runs.

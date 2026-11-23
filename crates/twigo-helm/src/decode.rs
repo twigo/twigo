@@ -191,9 +191,8 @@ pub(crate) trait Revision {
     fn identity(&self) -> (&str, u32);
 }
 
-/// The fields of a release that a row or a history line reads; serde skips
-/// the rest, the chart's templates and files among them, without keeping
-/// them.
+/// The fields of a release that its row reads; serde skips the rest, the
+/// chart's templates and files among them, without keeping them.
 #[derive(Deserialize)]
 struct SummaryJson {
     #[serde(default)]
@@ -351,7 +350,7 @@ impl Summary {
     }
 }
 
-/// The revision `stored` holds, as a list row or a history line shows it.
+/// The revision `stored` holds, as its release's row shows it.
 pub fn summary(stored: &Stored<'_>) -> Result<Summary, IpcError> {
     let json: SummaryJson = stored.read()?;
     let chart = json
