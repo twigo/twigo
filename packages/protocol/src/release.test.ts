@@ -61,6 +61,17 @@ test("a release that is gone has no parts, and a revision it does not keep says 
   expect(gone.getSnapshot().overview).toBeUndefined();
   gone.close();
 
+  const pinnedGone = new ReleaseView(
+    createMockBackend(),
+    { ...ref, name: "nothing" },
+    { revision: 3, parts: ALL },
+  );
+  await later();
+  expect(pinnedGone.getSnapshot().exists).toBe(false);
+  expect(pinnedGone.getSnapshot().revision).toBeUndefined();
+  expect(pinnedGone.getSnapshot().problem).toBeUndefined();
+  pinnedGone.close();
+
   const again = new ReleaseView(createMockBackend(), ref, {
     revision: null,
     parts: ALL,

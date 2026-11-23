@@ -460,7 +460,7 @@ export class MockRelease {
       seq: ++this.#seq,
       status: this.#status,
       exists: release !== undefined,
-      revision: shown,
+      revision: release === undefined ? null : shown,
       latest: release?.latest.revision ?? null,
       previous: this.#previous(),
       problem,
