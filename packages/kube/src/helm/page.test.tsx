@@ -334,7 +334,7 @@ test("the header's Compare with Previous compares with the revision before that 
   expect(workbench.commands.enabled(command, lookup())).toBe(false);
 
   act(() => {
-    send({ seq: 51, previous: 1 });
+    send({ seq: 51, revision: 3, latest: 3, previous: 1 });
   });
   await settle(3);
   expect(workbench.commands.enabled(command, lookup())).toBe(true);
@@ -345,7 +345,7 @@ test("the header's Compare with Previous compares with the revision before that 
       kind: "release",
       release: { space: "prod-eu", namespace: "payments", name: "alpha" },
       from: 1,
-      to: 2,
+      to: 3,
       part: "values",
     }),
   );
@@ -393,6 +393,7 @@ async function openHistory(backend: Backend) {
   await settle(8);
   fireEvent.click(screen.getByRole("tab", { name: "History" }));
   await settle(6);
+  return workbench;
 }
 
 const revisionRow = (revision: number) => {
@@ -539,4 +540,37 @@ test("a marked revision that Helm prunes is no longer marked, so two marked rows
   await mark(3);
   expect(markedRevisions()).toEqual([3, 2]);
   expect(await menuOf(3)).toContain("Compare Values");
+});
+
+test("History's Compare with Previous compares with the revision before that Helm keeps, and is not offered on the oldest one it keeps", async () => {
+  const { backend, send } = core();
+  const workbench = await openHistory(backend);
+  act(() => {
+    send({
+      seq: 84,
+      revision: 3,
+      latest: 3,
+      history: [line(3, "deployed"), line(1, "superseded")],
+    });
+  });
+  await settle(4);
+  expect(await menuOf(1)).toContain("Compare with Current");
+  expect(await menuOf(1)).not.toContain("Compare with Previous");
+
+  const opened = vi.spyOn(workbench.editors, "open");
+  fireEvent.contextMenu(revisionRow(3));
+  await settle(2);
+  fireEvent.click(
+    screen.getByRole("menuitem", { name: "Compare with Previous" }),
+  );
+  await settle(2);
+  expect(opened).toHaveBeenLastCalledWith(
+    diffUri({
+      kind: "release",
+      release: { space: "prod-eu", namespace: "payments", name: "alpha" },
+      from: 1,
+      to: 3,
+      part: "values",
+    }),
+  );
 });
