@@ -284,9 +284,10 @@ struct Holds {
     whole: BTreeMap<&'static str, Option<String>>,
 }
 
-/// A key's value as the server would store it: its bytes, or for a `data`
-/// value that is no base64 its text, which the server refuses, so that it
-/// equals nothing the server stores.
+/// A key's value as the server would store it: its bytes, none for a null,
+/// or for a value the server refuses, since `data` and `stringData` hold
+/// only strings, one that is neither a string nor null or a `data` value
+/// that is no base64, its JSON, which equals nothing the server stores.
 #[derive(PartialEq, Eq)]
 enum Kept {
     Stored(Vec<u8>),
@@ -327,11 +328,14 @@ fn holds(secret: &Value) -> Holds {
 }
 
 fn kept(entry: &Entry<'_>) -> Kept {
-    let text = entry.text();
-    match entry.field {
-        Field::StringData => Kept::Stored(text.as_bytes().to_vec()),
-        Field::Data => decode_base64(text.as_bytes())
-            .map_or_else(|| Kept::Refused(text.into_owned()), Kept::Stored),
+    let refused = || Kept::Refused(entry.value.to_string());
+    match (entry.field, entry.value) {
+        (_, Value::Null) => Kept::Stored(Vec::new()),
+        (Field::StringData, Value::String(text)) => Kept::Stored(text.as_bytes().to_vec()),
+        (Field::Data, Value::String(text)) => {
+            decode_base64(text.as_bytes()).map_or_else(refused, Kept::Stored)
+        }
+        _ => refused(),
     }
 }
 
@@ -786,25 +790,45 @@ stringData: {broken: pw-unread
     }
 
     #[test]
-    fn a_data_value_that_is_no_base64_equals_no_value_the_server_stores() {
-        let secret = |data: &str| {
+    fn a_value_the_server_refuses_equals_no_value_it_stores() {
+        let secret = |fields: &str| {
             held(&format!(
-                "---\n# Source: a.yaml\nkind: Secret\nmetadata: {{name: db}}\ndata: {{{data}}}\n"
+                "---\n# Source: a.yaml\nkind: Secret\nmetadata: {{name: db}}\n{fields}\n"
             ))
         };
-        let (from, to) = (
-            secret("password: aHVudGVyMg=="),
-            secret("password: hunter2"),
-        );
-        let (before, after) = compared((&from, "default"), (&to, "default"));
-        for side in [&before, &after] {
-            assert!(side.contains("password: <7 bytes, changed>"), "{side}");
+        for (refused, stored, mask) in [
+            (
+                "data: {password: hunter2}",
+                "data: {password: aHVudGVyMg==}",
+                "password: <7 bytes, changed>",
+            ),
+            (
+                "stringData: {pin: 1234567}",
+                "stringData: {pin: \"1234567\"}",
+                "pin: <7 bytes, changed>",
+            ),
+            (
+                "stringData: {enabled: true}",
+                "stringData: {enabled: \"true\"}",
+                "enabled: <4 bytes, changed>",
+            ),
+            (
+                "data: {pin: 1234}",
+                "data: {pin: \"1234\"}",
+                "pin: <3 bytes, changed>",
+            ),
+        ] {
+            let (from, to) = (secret(refused), secret(stored));
+            let (before, after) = compared((&from, "default"), (&to, "default"));
+            for side in [&before, &after] {
+                assert!(side.contains(mask), "{refused}: {side}");
+            }
+            let (before, after) = compared((&from, "default"), (&from, "default"));
+            assert!(
+                !before.contains("changed") && !after.contains("changed"),
+                "{refused}: {before}"
+            );
         }
-        let (before, after) = compared((&to, "default"), (&to, "default"));
-        assert!(
-            !before.contains("changed") && !after.contains("changed"),
-            "{before}"
-        );
     }
 
     #[test]
