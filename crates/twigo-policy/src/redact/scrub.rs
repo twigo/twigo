@@ -523,12 +523,15 @@ mod tests {
         for stored in [
             json!({ "stringData": { "WORKERS": "1" } }),
             json!({ "stringData": { "API_VERSION": "1.0" } }),
+            json!({ "stringData": { "LOOPBACK": "127" } }),
             json!({ "data": { "REDIS_DB": "MA==" } }),
         ] {
             let mut secret = stored;
             secret["kind"] = json!("Secret");
             assert_eq!(scrub(notes, &secret_values(&[&secret])), notes, "{secret}");
         }
+        let name = json!({ "kind": "Secret", "stringData": { "NAME": "név" } });
+        assert_eq!(scrub("név: név", &secret_values(&[&name])), "név: név");
         let port = json!({ "kind": "Secret", "stringData": { "PORT": "8080" } });
         assert_eq!(
             scrub(notes, &secret_values(&[&port])),
