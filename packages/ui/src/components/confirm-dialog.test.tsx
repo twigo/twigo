@@ -62,10 +62,25 @@ test("focus starts on Cancel, so a stray Enter confirms nothing", () => {
   fireEvent.click(cancel);
   expect(onCancel).toHaveBeenCalledOnce();
   expect(onConfirm).not.toHaveBeenCalled();
-  expect(
-    screen.getByText("kubectl --context prod-eu delete namespaces payments"),
-  ).toBeTruthy();
   expect(screen.getByText("Every object in it goes with it.")).toBeTruthy();
+});
+
+test("the command line breaks only between its words, and reads as it was written", () => {
+  dialog();
+  const code = document.querySelector("code");
+  expect(code?.textContent).toBe(
+    "kubectl --context prod-eu delete namespaces payments",
+  );
+  const words = [...(code?.querySelectorAll("span") ?? [])];
+  expect(words.map((word) => word.textContent)).toEqual([
+    "kubectl",
+    "--context",
+    "prod-eu",
+    "delete",
+    "namespaces",
+    "payments",
+  ]);
+  for (const word of words) expect(word.className).toContain("inline-block");
 });
 
 test("Escape cancels", () => {
