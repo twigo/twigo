@@ -372,7 +372,7 @@ async fn run(
                                 }
                                 line => {
                                     let line = line.unwrap_or_else(|failed| {
-                                        unreadable(revision, failed.error())
+                                        undecoded(revision, UNREADABLE, Some(failed.error()))
                                     });
                                     lines.insert(revision, (stamp, line));
                                 }
@@ -652,7 +652,11 @@ async fn run(
                             problem: failed,
                             ..line.clone()
                         },
-                        None => labelled(revision, &held.row, failed),
+                        None => undecoded(
+                            revision,
+                            label(&held.row, "status").unwrap_or_default(),
+                            failed,
+                        ),
                     }
                 })
                 .collect::<Vec<_>>()
@@ -786,33 +790,19 @@ fn revision_of(row: &Row, name: &str) -> Option<u32> {
         .flatten()
 }
 
-/// A history line from a revision's labels, before it is decoded or where
-/// it cannot be.
-fn labelled(revision: u32, row: &Row, problem: Option<IpcError>) -> RevisionLine {
+/// A history line of a revision not decoded: by its label's status before
+/// it is decoded or while its request fails, and `unreadable`, as the list's
+/// row says it, where its Secret as it stands cannot be read.
+fn undecoded(revision: u32, status: &str, problem: Option<IpcError>) -> RevisionLine {
     RevisionLine {
         revision,
-        status: label(row, "status").unwrap_or_default().to_owned(),
+        status: status.to_owned(),
         updated: None,
         chart: None,
         app_version: None,
         description: None,
         rollback_of: None,
         problem,
-    }
-}
-
-/// The line of a revision whose Secret, as it stands, cannot be read, as
-/// the list's row says it.
-fn unreadable(revision: u32, error: IpcError) -> RevisionLine {
-    RevisionLine {
-        revision,
-        status: UNREADABLE.to_owned(),
-        updated: None,
-        chart: None,
-        app_version: None,
-        description: None,
-        rollback_of: None,
-        problem: Some(error),
     }
 }
 
