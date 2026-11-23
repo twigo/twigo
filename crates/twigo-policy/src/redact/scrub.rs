@@ -8,7 +8,7 @@ use base64::engine::general_purpose::STANDARD;
 use serde_json::Value;
 use twigo_ipc::{IpcError, Scrubbed};
 
-use super::{Field, Held, contents, decoded, whole_tokens_replaced};
+use super::{Field, Held, contents, decoded, holds_helm_release, whole_tokens_replaced};
 
 /// What takes the place of a value in a text.
 pub const HIDDEN: &str = "<hidden>";
@@ -116,12 +116,20 @@ pub fn scrubbed(mut error: IpcError, secrets: &[String]) -> IpcError {
 }
 
 /// Every string and number a Secret of `objects` holds in `data` and
-/// `stringData`, encoded and decoded, the longest first, so that what a
-/// refusal echoes is covered before any answer shows how the server stored
-/// it. Booleans and nulls carry no secret.
+/// `stringData`, encoded and decoded, and the `release` of a ConfigMap that
+/// holds a Helm release, the longest first, so that what a refusal echoes is
+/// covered before any answer shows how the server stored it; none of any
+/// other kind. Booleans and nulls carry no secret.
 pub fn secret_values(objects: &[&Value]) -> Vec<String> {
     let mut values = BTreeSet::new();
     for object in objects {
+        if holds_helm_release(object) {
+            values.extend(object["data"]["release"].as_str().map(str::to_owned));
+            continue;
+        }
+        if object["kind"] != "Secret" {
+            continue;
+        }
         for (field, value) in contents(object) {
             let mut texts = Vec::new();
             scalars(value, &mut texts);
@@ -217,7 +225,10 @@ mod tests {
 
     #[test]
     fn a_value_of_string_data_is_scrubbed_as_the_server_would_store_it() {
-        let secrets = secret_values(&[&json!({ "stringData": { "token": "typed-value" } })]);
+        let secrets = secret_values(&[&json!({
+            "kind": "Secret",
+            "stringData": { "token": "typed-value" },
+        })]);
         assert_eq!(
             scrub("token is dHlwZWQtdmFsdWU=", &secrets),
             format!("token is {HIDDEN}")
@@ -240,6 +251,10 @@ mod tests {
         assert_eq!(
             scrub("hunter2 or s3cret", &secret_values(&[&loose])),
             format!("{HIDDEN} or {HIDDEN}")
+        );
+        assert!(
+            secret_values(&[&json!({ "kind": "ConfigMap", "data": { "k": "v1" } })]).is_empty(),
+            "only a Secret's values"
         );
     }
 

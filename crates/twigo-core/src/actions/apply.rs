@@ -709,14 +709,10 @@ pub(crate) async fn preview(
             }
         };
 
-        let secrets = if secret {
-            let mut objects = vec![&edited];
-            objects.extend(&config);
-            objects.extend(&live);
-            secret_values(&objects)
-        } else {
-            Vec::new()
-        };
+        let mut objects = vec![&edited];
+        objects.extend(&config);
+        objects.extend(&live);
+        let secrets = secret_values(&objects);
 
         let holds_what_it_read =
             lock.is_some() && lock.as_deref() == live.as_ref().and_then(resource_version);
@@ -2078,6 +2074,7 @@ mod tests {
             format!(r#"Invalid value: "{quoted}": illegal base64 data at input byte 0"#),
         );
         let secrets = secret_values(&[&json!({
+            "kind": "Secret",
             "data": { "bad": "@@@" },
             "stringData": { "k": "line1\nsec\"ret<tag>&end" },
         })]);
@@ -2101,9 +2098,40 @@ mod tests {
     }
 
     #[test]
+    fn a_refusal_of_a_config_map_that_holds_a_helm_release_loses_the_release() {
+        let release =
+            "H4sIAAAAAAAC/6pWSkksSVSyUlAqzs9NVUjOzytJzSvRSy9KTVWyUlBKzs8tKEotLs5MKVbSqgUEAAD//w==";
+        let config_map = json!({
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": { "name": "sh.helm.release.v1.app.v1", "labels": { "owner": "helm" } },
+            "data": { "release": release },
+        });
+        let quoted = format!(
+            r#"{{\"apiVersion\":\"v1\",\"data\":{{\"release\":\"{release}\",\"x\":5}},\"kind\":\"ConfigMap\"}}"#
+        );
+        let refused = serde_json::from_value::<Status>(json!({
+            "status": "Failure",
+            "reason": "Invalid",
+            "code": 422,
+            "message": format!(
+                r#""" is invalid: patch: Invalid value: "{quoted}": json: cannot unmarshal number into Go struct field ConfigMap.data of type string"#
+            ),
+        }))
+        .unwrap();
+        let secrets = secret_values(&[&config_map]);
+        let Refused::Other(error) = Refused::of(&kube::Error::Api(Box::new(refused)), &secrets)
+        else {
+            panic!("an ordinary refusal");
+        };
+        assert!(!error.message.contains("H4sI"), "{}", error.message);
+    }
+
+    #[test]
     fn what_a_dry_run_s_answer_holds_is_scrubbed_too() {
-        let mut secrets = secret_values(&[&json!({ "stringData": { "a": "first" } })]);
-        let answer = json!({ "data": { "token": "dHlwZWQ=", "a": "Zmlyc3Q=" } });
+        let mut secrets =
+            secret_values(&[&json!({ "kind": "Secret", "stringData": { "a": "first" } })]);
+        let answer = json!({ "kind": "Secret", "data": { "token": "dHlwZWQ=", "a": "Zmlyc3Q=" } });
         add_answered(&mut secrets, &answer);
         assert_eq!(
             scrub("dHlwZWQ= or typed or first or Zmlyc3Q=", &secrets),
