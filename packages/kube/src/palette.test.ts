@@ -50,6 +50,7 @@ async function withEveryEnablement() {
     "helm.canHide",
     "helm.canRevealAll",
     "helm.canHideAll",
+    "helm.marked",
   ])
     workbench.keys.set(key, true);
   for (const key of [
@@ -86,7 +87,7 @@ const KINDS = [
   {
     group: "helm.sh",
     kind: "HelmRelease",
-    commands: /^helm\.(release|values?)\./,
+    commands: /^helm\.(release|values?|text)\./,
   },
 ] as const;
 
@@ -113,7 +114,8 @@ test("every registered command appears in the palette", async () => {
       (id) =>
         id !== "k8s.logs.open" &&
         id !== "k8s.shell.open" &&
-        !/^helm\.revisions?\./.test(id) &&
+        (!/^helm\.revisions?\./.test(id) ||
+          id === "helm.revisions.clearMarks") &&
         (!id.startsWith("k8s.forward.") || id === "k8s.forward.stopAll"),
     );
   expect(ids.length).toBeGreaterThan(25);
