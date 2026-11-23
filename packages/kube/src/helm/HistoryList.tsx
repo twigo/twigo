@@ -16,7 +16,7 @@ import {
   useListRegistration,
 } from "@twigo/workbench";
 import { Age } from "../object/values";
-import { problemWords, isQuiet, statusTone } from "./status";
+import { IN_FLIGHT_RELEASE, problemWords, isQuiet, statusTone } from "./status";
 import type { ReleaseStates } from "./states";
 
 const COLUMNS: readonly GridColumn[] = [
@@ -164,7 +164,7 @@ function StatusWord({
           tone === "error" ? "text-error" : "text-warn-foreground",
         )}
       >
-        <StatusDot tone={tone} pulse={line.status.startsWith("pending-")} />
+        <StatusDot tone={tone} pulse={IN_FLIGHT_RELEASE.test(line.status)} />
         {line.status}
       </span>
     );

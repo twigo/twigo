@@ -292,3 +292,47 @@ test("Copy helm Command is enabled where a command prints the view, and not on t
   await settle(6);
   expect(enabled()).toBe(true);
 });
+
+test("History pulses the dot of a revision that waits for Helm to end, uninstalling as the list does", async () => {
+  const { backend, send } = core();
+  const workbench = await mountKube(backend);
+  act(() => {
+    workbench.editors.open(release("alpha"));
+  });
+  await settle(8);
+  fireEvent.click(screen.getByRole("tab", { name: "History" }));
+  await settle(6);
+  const line = (revision: number, status: string) => ({
+    revision,
+    status,
+    chart: "demo-0.1.0",
+    appVersion: "1.0.0",
+    description: { text: "", hidden: false },
+    rollbackOf: null,
+    problem: null,
+    updated: "2026-11-22T20:14:04.237774Z",
+  });
+  act(() => {
+    send({
+      seq: 70,
+      history: [
+        line(3, "uninstalling"),
+        line(2, "pending-upgrade"),
+        line(1, "failed"),
+      ],
+    });
+  });
+  await settle(4);
+  const pulses = screen
+    .getAllByRole("row")
+    .slice(1)
+    .map((row) => [
+      row.querySelector('[data-column="revision"]')?.textContent,
+      row.querySelector(".animate-pulse") !== null,
+    ]);
+  expect(pulses).toEqual([
+    ["3", true],
+    ["2", true],
+    ["1", false],
+  ]);
+});
