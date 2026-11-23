@@ -178,12 +178,15 @@ fn scalars(value: &Value, found: &mut Vec<String>) {
 
 /// A number as serde_json writes it, as Go's `%v` prints it as a float64,
 /// which Helm's templates print a value read from YAML as, such as
-/// `1.234567e+06`, and as its integer digits where it is whole, as a
-/// refusal of an object Helm sent prints it.
+/// `1.234567e+06`, as Go's `encoding/json` writes it, which `toJson` prints
+/// and a refusal of an object Helm sent quotes, such as
+/// `1152921504606847000` for 2^60, and as its integer digits where it is
+/// whole, as `| int64` prints it.
 fn spellings(number: &Number) -> Vec<String> {
     let mut spellings = vec![number.to_string()];
     if let Some(float) = number.as_f64().filter(|float| float.is_finite()) {
         spellings.push(go_float(float));
+        spellings.push(go_json(float));
         if float.fract() == 0.0 && float.abs() < 1e21 {
             spellings.push(format!("{float:.0}"));
         }
@@ -192,35 +195,66 @@ fn spellings(number: &Number) -> Vec<String> {
     spellings
 }
 
-/// Go's `%v` of a float64: the shortest digits that read back as it, of 17
-/// the nearest, a tie to the even, with an exponent of at least two digits
-/// where it is under -4 or 6 and over
+/// Go's `%v` of a float64: its shortest digits, with an exponent of at
+/// least two digits where it is under -4 or 6 and over
 /// ([ftoa.go](https://github.com/golang/go/blob/go1.27.1/src/internal/strconv/ftoa.go#L347-L373)).
 fn go_float(float: f64) -> String {
-    let (sign, digits, exponent) = scientific(&format!("{float:e}"));
-    let (sign, digits, exponent) = if digits.len() < 17 {
-        (sign, digits, exponent)
-    } else {
-        scientific(&format!("{float:.16e}"))
-    };
+    let (sign, digits, exponent) = shortest(float);
     if float == 0.0 {
-        return format!("{sign}0");
+        format!("{sign}0")
+    } else if (-4..6).contains(&exponent) {
+        fixed(sign, &digits, exponent)
+    } else {
+        exponential(sign, &digits, exponent, 2)
     }
-    if !(-4..6).contains(&exponent) {
-        let (first, rest) = digits.split_at(1);
-        let point = if rest.is_empty() { "" } else { "." };
-        let at = if exponent < 0 { '-' } else { '+' };
-        return format!("{sign}{first}{point}{rest}e{at}{:02}", exponent.abs());
+}
+
+/// Go's `encoding/json` of a float64: its shortest digits without an
+/// exponent from 1e-6 to under 1e21, else with one of at least one digit
+/// ([encode.go](https://github.com/golang/go/blob/go1.27.1/src/encoding/json/encode.go#L583-L599)).
+fn go_json(float: f64) -> String {
+    let (sign, digits, exponent) = shortest(float);
+    if float == 0.0 {
+        format!("{sign}0")
+    } else if (1e-6..1e21).contains(&float.abs()) {
+        fixed(sign, &digits, exponent)
+    } else {
+        exponential(sign, &digits, exponent, 1)
     }
-    let point = usize::try_from(exponent + 1).unwrap_or(0);
+}
+
+/// The sign, the shortest digits that read back as `float`, the nearest
+/// of them and a tie to the even, as Go rounds them, and the exponent of
+/// the first: Rust's `{:e}` gives as many digits but rounds a tie up, and
+/// its `{:.*e}` rounds the exact value, a tie to the even.
+fn shortest(float: f64) -> (&'static str, String, i32) {
+    let (_, digits, _) = scientific(&format!("{float:e}"));
+    scientific(&format!("{float:.*e}", digits.len() - 1))
+}
+
+/// `digits` with the point where `exponent` puts it, padded with zeros.
+fn fixed(sign: &str, digits: &str, exponent: i32) -> String {
     if exponent < 0 {
         let zeros = "0".repeat(usize::try_from(-exponent - 1).unwrap_or(0));
-        format!("{sign}0.{zeros}{digits}")
-    } else if point >= digits.len() {
+        return format!("{sign}0.{zeros}{digits}");
+    }
+    let point = usize::try_from(exponent + 1).unwrap_or(0);
+    if point >= digits.len() {
         format!("{sign}{digits}{}", "0".repeat(point - digits.len()))
     } else {
         format!("{sign}{}.{}", &digits[..point], &digits[point..])
     }
+}
+
+/// `digits` as `d.ddde+XX`, its exponent of at least `width` digits.
+fn exponential(sign: &str, digits: &str, exponent: i32, width: usize) -> String {
+    let (first, rest) = digits.split_at(1);
+    let point = if rest.is_empty() { "" } else { "." };
+    let at = if exponent < 0 { '-' } else { '+' };
+    format!(
+        "{sign}{first}{point}{rest}e{at}{:0width$}",
+        exponent.unsigned_abs()
+    )
 }
 
 /// Rust's `{:e}` of a float: its sign, its digits and its exponent.
@@ -337,9 +371,27 @@ mod tests {
             (5e-324, "5e-324"),
             (1.797_693_134_862_315_7e308, "1.7976931348623157e+308"),
             (25_864_340_602_886.812, "2.5864340602886812e+13"),
+            (830_985_716_167_268.25, "8.309857161672682e+14"),
         ];
         for (value, go) in printed {
             assert_eq!(go_float(value), go, "{value:e}");
+        }
+        let written = [
+            (0.0, "0"),
+            (0.1, "0.1"),
+            (1_234_567.0, "1234567"),
+            (1e20, "100000000000000000000"),
+            (1_152_921_504_606_846_976.0, "1152921504606847000"),
+            (1e21, "1e+21"),
+            (1.5e300, "1.5e+300"),
+            (0.000_001, "0.000001"),
+            (-0.000_001_234, "-0.000001234"),
+            (1e-7, "1e-7"),
+            (1.5e-10, "1.5e-10"),
+            (830_985_716_167_268.25, "830985716167268.2"),
+        ];
+        for (value, go) in written {
+            assert_eq!(go_json(value), go, "{value:e}");
         }
     }
 
@@ -347,14 +399,16 @@ mod tests {
     fn a_number_is_scrubbed_in_each_spelling_it_is_printed_in() {
         let secrets = secret_values(&[&json!({
             "kind": "Secret",
-            "stringData": { "pin": 1_234_567.0, "port": 5432 },
+            "stringData": { "pin": 1_234_567.0, "port": 5432, "n": 1_152_921_504_606_846_976.0 },
         })]);
         assert_eq!(
             scrub(
-                "PIN 1.234567e+06, got &value.valueUnstructured{Value:1234567}, port 5432.",
+                "PIN 1.234567e+06, got &value.valueUnstructured{Value:1234567}, port 5432, n {Value:1152921504606847000}.",
                 &secrets
             ),
-            format!("PIN {HIDDEN}, got &value.valueUnstructured{{Value:{HIDDEN}}}, port {HIDDEN}.")
+            format!(
+                "PIN {HIDDEN}, got &value.valueUnstructured{{Value:{HIDDEN}}}, port {HIDDEN}, n {{Value:{HIDDEN}}}."
+            )
         );
     }
 
