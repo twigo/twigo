@@ -28,7 +28,6 @@ import { useResources } from "../discovery";
 import { yamlOfObject } from "../edit/object";
 import { ObjectHeader } from "../object/ObjectHeader";
 import { Overview } from "../object/Overview";
-import { TONE } from "../object/tone";
 import { ObjectViews } from "../object/ObjectViews";
 import { FULL_PAGE, useClientWidth, useHeld } from "../object/pageStage";
 import {
@@ -41,6 +40,7 @@ import { useReveal } from "../object/reveal";
 import { RevealButton } from "../object/RevealButton";
 import { refUri } from "../object/useObject";
 import { useHeader } from "../object/useHeader";
+import { foundTone } from "../object/verdict";
 import { Vitals } from "../object/Vitals";
 import type { ListServices } from "../services";
 import type { ReleaseInput } from "../uri";
@@ -156,13 +156,6 @@ function pageOverview(
   return withNotes(withDescription(overview, description), notes);
 }
 
-function foundTone(overview: Document | undefined) {
-  const tone = overview?.sections.find(
-    ({ id }) => id === "helm.diagnostics",
-  )?.tone;
-  return tone ? TONE[tone] : undefined;
-}
-
 interface ReleasePageProps {
   /** What the page's state is kept by: the editor's URI, or the list's for its inspector. */
   readonly uri: string;
@@ -268,7 +261,7 @@ export function ReleasePage({
   const { verdict, strip, line } = useHeader({
     gvr: HELM_RELEASES,
     header,
-    found: foundTone(snapshot.overview),
+    found: foundTone(snapshot.overview, "helm.diagnostics"),
     usage: undefined,
   });
   const [element, setElement] = useState<HTMLElement | null>(null);

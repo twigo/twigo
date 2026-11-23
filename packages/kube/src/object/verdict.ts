@@ -35,10 +35,11 @@ export function verdictOf(
   };
 }
 
-/** The tone of the core's findings of an object, which its Diagnostics section carries. */
-export function foundTone(overview: Overview | undefined): Tone | undefined {
-  const tone = overview?.sections.find(
-    ({ id }) => id === "core.diagnostics",
-  )?.tone;
+/** The tone of the core's findings of an object, or a release, which its Diagnostics section carries. */
+export function foundTone(
+  overview: Overview | undefined,
+  section = "core.diagnostics",
+): Tone | undefined {
+  const tone = overview?.sections.find(({ id }) => id === section)?.tone;
   return tone ? TONE[tone] : undefined;
 }
