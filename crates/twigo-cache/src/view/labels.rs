@@ -7,7 +7,7 @@
 
 use twigo_ipc::{ErrorCode, IpcError};
 
-use crate::meta::Labels;
+use crate::meta::{Labels, label};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Selector(Vec<Requirement>);
@@ -314,14 +314,8 @@ impl Selector {
     }
 
     pub fn matches(&self, labels: &Labels) -> bool {
-        let get = |key: &str| {
-            labels
-                .iter()
-                .find(|(name, _)| &**name == key)
-                .map(|(_, value)| &**value)
-        };
         self.0.iter().all(|requirement| {
-            let value = get(&requirement.key);
+            let value = label(labels, &requirement.key);
             match &requirement.op {
                 Op::In(values) => value.is_some_and(|v| values.iter().any(|w| w == v)),
                 Op::NotIn(values) => value.is_none_or(|v| values.iter().all(|w| w != v)),

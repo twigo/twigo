@@ -17,7 +17,6 @@ Every helm process ran with `TZ=UTC` but `delta`'s, and every call named the clu
 | `secrets/fmt-b.sh.helm.release.v1.beta.v1.json`, `.v2.json` | helm v3.22.1: `install beta charts/plain -n fmt-b --set message=hi-from-v3`, `upgrade beta charts/plain -n fmt-b --set message=second`, `uninstall beta -n fmt-b --keep-history`. Chart `plain` is apiVersion v1 with no NOTES.txt. Revision 2 is `uninstalled`; helm v3 writes `"deleted":""` where nothing was deleted. |
 | `secrets/fmt-b.sh.helm.release.v1.alpha.v1.json` | helm v4.3.2: `install alpha charts/plain -n fmt-b`, a second release named `alpha` in another namespace. |
 | `secrets/fmt-c.sh.helm.release.v1.delta.v1.json` | helm v4.3.2 with `TZ=Asia/Tokyo`: `install delta charts/plain -n fmt-c`. Its times end in `+09:00`; it has no user values, so its release has no `config`. |
-| `secrets/fmt-c.sh.helm.release.v1.pruned.v5.json` to `.v7.json` | helm v4.3.2: `install pruned charts/plain -n fmt-c`, then six `upgrade pruned charts/plain -n fmt-c --history-max 3 --set message=rev<N>`; helm deleted revisions 1 to 4. |
 | `secrets/fmt-c.sh.helm.release.v1.order.v1.json` | helm v4.3.2: `install order charts/plain -n fmt-c -f charts/order.yaml`, keys whose byte order and go-yaml's order differ, and YAML 1.1 words that helm stored as booleans. |
 | `configmaps/fmt-c.sh.helm.release.v1.gamma.v1.json` | helm v4.3.2 with `HELM_DRIVER=configmap`: `install gamma charts/plain -n fmt-c --set message=in-a-configmap`, then `upgrade gamma charts/plain -n fmt-c --set message=second`. Its `data.release` is Helm's base64 string itself, one base64 layer fewer than a Secret's. |
 | `secrets/fmt-a.sh.helm.release.v1.epsilon.v1.json`, `.v2.json` | helm v4.3.2, by `record-failed.sh` beside this file, on 2026-11-22: `install epsilon charts/failing -n fmt-a --server-side=false --set password=epsilon-password-r1`, then `upgrade epsilon charts/failing -n fmt-a --set password=epsilon-password-r2 --set 'extra=not base64!'`, which the API server refused with the patched Secret quoted. Revision 1 stays `deployed`, 2 is `failed`, and its description quotes the Secret's values; its notes print the password. |
@@ -41,12 +40,12 @@ A crafted Secret carries the labels `owner=helm`, `name`, `status`, `version` an
 
 ## What helm printed
 
-`get/` holds what helm v4.3.2 printed for each revision of `alpha` in `fmt-a` and of `beta`, `get manifest`, `get notes`, `get hooks`, `get values -o json` and `get metadata -o json`, in `<release>.r<revision>.v4.<part>`, `history -o json` of both in `<release>.v4.history.json`, and `get values -o json` of `order` in `order.r1.v4.values.json`.
-helm v3.22.1 printed the same bytes for those revisions' manifests, notes, hooks and values.
+`get/` holds what helm v4.3.2 printed for each revision of `alpha` in `fmt-a` and of `beta`, `get manifest`, `get notes`, `get values -o json` and `get metadata -o json`, in `<release>.r<revision>.v4.<part>`, `history -o json` of both in `<release>.v4.history.json`, and `get values -o json` of `order` in `order.r1.v4.values.json`.
+helm v3.22.1 printed the same bytes for those revisions' manifests, notes and values.
 `record-failed.sh` writes `epsilon`'s manifests, notes and history beside them.
 
-`get manifest` prints the stored manifest and a line feed; `get notes` prints `NOTES:`, a line feed, the stored notes and a line feed, or nothing for none; `get hooks` prints, for each hook, `---`, a `# Source:` line with its path, its stored manifest and a line feed.
+`get manifest` prints the stored manifest and a line feed; `get notes` prints `NOTES:`, a line feed, the stored notes and a line feed, or nothing for none.
 
 ## Left out
 
-A release at 99 % of Kubernetes' 1 MiB limit and a release behind 64 MiB of JSON white space are not recorded here: `tests/big.rs` builds a release near the limit and a gzip bomb as it runs.
+A release behind 48 MiB of JSON white space is not recorded here: `tests/big.rs` builds that gzip bomb as it runs.

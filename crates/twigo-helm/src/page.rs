@@ -43,8 +43,6 @@ pub struct Page {
     defaults: Held<Box<RawValue>>,
     manifest: Held<String>,
     masked: ReleaseManifest,
-    /// Its hooks as `helm get hooks` prints them, masked.
-    hooks_text: String,
     notes: Held<String>,
     description: Held<String>,
     /// The values of the Secrets of its manifest and its hooks.
@@ -62,7 +60,6 @@ pub(crate) struct StoredIn {
 /// What the chart says of itself beyond its name and versions.
 #[derive(Default)]
 pub(crate) struct Chart {
-    pub name: String,
     pub description: String,
     pub home: String,
     pub sources: Vec<String>,
@@ -85,14 +82,9 @@ pub fn page(stored: &Stored<'_>) -> Result<Page, IpcError> {
     let manifest = Held::new(json.manifest);
     let masked = manifest::masked(&manifest);
     let mut secret_values = masked.values;
-    let mut hooks_text = String::new();
     let mut hooks = Vec::with_capacity(json.hooks.len());
     for hook in json.hooks {
         let held = manifest::masked(&Held::new(hook.manifest));
-        hooks_text.push_str("---\n# Source: ");
-        hooks_text.push_str(&hook.path);
-        hooks_text.push('\n');
-        hooks_text.push_str(&held.manifest.text);
         secret_values = secret_values.joined(held.values);
         hooks.push(Hook {
             name: hook.name,
@@ -106,21 +98,19 @@ pub fn page(stored: &Stored<'_>) -> Result<Page, IpcError> {
         Some(chart) => (chart.metadata, chart.values),
         None => (None, None),
     };
-    let head = metadata.as_ref().map(|metadata| {
-        (
-            metadata.name.clone(),
-            metadata.version.clone(),
-            metadata.app_version.clone(),
-        )
-    });
-    let chart = metadata.map_or_else(Chart::default, |metadata| Chart {
-        name: metadata.name,
-        description: metadata.description,
-        home: metadata.home,
-        sources: metadata.sources,
-        kube_version: metadata.kube_version,
-        deprecated: metadata.deprecated,
-    });
+    let (head, chart) = match metadata {
+        Some(metadata) => (
+            Some((metadata.name, metadata.version, metadata.app_version)),
+            Chart {
+                description: metadata.description,
+                home: metadata.home,
+                sources: metadata.sources,
+                kube_version: metadata.kube_version,
+                deprecated: metadata.deprecated,
+            },
+        ),
+        None => (None, Chart::default()),
+    };
     Ok(Page {
         summary: Summary::of(
             json.name,
@@ -147,7 +137,6 @@ pub fn page(stored: &Stored<'_>) -> Result<Page, IpcError> {
         defaults: Held::new(defaults.unwrap_or_default()),
         manifest,
         masked: masked.manifest,
-        hooks_text,
         notes: Held::new(json.info.notes),
         description: Held::new(json.info.description),
         secret_values,
@@ -170,12 +159,6 @@ impl Page {
     /// The manifest as `helm get manifest` prints it, its Secrets masked.
     pub fn manifest(&self) -> &ReleaseManifest {
         &self.masked
-    }
-
-    /// The hooks as `helm get hooks` prints them, their Secrets masked;
-    /// no view shows them yet.
-    pub fn hooks(&self) -> &str {
-        &self.hooks_text
     }
 
     /// The rendered NOTES.txt, scrubbed of the values of the revision's

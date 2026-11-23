@@ -45,8 +45,7 @@ pub fn page(headers: &HeaderMap, body: Bytes) -> io::Result<Bytes> {
 /// the rest.
 fn decoded(body: &[u8]) -> io::Result<Vec<u8>> {
     let size = body.last_chunk().map_or(0, |size| {
-        usize::try_from(u32::from_le_bytes(*size))
-            .map_or(RESERVED_AT_MOST, |size| size.min(RESERVED_AT_MOST))
+        (u32::from_le_bytes(*size) as usize).min(RESERVED_AT_MOST)
     });
     let mut plain = Vec::with_capacity(size);
     PageDecoder::new(body).read_to_end(&mut plain)?;

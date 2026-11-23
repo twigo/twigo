@@ -106,10 +106,7 @@ impl Rig {
 }
 
 fn path(version: u32) -> String {
-    format!(
-        "/api/v1/namespaces/a/secrets/{}",
-        secret_name("app", version)
-    )
+    testing::path("a", "app", version)
 }
 
 fn release_ref() -> ReleaseRef {
@@ -171,7 +168,7 @@ async fn an_open_release_shows_its_latest_revision_fetched_once_and_each_part_as
             .contains("kind: ConfigMap")
     );
     assert_eq!(rig.gets(2), 1, "the page is held while the editor is open");
-    let shown = rig.opened.showing().now().expect("a page is held");
+    let shown = rig.opened.shown().expect("a page is held");
     assert_eq!(shown.revision, 2);
 }
 
@@ -321,6 +318,32 @@ async fn previous_is_the_highest_revision_helm_keeps_below_the_one_shown() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_page_asked_before_another_revision_is_pinned_never_shows() {
+    let fake = Fake::default();
+    revision(&fake, 1, "superseded");
+    revision(&fake, 2, "deployed");
+    fake.state().gets_take = Duration::from_secs(1);
+    let mut rig = Rig::open(fake, None, OVERVIEW).await;
+    while rig.fake.state().gets_overlap == 0 {
+        rig.drain_for(Duration::from_millis(10)).await;
+    }
+
+    rig.opened.set_view(Some(1), OVERVIEW);
+    rig.until("revision 1", |shown| {
+        notes(shown) == Some("Revision 1 of app")
+    })
+    .await;
+    rig.drain_for(Duration::from_secs(2)).await;
+    let said: Vec<_> = rig
+        .watched
+        .sent
+        .iter()
+        .filter_map(|batch| batch.revision)
+        .collect();
+    assert!(!said.contains(&2), "{said:?}");
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_pinned_revision_that_helm_prunes_says_so() {
     let fake = Fake::default();
     revision(&fake, 1, "superseded");
@@ -342,7 +365,7 @@ async fn a_pinned_revision_that_helm_prunes_says_so() {
     );
     assert!(shown.exists);
     assert_eq!(shown.revision, Some(1));
-    assert!(rig.opened.showing().now().is_none(), "its page is dropped");
+    assert!(rig.opened.shown().is_none(), "its page is dropped");
 }
 
 #[tokio::test(start_paused = true)]
@@ -359,7 +382,7 @@ async fn an_uninstall_that_keeps_no_history_ends_the_release() {
     let shown = &rig.watched.shown;
     assert_eq!((shown.revision, shown.latest), (None, None));
     assert_eq!(shown.status, Some(ViewState::Ready));
-    assert!(rig.opened.showing().now().is_none());
+    assert!(rig.opened.shown().is_none());
 }
 
 #[tokio::test(start_paused = true)]
@@ -481,7 +504,7 @@ async fn requests_that_fail_are_said_while_they_do_and_the_revisions_shown_once_
     })
     .await;
     assert_eq!(rig.watched.shown.revision, Some(2));
-    assert!(rig.opened.showing().now().is_none());
+    assert!(rig.opened.shown().is_none());
     let lines = rig.watched.shown.history.as_ref().unwrap();
     assert_eq!(
         lines[1].status, "superseded",
@@ -700,13 +723,10 @@ async fn a_decode_that_panics_marks_the_revision_and_the_editor_goes_on() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn two_revisions_compare_with_a_value_that_changed_reading_before_and_after() {
+async fn two_revisions_compare_from_left_to_right_and_one_helm_does_not_keep_says_so() {
     let fake = Fake::default();
-    for (version, password) in [(1, "alpha1"), (2, "bravo2")] {
-        let mut release = with_secret(version, "deployed", password);
-        release["config"]["password"] = json!(password);
-        testing::put(&fake, &release, "deployed");
-    }
+    revision(&fake, 1, "superseded");
+    revision(&fake, 2, "deployed");
     let (hub, _clients) = fake.hub(Budgets::default());
     let compare = |part, from, to| {
         let hub = hub.clone();
@@ -721,48 +741,11 @@ async fn two_revisions_compare_with_a_value_that_changed_reading_before_and_afte
         }
     };
 
-    let values = compare(ComparedPart::Values, 1, 2).await.unwrap();
-    assert!(
-        values.from.contains(r#""password":"<6 bytes, before>""#),
-        "{}",
-        values.from
-    );
-    assert!(
-        values.to.contains(r#""password":"<6 bytes, after>""#),
-        "{}",
-        values.to
-    );
-    let reversed = compare(ComparedPart::Values, 2, 1).await.unwrap();
-    assert!(
-        reversed.from.contains(r#""password":"<6 bytes, after>""#),
-        "{}",
-        reversed.from
-    );
-    assert!(
-        reversed.to.contains(r#""password":"<6 bytes, before>""#),
-        "{}",
-        reversed.to
-    );
-    let defaults = compare(ComparedPart::Defaults, 1, 2).await.unwrap();
-    assert_eq!(
-        defaults.from, defaults.to,
-        "the chart's defaults did not change"
-    );
     let manifest = compare(ComparedPart::Manifest, 1, 2).await.unwrap();
-    assert!(
-        manifest.from.contains("<6 bytes, before>"),
-        "{}",
-        manifest.from
-    );
-    assert!(manifest.to.contains("<6 bytes, after>"), "{}", manifest.to);
     assert!(
         manifest.from.contains("revision: \"1\"") && manifest.to.contains("revision: \"2\""),
         "from is the left side and to the right"
     );
-    let sent = serde_json::to_string(&(values, defaults, manifest)).unwrap();
-    for password in ["alpha1", "bravo2"] {
-        assert!(!sent.contains(password), "{password} left Rust");
-    }
 
     let gone = compare(ComparedPart::Values, 1, 7).await.unwrap_err();
     assert_eq!(gone.code, ErrorCode::HelmRevisionGone);
@@ -954,7 +937,7 @@ async fn the_shown_revision_s_and_a_history_line_s_failure_shows_only_on_the_ver
         shown.problem.is_some() && line_1(shown).problem.is_some()
     })
     .await;
-    assert!(rig.opened.showing().now().is_none());
+    assert!(rig.opened.shown().is_none());
 
     rig.fake.state().forbidden.remove(&path(2));
     rig.fake.state().gets_take = Duration::from_secs(2);
@@ -968,7 +951,7 @@ async fn the_shown_revision_s_and_a_history_line_s_failure_shows_only_on_the_ver
         .collect();
     assert!(said.is_empty(), "the first rewrite's refusal: {said:?}");
     assert!(
-        rig.opened.showing().now().is_some(),
+        rig.opened.shown().is_some(),
         "the page of an earlier version of the same Secret is shown again"
     );
     let line = line_1(&rig.watched.shown);

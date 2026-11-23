@@ -122,12 +122,16 @@ fn secret(
     })
 }
 
-/// How many `GET`s the fake had of a revision's Secret.
-pub(crate) fn gets(fake: &Fake, namespace: &str, name: &str, version: u32) -> usize {
-    let path = format!(
+pub(crate) fn path(namespace: &str, name: &str, version: u32) -> String {
+    format!(
         "/api/v1/namespaces/{namespace}/secrets/{}",
         secret_name(name, version)
-    );
+    )
+}
+
+/// How many `GET`s the fake had of a revision's Secret.
+pub(crate) fn gets(fake: &Fake, namespace: &str, name: &str, version: u32) -> usize {
+    let path = path(namespace, name, version);
     fake.state()
         .requests
         .iter()

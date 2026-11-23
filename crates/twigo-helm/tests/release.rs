@@ -223,7 +223,7 @@ fn notes_and_a_description_that_print_a_secret_s_value_are_scrubbed() {
         format!("NOTES:\n{stored}\n"),
         text("get/epsilon.r2.v4.notes.txt")
     );
-    let line = line(epsilon.summary(), Some(description.clone()));
+    let line = line(&epsilon);
     assert_eq!((line.revision, line.status.as_str()), (2, "failed"));
     assert_eq!(line.description, Some(description));
 }
@@ -493,7 +493,7 @@ fn an_uninstall_that_has_not_ended_says_so() {
 }
 
 #[test]
-fn a_hook_s_secret_is_masked_and_scrubbed_from_the_notes() {
+fn a_hook_s_secret_is_scrubbed_from_the_notes() {
     let release = serde_json::json!({
         "name": "hooked",
         "version": 1,
@@ -510,8 +510,4 @@ fn a_hook_s_secret_is_masked_and_scrubbed_from_the_notes() {
     });
     let hooked = built(&release);
     assert_eq!(hooked.notes().text, "The key is <hidden>.");
-    assert_eq!(
-        hooked.hooks(),
-        "---\n# Source: hooked/templates/key.yaml\napiVersion: v1\nkind: Secret\nmetadata:\n  name: hooked-key\nstringData:\n  key: <17 bytes>\n\n"
-    );
 }

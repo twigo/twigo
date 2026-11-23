@@ -6,7 +6,7 @@
 
 use twigo_ipc::{
     Block, Field, Finding, Fold, Header, Label, ObjectRef, Overview, Printed, Resource,
-    RevisionLine, Scrubbed, Section, Span, Tone, Value, Vital,
+    RevisionLine, Section, Span, Tone, Value, Vital,
 };
 
 use crate::{Page, Status, Summary};
@@ -65,14 +65,15 @@ pub fn overview(page: &Page, release: &Release<'_>) -> Overview {
 }
 
 /// A revision as `helm history` prints it, its description scrubbed.
-pub fn line(summary: &Summary, description: Option<Scrubbed>) -> RevisionLine {
+pub fn line(page: &Page) -> RevisionLine {
+    let summary = page.summary();
     RevisionLine {
         revision: summary.revision(),
         status: summary.status().word().to_owned(),
         updated: summary.last_deployed().map(|at| at.to_string()),
         chart: summary.chart(),
         app_version: summary.app_version().map(str::to_owned),
-        description,
+        description: Some(page.description()),
         rollback_of: summary.rollback_revision(),
         problem: None,
     }
@@ -281,6 +282,7 @@ fn hooks(page: &Page) -> Option<Section> {
 /// The chart, but for its versions, which the vitals hold.
 fn chart(page: &Page) -> Section {
     let chart = &page.chart;
+    let name = page.summary().chart_name().unwrap_or_default();
     let mut fields = Vec::new();
     let mut add = |label: &str, value: Value| {
         fields.push(Field {
@@ -290,13 +292,13 @@ fn chart(page: &Page) -> Section {
         });
     };
     for (label, text) in [
-        ("Name", &chart.name),
+        ("Name", name),
         ("Description", &chart.description),
         ("Home", &chart.home),
         ("Kubernetes", &chart.kube_version),
     ] {
         if !text.is_empty() {
-            add(label, Value::Text { text: text.clone() });
+            add(label, Value::Text { text: text.into() });
         }
     }
     if !chart.sources.is_empty() {
@@ -323,7 +325,7 @@ fn chart(page: &Page) -> Section {
         );
     }
     Section {
-        summary: match (chart.deprecated, chart.name.as_str()) {
+        summary: match (chart.deprecated, name) {
             (true, _) => text("deprecated"),
             (false, "") => Vec::new(),
             (false, name) => text(name),

@@ -191,9 +191,8 @@ pub(crate) trait Revision {
     fn identity(&self) -> (&str, u32);
 }
 
-/// The fields of a release that a row or a history line reads; serde skips
-/// the rest, the chart's templates and files among them, without keeping
-/// them.
+/// The fields of a release that its row reads; serde skips the rest, the
+/// chart's templates and files among them, without keeping them.
 #[derive(Deserialize)]
 struct SummaryJson {
     #[serde(default)]
@@ -255,7 +254,7 @@ fn time<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Timestamp>,
     }
 }
 
-/// A revision as a list row or a history line shows it.
+/// A revision as its release's row shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Summary {
     name: String,
@@ -327,6 +326,10 @@ impl Summary {
             .map(|chart| format!("{}-{}", chart.name, chart.version))
     }
 
+    pub(crate) fn chart_name(&self) -> Option<&str> {
+        self.chart.as_ref().map(|chart| chart.name.as_str())
+    }
+
     pub(crate) fn chart_version(&self) -> Option<&str> {
         self.chart.as_ref().map(|chart| chart.version.as_str())
     }
@@ -351,7 +354,7 @@ impl Summary {
     }
 }
 
-/// The revision `stored` holds, as a list row or a history line shows it.
+/// The revision `stored` holds, as its release's row shows it.
 pub fn summary(stored: &Stored<'_>) -> Result<Summary, IpcError> {
     let json: SummaryJson = stored.read()?;
     let chart = json
@@ -443,8 +446,6 @@ pub(crate) struct HookJson {
     pub name: String,
     #[serde(default)]
     pub kind: String,
-    #[serde(default)]
-    pub path: String,
     #[serde(default)]
     pub manifest: String,
     #[serde(default)]

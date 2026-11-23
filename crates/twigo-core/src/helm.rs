@@ -3,6 +3,7 @@
 //! release, an open release's revisions, and two revisions compared.
 
 mod fetch;
+mod reads;
 mod release;
 mod releases;
 
@@ -15,7 +16,7 @@ use twigo_ipc::{
     ReleaseBatch, ReleaseListQuery,
 };
 
-pub(crate) use release::{Discovery, Opened, Showing, ShownPage};
+pub(crate) use release::{Discovery, Opened, ShownPage};
 use releases::Releases;
 
 /// The seam of a list of releases, as `TWIGO_PANIC` names it.
@@ -23,16 +24,20 @@ const ITEM: &str = "helm releases";
 /// What Helm lists its releases by (`List` in its Secrets driver).
 const OWNER: &str = "owner=helm";
 
+fn secret_resource() -> Resource {
+    Resource {
+        group: String::new(),
+        version: "v1".to_owned(),
+        resource: "secrets".to_owned(),
+        namespaced: true,
+    }
+}
+
 /// The metadata of the release Secrets of `namespaces` in `context`.
 fn secrets(context: String, namespaces: Vec<String>) -> Query {
     Query {
         context,
-        resource: Resource {
-            group: String::new(),
-            version: "v1".to_owned(),
-            resource: "secrets".to_owned(),
-            namespaced: true,
-        },
+        resource: secret_resource(),
         format: RowFormat::Metadata,
         namespaces,
         selectors: Selectors {

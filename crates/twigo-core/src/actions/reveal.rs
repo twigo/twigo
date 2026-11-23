@@ -11,7 +11,7 @@ use twigo_policy::redact::{secret_value, values};
 use super::shell_line;
 use crate::Core;
 use crate::bus::{self, Finished, Planned};
-use crate::helm::{Showing, ShownPage};
+use crate::helm::ShownPage;
 
 pub(crate) fn reveal(
     core: &Core,
@@ -91,21 +91,21 @@ pub(crate) fn reveal_helm(
     revision: u32,
     part: HelmPart,
 ) -> Result<Planned, IpcError> {
-    let (context, namespace, name, showing) = core.releases.with(window, release, |opened| {
+    let (context, namespace, name, shown_page) = core.releases.with(window, release, |opened| {
         (
             opened.context().to_owned(),
             opened.namespace().to_owned(),
             opened.name().to_owned(),
-            opened.showing(),
+            opened.shown(),
         )
     })?;
     let connection = core.policy.connection(&context);
-    let ShownPage { page, secret, .. } = shown(&showing, revision)?;
+    let ShownPage { page, secret, .. } = shown(shown_page, revision)?;
     let (value, binary) = page.revealed(&part)?;
     let words = Words::of(&part, &page);
     let release_words = format!("release {name} (revision {revision}) in {namespace}");
-    let get = |verb: &str| {
-        let revision = revision.to_string();
+    let shown_revision = revision.to_string();
+    let get = |verb: &str, rest: &[&str]| {
         let mut line = vec![
             "helm",
             "get",
@@ -116,28 +116,24 @@ pub(crate) fn reveal_helm(
             "--kube-context",
             &context,
             "--revision",
-            &revision,
+            &shown_revision,
         ];
-        let template;
-        match verb {
-            "values" => line.extend(["-o", "json"]),
-            "all" => {
-                template = format!("{{{{index .Release.Config {}}}}}", index_of(&part));
-                line.extend(["--template", &template]);
-            }
-            _ => {}
-        }
+        line.extend(rest);
         shell_line(&line)
     };
     let command_line = match &part {
         HelmPart::Values {
             defaults: false,
             path,
-        } if path.is_empty() => Some(get("values")?),
+        } if path.is_empty() => Some(get("values", &["-o", "json"])?),
         HelmPart::Values {
-            defaults: false, ..
-        } if prints_as_go_does(&value) => Some(get("all")?),
-        HelmPart::Manifest => Some(get("manifest")?),
+            defaults: false,
+            path,
+        } if prints_as_go_does(&value) => {
+            let template = format!("{{{{index .Release.Config {}}}}}", index_of(path));
+            Some(get("all", &["--template", &template])?)
+        }
+        HelmPart::Manifest => Some(get("manifest", &[])?),
         _ => None,
     };
     let (this, window) = (core.this.clone(), window.to_owned());
@@ -169,10 +165,11 @@ pub(crate) fn reveal_helm(
                 let core = this
                     .upgrade()
                     .ok_or_else(|| IpcError::new(ErrorCode::AppQuitting, "Twigo is quitting"))?;
-                let showing = core
-                    .releases
-                    .with(&window, release, |opened| opened.showing())?;
-                let now = shown(&showing, revision)?;
+                let now = shown(
+                    core.releases
+                        .with(&window, release, |opened| opened.shown())?,
+                    revision,
+                )?;
                 if now.secret != secret {
                     return Err(changed(revision));
                 }
@@ -184,9 +181,8 @@ pub(crate) fn reveal_helm(
 }
 
 /// The page of `revision`, refused unless the release shows it.
-fn shown(showing: &Showing, revision: u32) -> Result<ShownPage, IpcError> {
-    showing
-        .now()
+fn shown(shown: Option<ShownPage>, revision: u32) -> Result<ShownPage, IpcError> {
+    shown
         .filter(|shown| shown.revision == revision)
         .ok_or_else(|| changed(revision))
 }
@@ -275,10 +271,7 @@ fn prints_as_go_does(value: &str) -> bool {
 
 /// The arguments of `index` that reach a path's leaf from
 /// `.Release.Config`: keys as Go strings, list indexes as numbers.
-fn index_of(part: &HelmPart) -> String {
-    let HelmPart::Values { path, .. } = part else {
-        return String::new();
-    };
+fn index_of(path: &[ValueStep]) -> String {
     path.iter()
         .map(|step| match step {
             ValueStep::Key(key) => go_string(key),

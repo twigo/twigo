@@ -16,13 +16,17 @@ use http_body_util::BodyExt;
 use kube::client::Body;
 use serde::Deserialize;
 use twigo_cache::encoding;
-use twigo_cache::hub::{Hub, Resource};
+use twigo_cache::hub::Hub;
 use twigo_helm::Stored;
 use twigo_ipc::{ErrorCode, IpcError};
 use twigo_kube::client::Clients;
 
 /// The seam of one revision's decode, as `TWIGO_PANIC` names it.
 pub(crate) const DECODE: &str = "helm decode";
+
+/// How many revisions a list or a History fetches at once, as the metrics
+/// poller keeps to four requests (ARCHITECTURE 3.6).
+pub(super) const AT_ONCE: usize = 4;
 
 /// The name Helm gives the Secret of a release's revision
 /// ([`makeKey`](https://github.com/helm/helm/blob/v4.3.2/pkg/storage/storage.go#L327-L329)).
@@ -82,13 +86,7 @@ async fn fetched(
     namespace: &str,
     name: &str,
 ) -> Result<(HeaderMap, Bytes), Failed> {
-    let secrets = Resource {
-        group: String::new(),
-        version: "v1".to_owned(),
-        resource: "secrets".to_owned(),
-        namespaced: true,
-    };
-    let path = secrets
+    let path = super::secret_resource()
         .object_path(Some(namespace), name)
         .map_err(Failed::Read)?;
     let request = Request::get(path)

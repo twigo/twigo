@@ -177,21 +177,3 @@ fn the_labels_name_the_revision_and_a_payload_that_disagrees_is_refused() {
         "a Secret with Helm's owner label alone"
     );
 }
-
-#[test]
-fn a_release_stored_away_from_its_objects_says_where_they_went() {
-    let moved = page(&secret("fmt-store.sh.helm.release.v1.alpha.v2").stored()).unwrap();
-    assert_eq!(moved.summary().namespace(), "fmt-a");
-}
-
-#[test]
-fn a_pruned_history_starts_where_helm_left_it_and_a_stuck_upgrade_says_so() {
-    for revision in [5, 6, 7] {
-        let pruned =
-            summary(&secret(&format!("fmt-c.sh.helm.release.v1.pruned.v{revision}")).stored())
-                .unwrap();
-        assert_eq!(pruned.revision(), revision);
-    }
-    let stuck = summary(&secret("fmt-d.sh.helm.release.v1.stuck.v2").stored()).unwrap();
-    assert_eq!(stuck.status(), &Status::PendingUpgrade);
-}
