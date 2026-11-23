@@ -366,6 +366,13 @@ async fn a_pinned_revision_that_helm_prunes_says_so() {
     assert!(shown.exists);
     assert_eq!(shown.revision, Some(1));
     assert!(rig.opened.shown().is_none(), "its page is dropped");
+
+    rig.opened.set_view(None, OVERVIEW);
+    rig.until("the latest", |shown| {
+        shown.problem.is_none() && notes(shown) == Some("Revision 2 of app")
+    })
+    .await;
+    assert_eq!(rig.watched.shown.revision, Some(2));
 }
 
 #[tokio::test(start_paused = true)]
