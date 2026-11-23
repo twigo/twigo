@@ -310,8 +310,8 @@ async function compared(from: number, to: number) {
   await settle(6);
   const diff = screen.getByTestId("diff");
   const sides = {
-    left: diff.dataset["original"] ?? "",
-    right: diff.dataset["modified"] ?? "",
+    left: diff.dataset.original ?? "",
+    right: diff.dataset.modified ?? "",
     said: document.body.textContent,
   };
   cleanup();
