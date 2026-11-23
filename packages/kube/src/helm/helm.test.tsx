@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import type { Backend } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import {
   mountKube,
@@ -7,7 +8,7 @@ import {
   settle,
   withScreenSize,
 } from "../../test/workbench";
-import { helmUri } from "../uri";
+import { diffUri, helmUri } from "../uri";
 import { helmCommand } from "./commands";
 import { isQuiet, statusTone } from "./status";
 import { ReleaseStates } from "./states";
@@ -203,4 +204,40 @@ test("Copy helm Command prints what helm prints for the view shown, with the con
   expect(at("history", 4)).toBe(
     "helm history api --namespace payments --kube-context prod-eu",
   );
+});
+
+test("a comparison of two revisions asks the core once, however often the editor area draws again", async () => {
+  const mock = createMockBackend("ready");
+  let compares = 0;
+  const backend: Backend = {
+    invoke: (command: string, request: never) => {
+      if (command === "helm_compare") compares++;
+      return mock.invoke(command as never, request);
+    },
+    subscribe: mock.subscribe.bind(mock),
+  };
+  const workbench = await mountKube(backend);
+  const diff = diffUri({
+    kind: "release",
+    release: { space: "prod-eu", namespace: "payments", name: "alpha" },
+    from: 1,
+    to: 2,
+    part: "values",
+  });
+  act(() => {
+    workbench.editors.open(diff);
+  });
+  await settle(6);
+  expect(compares).toBe(1);
+  for (const other of ["helm-list://prod-eu", "k8s-list://prod-eu/v1/pods"]) {
+    act(() => {
+      workbench.editors.open(other, { preview: false });
+    });
+    await settle(6);
+    act(() => {
+      workbench.editors.open(diff);
+    });
+    await settle(6);
+  }
+  expect(compares).toBe(1);
 });

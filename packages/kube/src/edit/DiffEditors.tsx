@@ -32,7 +32,7 @@ export function DiffEditor({
   discovery,
 }: EditorProps & { edits: EditServices; discovery: Discovery }) {
   const [attempt, reopen] = useReopen();
-  const input = parseDiffUri(uri);
+  const input = useMemo(() => parseDiffUri(uri), [uri]);
   if (!input) {
     return <EmptyState title="Not a comparison">{uri}</EmptyState>;
   }
