@@ -16,7 +16,7 @@ Helm, k9s, Freelens, Headlamp and Rancher show values and manifests in clear; Ar
 - **Notes and descriptions: scrubbed, not hidden.**
   Each value of the revision's Secrets, the manifest's and the hooks', of four characters or more, is taken out where it stands as a whole token, as the apply preview scrubs a refusal, and each patched object a refusal quotes goes whole; a Reveal shows the whole text.
 - **A comparison: changed or not.**
-  Rust compares the real values, and a masked value that differs from its counterpart reads `<N bytes, changed>` on both sides; values pair by path, a manifest's Secrets by namespace and name, a Secret whose document writes no namespace, or an empty one, in its release's.
+  Rust compares the real values, and a masked value that differs from its counterpart reads `<N bytes, before>` on the lower revision's side and `<N bytes, after>` on the higher's, whichever is asked for first, so that the diff marks its line; values pair by path, a manifest's Secrets by namespace and name, a Secret whose document writes no namespace, or an empty one, in its release's.
 - **The manifest: its Secrets only.**
   Every `kind: Secret`, at a document's root or inside `items` at any depth, is masked as an open Secret is, and every other document goes as it stands.
   A Reveal shows one key of one Secret, one document Twigo could not read, or the whole manifest as `helm get manifest` prints it, every Secret and unread document at once, behind one confirmation.
