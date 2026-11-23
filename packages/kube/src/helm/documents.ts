@@ -1,3 +1,5 @@
+import { landmarksOf, outlineOf } from "../edit/outline";
+
 /** A document of a release's manifest: where it starts and ends, and the file its `# Source:` comment names. */
 export interface Document {
   readonly name: string;
@@ -32,4 +34,21 @@ export function documentsOf(text: string): readonly Document[] {
         ]
       : [];
   });
+}
+
+/** The offsets of the top-level keys of every document of a text, which a manifest has several of. */
+export function topKeysOf(
+  text: string,
+): readonly (readonly [number, number])[] {
+  const separators = [...text.matchAll(/^---[ \t]*$/gm)];
+  const starts = [
+    0,
+    ...separators.map(({ index, 0: found }) => index + found.length + 1),
+  ];
+  const ends = [...separators.map(({ index }) => index), text.length];
+  return starts.flatMap((start, at) =>
+    landmarksOf(outlineOf(text.slice(start, ends[at]))).keys.map(
+      ([from, to]) => [start + from, start + to] as const,
+    ),
+  );
 }

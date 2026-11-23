@@ -1,18 +1,20 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useEditorShown } from "@twigo/workbench";
 import { useWorkbench } from "@twigo/workbench";
+import { topKeyMarks } from "../edit/landmarks";
 import { editor, textOptions, Uri } from "../edit/monaco";
-import { documentsOf } from "./documents";
-import { MASK, type Glyph } from "./reveals";
+import { documentsOf, topKeysOf } from "./documents";
+import type { Glyph } from "./reveals";
 
 /** The scheme of the models of a release's texts. */
 const MODELS = "twigo-helm";
 
 /**
- * A release's text, read-only YAML, with its masked values in the quiet role
- * and an eye in the gutter of each line that holds one, which reveals it, and
- * on the line of each that was revealed, which hides it. Only a text on
- * screen has a Monaco view, as a diff does (ARCHITECTURE 4.3).
+ * A release's text, read-only YAML as a Secret's is, with an eye in the gutter
+ * of each line that holds a masked value, which reveals it, and on the first
+ * line of each that was revealed, which hides it, the revealed lines on a
+ * muted fill. Only a text on screen has a Monaco view, as a diff does
+ * (ARCHITECTURE 4.3).
  */
 export default function MaskedText({
   id,
@@ -40,6 +42,7 @@ export default function MaskedText({
   useEffect(() => {
     latest.current = { text, glyphs, onGlyph, onCursor };
   });
+  const keys = useMemo(() => topKeysOf(text), [text]);
   const place = useRef<editor.ICodeEditorViewState | null>(null);
   useEffect(() => {
     const element = host.current;
@@ -114,21 +117,19 @@ export default function MaskedText({
       model.setValue(text);
       if (where) instance.restoreViewState(where);
     }
-    const masked = model.getLinesContent().flatMap((content, index) =>
-      [...content.matchAll(new RegExp(MASK, "g"))].map(
-        ({ index: from, 0: found }) => ({
-          range: {
-            startLineNumber: index + 1,
-            startColumn: from + 1,
-            endLineNumber: index + 1,
-            endColumn: from + 1 + found.length,
-          },
-          options: { inlineClassName: "twigo-masked" },
-        }),
-      ),
-    );
     marks.current?.set([
-      ...masked,
+      ...topKeyMarks(keys, model),
+      ...glyphs
+        .filter(({ revealed }) => revealed)
+        .map((glyph) => ({
+          range: {
+            startLineNumber: glyph.line,
+            startColumn: 1,
+            endLineNumber: glyph.to,
+            endColumn: 1,
+          },
+          options: { isWholeLine: true, className: "twigo-revealed" },
+        })),
       ...glyphs.map((glyph) => ({
         range: {
           startLineNumber: glyph.line,
@@ -142,7 +143,7 @@ export default function MaskedText({
         },
       })),
     ]);
-  }, [text, glyphs, shown]);
+  }, [text, glyphs, keys, shown]);
   useEffect(() => {
     const instance = view.current;
     if (!symbols || !shown || !instance) return;

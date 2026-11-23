@@ -98,6 +98,7 @@ export function ValuesTree({
     if (revealed || row.masked) {
       glyphs.set(id, {
         line: 0,
+        to: 0,
         part,
         revealed,
         label: `${revealed ? "Hide" : "Reveal"} ${name}`,

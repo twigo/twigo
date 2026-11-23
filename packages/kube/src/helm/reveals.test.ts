@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import type { HelmPart, ReleaseManifest } from "@twigo/protocol";
 import HELM from "../../../protocol/src/mock/helm.json";
 import { yamlOfJson, yamlOfObject } from "../edit/object";
-import { documentsOf } from "./documents";
+import { documentsOf, topKeysOf } from "./documents";
 import {
   hiddenCount,
   manifestOf,
@@ -54,7 +54,7 @@ describe("values", () => {
     expect(next).toContain("extra:\n  - <3 bytes>");
     const glyphs = valueGlyphs(next, false, shown(answer));
     expect(glyphs.filter(({ revealed }) => revealed)).toMatchObject([
-      { line: 1, part: user("database") },
+      { line: 1, to: 3, part: user("database") },
     ]);
     expect(glyphs.filter(({ revealed }) => !revealed)).toHaveLength(2);
     expect(hiddenCount(next)).toBe(2);
@@ -71,6 +71,9 @@ describe("values", () => {
     const leaf: Shown = { part: defaults, value: '"x"', binary: false };
     expect(spliced({ a: "<1 bytes>" }, shown(leaf))).toEqual({ a: "x" });
     expect(valueGlyphs("a: x\n", false, shown(leaf))).toEqual([]);
+    expect(valueGlyphs("a: x\nb: y\n", false, shown(whole))).toMatchObject([
+      { line: 1, to: 3, revealed: true },
+    ]);
     expect(
       valueGlyphs("a: x\n", true, shown(leaf)).map(({ revealed }) => revealed),
     ).toEqual([true]);
@@ -161,10 +164,14 @@ describe("a manifest", () => {
     const after = manifestOf(manifest, shown(document));
     expect(after.text).toContain("kind: ConfigMap\ndata:\n  a: b");
     expect(after.text).not.toContain("could not read");
-    const eyes = after.glyphs.map(({ line, revealed }) => [line, revealed]);
+    const eyes = after.glyphs.map(({ line, to, revealed }) => [
+      line,
+      to,
+      revealed,
+    ]);
     expect(eyes).toEqual([
-      [2, true],
-      [10, false],
+      [2, 5, true],
+      [10, 10, false],
     ]);
     expect(after.text.split("\n")[9]).toContain("token: <5 bytes>");
     expect(after.glyphs[0]?.label).toBe(
@@ -191,6 +198,25 @@ test("the documents of a manifest are listed by the file their Source comment na
     { name: "Document 3", from: 7, to: 7 },
     { name: "a/three.yaml", from: 9, to: 10 },
   ]);
+});
+
+test("the top-level keys of every document of a manifest are found, each by its offsets in the whole text", () => {
+  const text = [
+    "---",
+    "# Source: a/one.yaml",
+    "kind: A",
+    "spec:",
+    "  kind: nested",
+    "---",
+    "# Source: a/two.yaml",
+    "apiVersion: v1",
+  ].join("\n");
+  expect(topKeysOf(text).map(([from, to]) => text.slice(from, to))).toEqual([
+    "kind",
+    "spec",
+    "apiVersion",
+  ]);
+  expect(topKeysOf("")).toEqual([]);
 });
 
 describe("a Secret inside a List's items", () => {

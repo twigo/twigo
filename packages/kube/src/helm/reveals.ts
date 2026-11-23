@@ -17,6 +17,8 @@ export const partKey = (part: HelmPart): string => JSON.stringify(part);
 /** A line of a text and what the eye in its gutter asks of it: to reveal a masked value, or to hide a revealed one. */
 export interface Glyph {
   readonly line: number;
+  /** The last line of what the eye is about: its own for a hidden value, the end of the text revealed for a revealed one. */
+  readonly to: number;
   readonly part: HelmPart;
   readonly revealed: boolean;
   /** What the eye says, for its tooltip and its name. */
@@ -120,6 +122,7 @@ export function valueGlyphs(
     const at = entryAt(outline, part.path);
     glyphs.push({
       line: at ? at.entry.from : 1,
+      to: at ? at.entry.to : lines.length,
       part,
       revealed: true,
       label: `Hide ${part.path.length === 0 ? "the values" : pathLabel(part.path)}`,
@@ -132,6 +135,7 @@ export function valueGlyphs(
     const part: HelmPart = { kind: "values", defaults, path: [...path] };
     glyphs.push({
       line,
+      to: line,
       part,
       revealed: false,
       label: `Reveal ${path.length === 0 ? "the values" : pathLabel(path)}`,
@@ -283,6 +287,7 @@ export function manifestOf(
       glyphs.push({
         line: edit.line,
         glyph: {
+          to: edit.line,
           part: edit.part,
           revealed: false,
           label: `Reveal ${edit.name}`,
@@ -291,6 +296,7 @@ export function manifestOf(
       continue;
     }
     let delta = 0;
+    let last = edit.line;
     if (edit.kind === "key") {
       const row = lines[at] ?? "";
       lines[at] = row.replace(
@@ -302,13 +308,23 @@ export function manifestOf(
       const text = value.value.replace(/\n$/, "").split("\n");
       lines.splice(at, replaced, ...text);
       delta = text.length - replaced;
+      last = edit.line + text.length - 1;
     }
     if (delta !== 0) {
-      for (const each of glyphs) if (each.line > edit.line) each.line += delta;
+      for (const each of glyphs) {
+        if (each.line <= edit.line) continue;
+        each.line += delta;
+        each.glyph = { ...each.glyph, to: each.glyph.to + delta };
+      }
     }
     glyphs.push({
       line: edit.line,
-      glyph: { part: edit.part, revealed: true, label: `Hide ${edit.name}` },
+      glyph: {
+        to: last,
+        part: edit.part,
+        revealed: true,
+        label: `Hide ${edit.name}`,
+      },
     });
   }
   return {

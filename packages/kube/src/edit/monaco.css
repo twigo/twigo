@@ -7,11 +7,12 @@
   color: var(--support);
 }
 
-/* A Helm release's masked values, as a Secret's YAML shows them: the quiet role, and an eye in the gutter. */
-.monaco-editor .view-line .twigo-masked:not(.unexpected-closing-bracket) {
-  color: var(--quiet);
+/* The lines of a Helm release's text that a Reveal showed, on the fill a Secret's revealed value has. */
+.twigo-revealed {
+  background-color: var(--muted);
 }
 
+/* An eye in the gutter of a Helm release's masked line. */
 .twigo-eye,
 .twigo-eye-off {
   cursor: pointer;
