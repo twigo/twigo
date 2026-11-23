@@ -254,7 +254,7 @@ fn time<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Timestamp>,
     }
 }
 
-/// A revision as a list row or a history line shows it.
+/// A revision as its release's row shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Summary {
     name: String,
