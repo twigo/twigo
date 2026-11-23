@@ -1,7 +1,8 @@
 //! One revision of a release, fetched with one `GET` of its Secret through
 //! the UI's clients and decoded on the blocking pool, where a panic marks
 //! that revision alone. The Secret's bytes go once it is decoded. A request
-//! that fails says nothing of the revision, so it is asked again.
+//! that fails, or whose answer Twigo cannot read, says nothing of the
+//! revision, so it is asked again.
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -32,7 +33,8 @@ pub(crate) fn secret_name(release: &str, revision: u32) -> String {
 /// Why a revision was not read.
 pub(crate) enum Failed {
     /// The request failed: no clients for the context, a lost connection, a
-    /// refusal or a server's error. It says nothing of the revision.
+    /// refusal, a server's error, or an answer Twigo cannot read. It says
+    /// nothing of the revision.
     Request(IpcError),
     /// The Secret is gone, or what it holds cannot be read, which stands
     /// until it changes.
@@ -59,15 +61,12 @@ pub(crate) async fn decoded<T: Send + 'static>(
     let clients = hub.clients(context).await.map_err(Failed::Request)?;
     let (headers, body) = fetched(&clients, namespace, name).await?;
     let read = move || {
-        read(
-            encoding::page(&headers, body).map_err(|_| damaged())?,
-            decode,
-        )
+        let body = encoding::page(&headers, body).map_err(|_| Failed::Request(damaged()))?;
+        read(body, decode)
     };
     twigo_panic::contain(DECODE, twigo_panic::blocking(read))
         .await
-        .unwrap_or_else(|_| Err(IpcError::panicked("reading this revision")))
-        .map_err(Failed::Read)
+        .unwrap_or_else(|_| Err(Failed::Read(IpcError::panicked("reading this revision"))))
 }
 
 fn damaged() -> IpcError {
@@ -147,9 +146,11 @@ struct Data<'a> {
 }
 
 /// The Secret's JSON, its `data.release` with the API's base64 taken off and
-/// the body dropped before `decode` reads it.
-fn read<T>(body: Bytes, decode: fn(&Stored<'_>) -> Result<T, IpcError>) -> Result<T, IpcError> {
-    let undecodable = |what: &str| IpcError::new(ErrorCode::AnswerUndecodable, what.to_owned());
+/// the body dropped before `decode` reads it; an answer that is no Secret
+/// Twigo can read fails as its request.
+fn read<T>(body: Bytes, decode: fn(&Stored<'_>) -> Result<T, IpcError>) -> Result<T, Failed> {
+    let undecodable =
+        |what: &str| Failed::Request(IpcError::new(ErrorCode::AnswerUndecodable, what.to_owned()));
     let secret: Secret<'_> = serde_json::from_slice(&body).map_err(|error| {
         undecodable(&format!(
             "the Secret is not one Twigo can read: it breaks at line {}, column {}",
@@ -177,4 +178,5 @@ fn read<T>(body: Bytes, decode: fn(&Stored<'_>) -> Result<T, IpcError>) -> Resul
         labels: &labels,
         release: release.as_deref(),
     })
+    .map_err(Failed::Read)
 }
