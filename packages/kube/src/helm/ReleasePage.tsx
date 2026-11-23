@@ -31,6 +31,7 @@ import { ObjectHeader } from "../object/ObjectHeader";
 import { Overview } from "../object/Overview";
 import { TONE } from "../object/tone";
 import { ObjectViews } from "../object/ObjectViews";
+import { FULL_PAGE, useClientWidth, useHeld } from "../object/pageStage";
 import {
   OBJECT_FILTERED,
   OBJECT_SUBJECT,
@@ -221,10 +222,12 @@ export function ReleasePage({
   onReopen,
 }: ReleasePageProps) {
   const workbench = useWorkbench();
-  const { backend, keys, menus } = workbench;
+  const { backend, keys, menus, spaces, colors } = workbench;
   const { releases: states } = services;
   useChanges(states.changes);
   useChanges(menus.changes);
+  useChanges(spaces.changes);
+  useChanges(colors.changes);
   // @todo: drop this read once the owner has chosen the release editor's views (tabs:four, tabs:split, tabs:page), keeping the choice's branch
   const { tabs: layout } = variants();
   const asked = layout === "page" ? "page" : states.tab(uri);
@@ -303,6 +306,7 @@ export function ReleasePage({
     usage: undefined,
   });
   const [element, setElement] = useState<HTMLElement | null>(null);
+  const wide = useHeld(useClientWidth(element), FULL_PAGE);
   const [text, setText] = useState<TextState>();
   const notes = shown.get(partKey({ kind: "notes" }));
   const description = shown.get(partKey({ kind: "description" }));
@@ -458,6 +462,8 @@ export function ReleasePage({
       split={layout === "split"}
     />
   );
+  const space = spaces.list.find((each) => each.id === release.space);
+  const color = space && colors.ofSpace(space);
   const problem = snapshot.problem;
   const exists = snapshot.exists || snapshot.status.state !== "ready";
   return (
@@ -476,6 +482,8 @@ export function ReleasePage({
         controls={controls((command) => {
           void workbench.commands.execute(command, lookup, JSON.parse(subject));
         })}
+        {...(wide &&
+          space && { space: { name: space.contexts.join(" + "), color } })}
         namespace={release.namespace}
         owner={undefined}
         node={undefined}

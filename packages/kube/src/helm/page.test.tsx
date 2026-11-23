@@ -22,7 +22,7 @@ vi.mock("./MaskedText", () => ({
   default: () => <div data-testid="masked-text" />,
 }));
 
-withScreenSize(1600);
+const screenSize = withScreenSize(1600);
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -81,6 +81,20 @@ async function revealNotes(scope: HTMLElement) {
   fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
   await settle(4);
 }
+
+test("the release's full page leads the header's second line with the space, as an object's does, from 900 px of its own width", async () => {
+  await open(release("alpha"));
+  const editor = page("alpha");
+  const crumbs = () =>
+    within(editor)
+      .queryAllByTitle("prod-eu")
+      .filter((each) => !each.closest("[inert]"));
+  expect(crumbs()).toHaveLength(1);
+  screenSize.resize(editor, 883);
+  expect(crumbs()).toHaveLength(0);
+  screenSize.resize(editor, 900);
+  expect(crumbs()).toHaveLength(1);
+});
 
 test("a value revealed in the inspector is of the release it showed: another release of the same revision, and the same release shown again, read it masked", async () => {
   await openList(createMockBackend("ready"), "helm-list://prod-eu");
