@@ -16,7 +16,7 @@ import {
   withScreenSize,
 } from "../../test/workbench";
 import { DWELL_MS } from "../Details";
-import { helmUri } from "../uri";
+import { diffUri, helmUri } from "../uri";
 
 withScreenSize(1600);
 
@@ -290,6 +290,41 @@ test("Copy helm Command is enabled where a command prints the view, and not on t
   fireEvent.click(screen.getByRole("tab", { name: "Your values" }));
   await settle(6);
   expect(enabled()).toBe(true);
+});
+
+test("the header's Compare with Previous compares with the revision before that Helm keeps, and is not offered where it keeps none", async () => {
+  const { backend, send } = core();
+  const workbench = await mountKube(backend);
+  act(() => {
+    workbench.editors.open(release("alpha"));
+  });
+  await settle(8);
+  const lookup = () =>
+    workbench.keys.lookup(screen.getByRole("tab", { name: "Overview" }));
+  const command = "helm.release.compareWithPrevious";
+  expect(workbench.commands.enabled(command, lookup())).toBe(true);
+  act(() => {
+    send({ seq: 50, previous: null });
+  });
+  await settle(3);
+  expect(workbench.commands.enabled(command, lookup())).toBe(false);
+
+  act(() => {
+    send({ seq: 51, previous: 1 });
+  });
+  await settle(3);
+  expect(workbench.commands.enabled(command, lookup())).toBe(true);
+  const opened = vi.spyOn(workbench.editors, "open");
+  await act(() => workbench.commands.execute(command, lookup()));
+  expect(opened).toHaveBeenLastCalledWith(
+    diffUri({
+      kind: "release",
+      release: { space: "prod-eu", namespace: "payments", name: "alpha" },
+      from: 1,
+      to: 2,
+      part: "values",
+    }),
+  );
 });
 
 test("History pulses the dot of a revision that waits for Helm to end, uninstalling as the list does", async () => {

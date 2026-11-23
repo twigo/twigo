@@ -16,7 +16,12 @@ import { OBJECT_SUBJECT } from "../object/pageStates";
 import { LIST_URI, objectOf } from "../selection";
 import type { ListServices } from "../services";
 import { diffUri, helmUri, listUri, parseListUri } from "../uri";
-import { HELM_NO_COMMAND, HELM_REVISION, HELM_TAB } from "./keys";
+import {
+  HELM_NO_COMMAND,
+  HELM_PREVIOUS,
+  HELM_REVISION,
+  HELM_TAB,
+} from "./keys";
 
 /** Where a command of a release applies, as a when-expression. */
 const HELM = "resource.group == helm.sh";
@@ -111,12 +116,13 @@ export function registerHelm(
     return namespace === undefined ? undefined : { space, namespace, name };
   };
   const contextOf = (space: string) => spaces.get(space)?.contexts[0];
-  const revisionOf = (lookup: Lookup): number | undefined => {
-    const shown = lookup(HELM_REVISION);
-    return typeof shown === "string" && shown !== ""
-      ? Number(shown)
+  const numberOf = (lookup: Lookup, key: string): number | undefined => {
+    const value = lookup(key);
+    return typeof value === "string" && value !== ""
+      ? Number(value)
       : undefined;
   };
+  const revisionOf = (lookup: Lookup) => numberOf(lookup, HELM_REVISION);
 
   const place = (
     id: string,
@@ -220,20 +226,21 @@ export function registerHelm(
     (lookup, args) => {
       const release = releaseOf(lookup, args);
       const shown = revisionOf(lookup);
-      if (!release || shown === undefined || shown < 2) return;
+      const previous = numberOf(lookup, HELM_PREVIOUS);
+      if (!release || shown === undefined || previous === undefined) return;
       editors.open(
         diffUri({
           kind: "release",
           release,
-          from: shown - 1,
+          from: previous,
           to: shown,
           part: "values",
         }),
       );
     },
     {
-      when: `${HELM} && ${HELM_REVISION} > 1`,
-      enablement: `${HELM} && ${HELM_REVISION} > 1`,
+      when: `${HELM} && ${HELM_PREVIOUS}`,
+      enablement: `${HELM} && ${HELM_PREVIOUS}`,
     },
   );
 

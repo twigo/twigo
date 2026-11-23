@@ -44,6 +44,7 @@ async function withEveryEnablement() {
   workbench.keys.set("resource.scalable", true);
   workbench.keys.set("list.uri", "helm-list://dev");
   workbench.keys.set("helm.revision", 2);
+  workbench.keys.set("helm.previous", 1);
   for (const key of [
     "helm.canReveal",
     "helm.canHide",

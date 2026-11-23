@@ -47,7 +47,12 @@ import type { ReleaseInput } from "../uri";
 import { ViewStatus } from "../ViewStatus";
 import { HistoryList } from "./HistoryList";
 import { printsCommand } from "./commands";
-import { HELM_NO_COMMAND, HELM_REVISION, HELM_TAB } from "./keys";
+import {
+  HELM_NO_COMMAND,
+  HELM_PREVIOUS,
+  HELM_REVISION,
+  HELM_TAB,
+} from "./keys";
 import {
   hiddenCount,
   manifestOf,
@@ -244,7 +249,7 @@ export function ReleasePage({
       },
     },
   );
-  const { revision, epoch } = snapshot;
+  const { revision, previous, epoch } = snapshot;
   const shown = states.shown(uri, epoch);
   useEffect(
     () => () => {
@@ -337,6 +342,7 @@ export function ReleasePage({
     scope.set(HELM_TAB, view);
     scope.set(HELM_NO_COMMAND, !printsCommand(view));
     scope.set(HELM_REVISION, revision === undefined ? "" : String(revision));
+    scope.set(HELM_PREVIOUS, previous === undefined ? "" : String(previous));
     scope.set("helm.page", uri);
     scope.set("helm.canReveal", under !== undefined && !under.revealed);
     scope.set("helm.canHide", under?.revealed === true);
@@ -357,6 +363,7 @@ export function ReleasePage({
     subject,
     view,
     revision,
+    previous,
     uri,
     under,
     text,

@@ -38,6 +38,8 @@ export interface ReleaseSnapshot {
   readonly revision: number | undefined;
   /** The highest revision Helm keeps. */
   readonly latest: number | undefined;
+  /** The highest revision Helm keeps below `revision`. */
+  readonly previous: number | undefined;
   readonly problem: Wire | undefined;
   readonly overview: Overview | undefined;
   readonly notes: Scrubbed | undefined;
@@ -55,6 +57,7 @@ export const INITIAL_RELEASE: ReleaseSnapshot = {
   exists: false,
   revision: undefined,
   latest: undefined,
+  previous: undefined,
   problem: undefined,
   overview: undefined,
   notes: undefined,
@@ -184,6 +187,7 @@ export class ReleaseView {
       exists: batch.exists,
       revision: batch.revision ?? undefined,
       latest: batch.latest ?? undefined,
+      previous: batch.previous ?? undefined,
       problem: batch.problem ?? undefined,
       overview: batch.overview ?? (kept ? previous.overview : undefined),
       notes: batch.notes ?? (kept ? previous.notes : undefined),

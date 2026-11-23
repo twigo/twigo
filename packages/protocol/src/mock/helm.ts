@@ -397,6 +397,15 @@ export class MockRelease {
     clearTimeout(this.#timer);
   }
 
+  /** The highest revision recorded below the one shown, as the core reads it from the labels. */
+  #previous(): number | null {
+    const shown = this.shown;
+    const below = (this.#release?.revisions ?? [])
+      .map((each) => each.revision)
+      .filter((each) => shown !== null && each < shown);
+    return below.length === 0 ? null : Math.max(...below);
+  }
+
   /** Ends the editor as the core's last batch does: it changes nothing but the state, and no part comes again. */
   #end(ends: ViewState): void {
     if (this.#closed) return;
@@ -407,6 +416,7 @@ export class MockRelease {
       exists: this.#release !== undefined,
       revision: this.shown,
       latest: this.#release?.latest.revision ?? null,
+      previous: this.#previous(),
       problem: null,
       overview: null,
       notes: null,
@@ -427,6 +437,7 @@ export class MockRelease {
         exists: false,
         revision: null,
         latest: null,
+        previous: null,
         problem: null,
         overview: null,
         notes: null,
@@ -450,6 +461,7 @@ export class MockRelease {
       exists: release !== undefined,
       revision: shown,
       latest: release?.latest.revision ?? null,
+      previous: this.#previous(),
       problem,
       overview: changed.overview ? (readable?.overview ?? null) : null,
       notes: changed.overview ? (readable?.notes ?? null) : null,
