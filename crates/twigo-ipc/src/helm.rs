@@ -16,13 +16,18 @@ use crate::{
 /// The releases of a space's namespaces, one row a release, which is its
 /// latest revision: Name and Revision from the labels Helm sets on its
 /// Secrets, Status from the `status` label until that revision is decoded and
-/// the release's own after, as `helm list` prints it, and Chart
+/// the release's own after, as `helm list` prints it, or `unreadable` where
+/// what the revision's Secret holds cannot be read, and Chart
 /// (`name-version`), App Version and Updated once that revision is decoded.
-/// Updated is an `age` column that reads the row's `created`, the
-/// revision's `info.last_deployed`; Problem holds the wire name of the code
-/// that keeps the revision from being read, and is empty when it is. Its
-/// batches are [`ListBatch`](crate::ListBatch)es, and `list_set_window`,
-/// `list_ack` and `list_unsubscribe` serve it.
+/// Helm writes a revision's Secret again when its status changes: until the
+/// new version is decoded, Chart, App Version and Updated stay and Status is
+/// the label's. Updated is an `age` column that reads the row's `created`,
+/// the revision's `info.last_deployed`; Problem holds the wire name of the
+/// code that keeps the revision from being read, as
+/// [`ReleaseBatch::problem`] tells them, and is empty when it is read: a
+/// request that fails keeps the label's Status. Its batches are
+/// [`ListBatch`](crate::ListBatch)es, and `list_set_window`, `list_ack` and
+/// `list_unsubscribe` serve it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ReleaseListQuery {
@@ -93,10 +98,15 @@ pub struct ReleaseBatch {
     pub revision: Option<u32>,
     /// The highest revision Helm keeps, which `helm get` reads.
     pub latest: Option<u32>,
-    /// Why the shown revision cannot be read: `helm.not-a-release`,
-    /// `helm.truncated`, `helm.too-large`, `helm.revision-gone` for a revision
-    /// asked for that Helm no longer keeps, or `internal.panic`; its parts are
-    /// null then.
+    /// Why the shown revision cannot be read; its parts are null then. What
+    /// its Secret holds says it until the Secret changes: `helm.not-a-release`,
+    /// `helm.truncated`, `helm.too-large`, `answer.undecodable` for a Secret
+    /// the server sent in a shape Twigo cannot read, `internal.panic`, and
+    /// `helm.revision-gone` for a revision Helm no longer keeps. Any other
+    /// code is a request that failed, such as `server.forbidden`,
+    /// `server.unavailable` or `connect.refused`, which says nothing of the
+    /// revision and stays only while it lasts: Rust asks again after the
+    /// hub's backoff and at every relist.
     pub problem: Option<IpcError>,
     /// Described as an object's is: a header whose `printed` are the release
     /// row's cells and whose `created` is the revision's `last_deployed`, then
@@ -220,7 +230,9 @@ pub enum ComparedPart {
 
 /// The two sides masked as their views are, but that a masked value which
 /// differs from its counterpart reads `<N bytes, changed>` on both: values
-/// pair by their path, a manifest's Secrets by kind, namespace and name.
+/// pair by their path, a manifest's Secrets by kind, namespace and name, a
+/// Secret whose document writes no namespace in its release's, and a key
+/// by the value the server would store, `stringData`'s over `data`'s.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ComparedRevisions {
     pub from: String,
