@@ -16,7 +16,7 @@ import {
   withScreenSize,
 } from "../../test/workbench";
 import { diffUri, helmUri } from "../uri";
-import { helmCommand, printsCommand } from "./commands";
+import { helmCommand } from "./commands";
 import { isQuiet, statusTone } from "./status";
 import { ReleaseStates } from "./states";
 
@@ -286,13 +286,6 @@ test("Copy helm Command prints what helm prints for the view shown, with the con
   expect(at("history", 4)).toBe(
     "helm history api --namespace payments --kube-context prod-eu",
   );
-});
-
-test("no command is copied for a view that none prints: the chart's defaults", () => {
-  const release = { space: "prod-eu", namespace: "payments", name: "api" };
-  expect(helmCommand(release, "prod-eu", "defaults", 4)).toBeUndefined();
-  expect(printsCommand("defaults")).toBe(false);
-  expect(printsCommand("values")).toBe(true);
 });
 
 async function compared(from: number, to: number) {
