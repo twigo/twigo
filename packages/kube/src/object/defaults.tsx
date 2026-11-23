@@ -38,6 +38,10 @@ export function Fields({
   mono?: boolean;
   cut?: boolean;
 }) {
+  const [only] = fields;
+  // A section's title says what its one field with no label is, as the notes of a release.
+  if (only?.label === "" && fields.length === 1 && extra.length === 0)
+    return <FieldValue field={only} onOpen={onOpen} />;
   return (
     <PropertyList
       cut={cut}

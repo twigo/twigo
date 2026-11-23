@@ -185,7 +185,7 @@ test("a release's page says what Helm wrote of a failed revision, whole only aft
   expect(document.body.textContent).not.toContain("ZXBzaWxvbi1w");
 
   fireEvent.click(
-    screen.getByRole("button", { name: "Reveal what Helm wrote" }),
+    screen.getByRole("button", { name: "Reveal the description" }),
   );
   await settle(3);
   const dialog = screen.getByRole("dialog");
@@ -197,7 +197,7 @@ test("a release's page says what Helm wrote of a failed revision, whole only aft
   expect(document.body.textContent).toContain("ZXBzaWxvbi1w");
   expect(document.body.textContent).not.toContain("<hidden>");
 
-  fireEvent.click(screen.getByRole("button", { name: "Hide what Helm wrote" }));
+  fireEvent.click(screen.getByRole("button", { name: "Hide the description" }));
   await settle(2);
   expect(document.body.textContent).not.toContain("ZXBzaWxvbi1w");
   expect(document.body.textContent).toContain("<hidden>");

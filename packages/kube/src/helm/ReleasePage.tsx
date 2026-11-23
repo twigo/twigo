@@ -39,6 +39,7 @@ import {
   useFiltered,
 } from "../object/pageStates";
 import { useReveal } from "../object/reveal";
+import { RevealButton } from "../object/RevealButton";
 import { refUri } from "../object/useObject";
 import { useHeader } from "../object/useHeader";
 import { Prose } from "../object/values";
@@ -140,7 +141,7 @@ function withNotes(overview: Document, notes: string): Document {
         type: "fields",
         fields: [
           {
-            label: "Notes",
+            label: "",
             value: { type: "text", text: notes },
             default: false,
           },
@@ -736,7 +737,7 @@ function Body({
       <RevealControl
         hidden={descriptionHidden}
         revealed={revealed.description}
-        what="what Helm wrote"
+        what="the description"
         onReveal={() => {
           onReveal({ kind: "description" });
         }}
@@ -817,7 +818,7 @@ function Scrubbed({
   );
 }
 
-/** What a scrubbed text offers: a Reveal where a value of the revision's Secrets was taken out, and Hide once it is shown. */
+/** What a scrubbed text offers: the Reveal of a Secret's key, where a value of the revision's Secrets was taken out, and Hide once it is shown. */
 function RevealControl({
   hidden,
   revealed,
@@ -833,15 +834,12 @@ function RevealControl({
 }) {
   if (!hidden && !revealed) return null;
   return (
-    <div className="text-xs text-support">
-      {revealed ? (
-        <LinkButton onClick={onHide}>Hide {what}</LinkButton>
-      ) : (
-        <>
-          A value of the release's Secrets is hidden here.{" "}
-          <LinkButton onClick={onReveal}>Reveal {what}</LinkButton>
-        </>
-      )}
+    <div className="flex justify-end">
+      <RevealButton
+        label={what}
+        showing={revealed}
+        onClick={revealed ? onHide : onReveal}
+      />
     </div>
   );
 }

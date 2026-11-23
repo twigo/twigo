@@ -192,8 +192,27 @@ test("what was revealed does not come back when the release is uninstalled and i
     send({ seq: 51 });
   });
   await settle(3);
-  expect(page("epsilon").textContent).toContain("Reveal the notes");
+  expect(
+    within(page("epsilon")).getByRole("button", { name: "Reveal the notes" }),
+  ).toBeTruthy();
   expect(page("epsilon").textContent).not.toContain("epsilon-password-r2");
+});
+
+test("the Notes section holds the notes as its text, with no field that says Notes again, and its Reveal is the eye button of a Secret's key", async () => {
+  await open(release("epsilon"));
+  const section = document.querySelector<HTMLElement>(
+    '[data-section="helm.notes"]',
+  );
+  if (!section) throw new Error("no Notes section");
+  fireEvent.click(within(section).getByRole("button", { name: /^Notes/ }));
+  await settle(3);
+  expect(section.querySelector("dl, dt")).toBeNull();
+  expect(section.textContent).toContain("Log in as admin");
+  const reveal = within(section).getByRole("button", {
+    name: "Reveal the notes",
+  });
+  expect(reveal.textContent).toBe("");
+  expect(reveal.className).toContain("size-6");
 });
 
 test("a release in a namespace whose Secrets the person may not list says so, naming them, where one they may list shows whole", async () => {

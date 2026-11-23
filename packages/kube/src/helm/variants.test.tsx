@@ -95,7 +95,7 @@ async function helmRows() {
   const grid = screen.getByRole("grid", { name: "Helm releases" });
   const rows = within(grid).getAllByRole("row");
   const row = (name: string) => {
-    const found = rows.find((each) => each.textContent?.startsWith(name));
+    const found = rows.find((each) => each.textContent.startsWith(name));
     if (!found) throw new Error(`no row ${name}`);
     return found;
   };
