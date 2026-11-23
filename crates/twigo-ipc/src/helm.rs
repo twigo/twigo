@@ -94,7 +94,9 @@ pub struct ReleaseBatch {
     /// False until a revision is listed, and once none is left, as after an
     /// uninstall without `--keep-history`.
     pub exists: bool,
-    /// The revision the parts are of: the one asked for, else the latest.
+    /// The revision the parts are of: the one asked for, else the latest;
+    /// null while it shows none, as from when the Secret of the one shown
+    /// goes until the next one's page lands.
     pub revision: Option<u32>,
     /// The highest revision Helm keeps, which `helm get` reads.
     pub latest: Option<u32>,

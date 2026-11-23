@@ -1686,7 +1686,9 @@ status: ViewState,
  */
 exists: boolean, 
 /**
- * The revision the parts are of: the one asked for, else the latest.
+ * The revision the parts are of: the one asked for, else the latest;
+ * null while it shows none, as from when the Secret of the one shown
+ * goes until the next one's page lands.
  */
 revision: number | null, 
 /**

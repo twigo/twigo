@@ -7,10 +7,10 @@
 //! `resourceVersion` while it is shown, keeping only its line. A revision's
 //! page and line stay while its Secret, written again, is decoded anew, the
 //! status the label's meanwhile, and no overview goes until the new page
-//! lands; a page of another Secret at the same revision goes at once. A
-//! request that fails is said while it fails for that version of the
-//! Secret, and asked again as the list asks. Batches go with flow control,
-//! as an open object's do (3.5).
+//! lands; a page goes at once when its revision no longer holds the Secret
+//! it came from, whichever revision is wanted. A request that fails is said
+//! while it fails for that version of the Secret, and asked again as the
+//! list asks. Batches go with flow control, as an open object's do (3.5).
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
@@ -388,6 +388,17 @@ async fn run(
             }
         }
 
+        // So that no Reveal reads a Secret that is gone while the next page
+        // is fetched.
+        if shown.as_ref().is_some_and(|shown| {
+            shown.stamp.as_ref().is_some_and(|stamp| {
+                revisions
+                    .get(&shown.revision)
+                    .is_none_or(|held| !stamp.same_secret(&held.stamp))
+            })
+        }) {
+            shown = None;
+        }
         let latest = revisions.keys().next_back().copied();
         let wanted = pinned.or(latest);
         let wanted_held = wanted.and_then(|revision| revisions.get(&revision));
@@ -397,15 +408,6 @@ async fn run(
                     *at != revision || !failing.same_secret(&held.stamp)
                 }) {
                     page_failed = None;
-                }
-                if shown.as_ref().is_some_and(|shown| {
-                    shown.revision == revision
-                        && shown
-                            .stamp
-                            .as_ref()
-                            .is_some_and(|stamp| !stamp.same_secret(&held.stamp))
-                }) {
-                    shown = None;
                 }
                 let current = shown.as_ref().is_some_and(|shown| {
                     shown.revision == revision && shown.stamp.as_ref() == Some(&held.stamp)

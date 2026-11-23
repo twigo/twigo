@@ -291,6 +291,54 @@ async fn a_reveal_of_a_page_whose_rewrite_s_request_fails_is_refused_while_it_fa
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_reveal_planned_before_an_uninstall_and_an_install_is_refused_while_the_new_revision_is_fetched()
+ {
+    let fake = Fake::default();
+    revision(&fake, 1, "superseded");
+    revision(&fake, 2, "deployed");
+    let dir = tempfile::tempdir().unwrap();
+    let over = Over::new(&fake, dir.path());
+    let (id, mut watched) = over.open("a", "db", None, OVERVIEW).await;
+    watched
+        .until(over.ack(id), "revision 2", |shown| shown.overview.is_some())
+        .await;
+    let password = PlanRequest::RevealHelm {
+        release: id,
+        revision: 2,
+        part: HelmPart::Values {
+            defaults: false,
+            path: vec![key("auth"), key("password")],
+        },
+    };
+    let plan = over.core.command_plan("main", password).await.unwrap();
+
+    fake.state().gets_take = Duration::from_secs(2);
+    for version in [1, 2] {
+        fake.delete(
+            "secrets",
+            Some("a"),
+            &format!("sh.helm.release.v1.db.v{version}"),
+        );
+    }
+    testing::reinstall(
+        &fake,
+        &testing::release("a", "db", 1, "deployed"),
+        "deployed",
+    );
+    watched
+        .drain_for(over.ack(id), Duration::from_millis(500))
+        .await;
+    assert_eq!(
+        (watched.shown.revision, watched.shown.latest),
+        (None, Some(1))
+    );
+    assert_eq!(
+        refused(&over.run(&plan).await),
+        ErrorCode::ActionObjectChanged
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn another_secret_at_the_shown_revision_takes_its_page_at_once_and_refuses_a_reveal_planned_on_the_old_one()
  {
     let fake = Fake::default();
