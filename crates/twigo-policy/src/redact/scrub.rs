@@ -13,12 +13,15 @@ use super::{Field, Held, contents, decode_base64, holds_helm_release, whole_toke
 /// What takes the place of a value in a text.
 pub const HIDDEN: &str = "<hidden>";
 
+const SHORTEST_TOKEN: usize = 4;
+
 /// Takes every value in `secrets` out of `text`, where it stands as a whole
 /// token, so that a short value does not garble the words around it. A value
-/// with no letter or digit is no token, as it cannot be told from the
-/// punctuation and the spaces around it. For a Secret each patched object a
-/// refusal quotes goes whole, as no token matches what the server wrote of
-/// its values: JSON, HTML characters escaped, quoted again as a string
+/// shorter than four characters, or with no letter or digit, is no token,
+/// as it cannot be told from the numbers, the words and the punctuation
+/// around it. For a Secret each patched object a refusal quotes goes whole,
+/// as no token matches what the server wrote of its values: JSON, HTML
+/// characters escaped, quoted again as a string
 /// ([`applyPatchToCurrentObject`]'s `field.Invalid`).
 ///
 /// [`applyPatchToCurrentObject`]: https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/patch.go#L356-L358
@@ -30,7 +33,9 @@ pub fn scrub(text: &str, secrets: &[String]) -> String {
     };
     let tokens: Vec<&String> = secrets
         .iter()
-        .filter(|value| value.chars().any(char::is_alphanumeric))
+        .filter(|value| {
+            value.chars().count() >= SHORTEST_TOKEN && value.chars().any(char::is_alphanumeric)
+        })
         .collect();
     whole_tokens_replaced(&text, &tokens, |_| HIDDEN.to_owned())
 }
@@ -282,10 +287,13 @@ mod tests {
 
     #[test]
     fn scrubbing_takes_a_value_only_as_a_whole_token() {
-        let secrets = vec!["a".to_owned(), "hunter2".to_owned(), "x=".to_owned()];
+        let secrets = vec!["word".to_owned(), "hunter2".to_owned(), "key=".to_owned()];
         assert_eq!(
-            scrub("a a-bcd spat a_b ahunter2 hunter2 at x= cx=", &secrets),
-            format!("{HIDDEN} {HIDDEN}-bcd spat a_b ahunter2 {HIDDEN} at {HIDDEN} cx=")
+            scrub(
+                "word word-bcd swords word_b ahunter2 hunter2 at key= skey=",
+                &secrets
+            ),
+            format!("{HIDDEN} {HIDDEN}-bcd swords word_b ahunter2 {HIDDEN} at {HIDDEN} skey=")
         );
     }
 
@@ -469,13 +477,35 @@ mod tests {
 
     #[test]
     fn a_value_with_no_letter_or_digit_is_no_token() {
-        let secrets = vec!["hunter2".to_owned(), "/".to_owned(), " ".to_owned()];
+        let secrets = vec!["hunter2".to_owned(), "----".to_owned(), "    ".to_owned()];
         assert_eq!(
-            scrub(
-                "Open http://example.com/login/ and log in with hunter2.",
-                &secrets
-            ),
-            format!("Open http://example.com/login/ and log in with {HIDDEN}.")
+            scrub("Log in with hunter2.\n----\n    kubectl get pods", &secrets),
+            format!("Log in with {HIDDEN}.\n----\n    kubectl get pods")
+        );
+    }
+
+    #[test]
+    fn a_value_shorter_than_four_characters_is_no_token() {
+        let notes = concat!(
+            "1. Get the application URL by running these commands:\n",
+            "  export POD_NAME=$(kubectl get pods --namespace default -l \"app.kubernetes.io/name=demo,app.kubernetes.io/instance=demo\" -o jsonpath=\"{.items[0].metadata.name}\")\n",
+            "  export CONTAINER_PORT=$(kubectl get pod --namespace default $POD_NAME -o jsonpath=\"{.spec.containers[0].ports[0].containerPort}\")\n",
+            "  echo \"Visit http://127.0.0.1:8080 to use your application\"\n",
+            "  kubectl --namespace default port-forward $POD_NAME 8080:$CONTAINER_PORT\n",
+        );
+        for stored in [
+            json!({ "stringData": { "WORKERS": "1" } }),
+            json!({ "stringData": { "API_VERSION": "1.0" } }),
+            json!({ "data": { "REDIS_DB": "MA==" } }),
+        ] {
+            let mut secret = stored;
+            secret["kind"] = json!("Secret");
+            assert_eq!(scrub(notes, &secret_values(&[&secret])), notes, "{secret}");
+        }
+        let port = json!({ "kind": "Secret", "stringData": { "PORT": "8080" } });
+        assert_eq!(
+            scrub(notes, &secret_values(&[&port])),
+            notes.replace("8080", HIDDEN)
         );
     }
 
