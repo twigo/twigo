@@ -14,9 +14,9 @@ Helm, k9s, Freelens, Headlamp and Rancher show values and manifests in clear; Ar
 - **Values: every string and number masked.**
   Keys, booleans and nulls stay as stored, and every string and number reads `<N bytes>`, the chart's defaults as the person's values; a Reveal shows any leaf, any subtree or the whole document.
 - **Notes and descriptions: scrubbed, not hidden.**
-  Each value of the revision's Secrets, the manifest's and the hooks', is taken out where it stands as a whole token, as the apply preview scrubs a refusal, and a refusal's quoted patched object goes whole; a Reveal shows the whole text.
+  Each value of the revision's Secrets, the manifest's and the hooks', is taken out where it stands as a whole token, as the apply preview scrubs a refusal, and each patched object a refusal quotes goes whole; a Reveal shows the whole text.
 - **A comparison: changed or not.**
-  Rust compares the real values, and a masked value that differs from its counterpart reads `<N bytes, changed>` on both sides; values pair by path, a manifest's Secrets by namespace and name.
+  Rust compares the real values, and a masked value that differs from its counterpart reads `<N bytes, changed>` on both sides; values pair by path, a manifest's Secrets by namespace and name, a Secret whose document writes no namespace in its release's.
 - **The manifest: its Secrets only.**
   Every `kind: Secret`, at a document's root or inside `items` at any depth, is masked as an open Secret is, and every other document goes as it stands.
 - **Held in Rust until a Reveal.**
@@ -40,6 +40,7 @@ Helm, k9s, Freelens, Headlamp and Rancher show values and manifests in clear; Ar
 - Reading a release's values costs a Reveal for each setting the person wants to read, a dialog outside `read-write` (6.4).
 - A masked document shows key names, list lengths, which scalars are booleans or nulls, and sizes; a comparison shows which values changed.
 - A value of a Secret that the notes also print elsewhere in another spelling, or a value of the values that is no Secret's, stays in the notes.
+- A value of a Secret with no letter or digit, such as `/` or a space, is never taken out of a text, as it cannot be told from the punctuation and the spaces around it: it stays in the notes, the descriptions and the words of a refusal.
 - The mock's releases are written from the decoder's own output by `twigo-helm`'s `mock` test, which checks that they hold no value of a Secret, in clear or as base64.
 
 ## Where it is implemented
