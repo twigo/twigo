@@ -604,12 +604,14 @@ async fn run(
             exists: !revisions.is_empty(),
             revision,
             latest,
-            previous: revision.and_then(|revision| {
-                revisions
-                    .range(..revision)
-                    .next_back()
-                    .map(|(&previous, _)| previous)
-            }),
+            previous: revision
+                .filter(|revision| revisions.contains_key(revision))
+                .and_then(|revision| {
+                    revisions
+                        .range(..revision)
+                        .next_back()
+                        .map(|(&previous, _)| previous)
+                }),
             problem: match page_failing {
                 Some(failing) => Some(failing.error().clone()),
                 None => shown

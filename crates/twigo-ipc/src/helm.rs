@@ -102,7 +102,8 @@ pub struct ReleaseBatch {
     pub latest: Option<u32>,
     /// The highest revision Helm keeps below `revision`, from the labels of
     /// its Secrets, which Compare with Previous compares it with; null where
-    /// it keeps none, as after `--history-max` pruned the ones before.
+    /// it keeps none, as after `--history-max` pruned the ones before, and
+    /// where Helm no longer keeps `revision` itself (`helm.revision-gone`).
     pub previous: Option<u32>,
     /// Why the shown revision cannot be read; its parts are null then. What
     /// its Secret holds says it until the Secret changes, in exactly these

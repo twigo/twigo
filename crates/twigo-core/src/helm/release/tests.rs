@@ -192,6 +192,26 @@ async fn previous_is_the_highest_revision_helm_keeps_below_the_one_shown() {
     })
     .await;
     assert_eq!(rig.watched.shown.previous, None);
+
+    rig.opened.set_view(Some(4), OVERVIEW);
+    rig.until("revision 4", |shown| {
+        notes(shown) == Some("Revision 4 of app")
+    })
+    .await;
+    rig.fake
+        .delete("secrets", Some("a"), &secret_name("app", 4));
+    rig.until("revision 4 gone", |shown| shown.problem.is_some())
+        .await;
+    let shown = &rig.watched.shown;
+    assert_eq!(
+        shown.problem.as_ref().unwrap().code,
+        ErrorCode::HelmRevisionGone
+    );
+    assert_eq!(
+        (shown.revision, shown.latest, shown.previous),
+        (Some(4), Some(2), None),
+        "nothing to compare a revision Helm no longer keeps with"
+    );
 }
 
 #[tokio::test(start_paused = true)]
