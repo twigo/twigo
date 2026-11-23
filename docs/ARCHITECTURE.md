@@ -1018,6 +1018,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
     A part is dropped from the snapshot when the revision moves, so one revision's text is never shown beside another's (`ReleaseView`).
     The page draws the batch's `status` as an object page draws its view's: a refused, unauthorized or errored one, `internal.panic` among them, replaces the page with its words, naming Secrets for a refusal, and Reopen opens the release anew.
   - The Overview is the core's, drawn by the object page's components, with Notes after the findings; where the release failed or waits, Helm's description is a field of the Diagnostics section, after its finding.
+    The Objects table says each object's namespace: the one its document writes, else the release's where its kind is one of Kubernetes' own namespaced kinds, and none for a cluster-scoped kind or a custom resource, whose scope only the cluster's discovery tells.
     The notes and the description are scrubbed of the values of the revision's Secrets, and where that took a value out, a Reveal shows the text whole.
   - Values are the person's, then the chart's defaults, two plates of one view, each read-only YAML written from the masked JSON; Manifest is the masked manifest, `@` listing its documents.
     A masked value is the text `<12 bytes>` in the quiet role with an eye in the gutter of its line, which reveals it; the view's bar says `12 values hidden · Reveal all`.
