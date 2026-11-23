@@ -22,12 +22,10 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use backon::ExponentialBackoff;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
-use tokio::time::Instant;
 use twigo_cache::batcher::Source;
-use twigo_cache::hub::{Delta, Hub, Shown, Subscription, backoff, refusal_pause};
+use twigo_cache::hub::{Delta, Hub, Shown, Subscription};
 use twigo_cache::meta::Meta;
 use twigo_cache::store::RowKey;
 use twigo_cache::table::{Cell, Column, ColumnKind, Row};
@@ -35,6 +33,7 @@ use twigo_helm::Summary;
 use twigo_ipc::{ErrorCode, IpcError, Printed};
 
 use super::fetch::{self, AT_ONCE, Failed};
+use super::reads::{Reads, Stamp};
 
 pub(super) struct Releases {
     secrets: Subscription<Row>,
@@ -100,7 +99,7 @@ impl Source for Releases {
                 )
             }
         };
-        let due = held.due();
+        let due: Vec<Release> = held.reads.due().cloned().collect();
         let unread: Vec<Unread> = touched
             .into_iter()
             .chain(due)
@@ -193,93 +192,8 @@ fn belongs(meta: &Meta) -> (Release, Option<u32>) {
     }
 }
 
-/// One version of a revision's Secret: Helm writes a revision again, whole,
-/// when its status changes, which may change its description too.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct Stamp {
-    uid: Option<Box<str>>,
-    resource_version: Box<str>,
-}
-
-impl Stamp {
-    pub(super) fn of(meta: &Meta) -> Self {
-        Self {
-            uid: meta.uid.clone(),
-            resource_version: meta.resource_version.clone(),
-        }
-    }
-
-    /// Whether `other` is a version of the same Secret.
-    pub(super) fn same_secret(&self, other: &Stamp) -> bool {
-        self.uid.is_some() && self.uid == other.uid
-    }
-
-    pub(super) fn uid(&self) -> Option<&str> {
-        self.uid.as_deref()
-    }
-}
-
 /// A revision's summary, or the code that keeps it from being read.
 pub(super) type Decoded = Result<Summary, ErrorCode>;
-
-/// A request for a version of a revision's Secret that failed, which says
-/// nothing of the revision and shows only on that version: it is asked
-/// again once the hub's backoff has passed, or RBAC's no has had the time
-/// the hub gives it to pass, or at once after a relist, and goes once
-/// another Secret holds the revision.
-pub(super) struct Failing {
-    stamp: Stamp,
-    error: IpcError,
-    backoff: ExponentialBackoff,
-    due: Instant,
-}
-
-impl Failing {
-    /// `error` of the request for `stamp`; after `last`, the pause grows.
-    pub(super) fn after(last: Option<Failing>, stamp: Stamp, error: IpcError) -> Self {
-        let mut backoff = last.map_or_else(backoff, |last| last.backoff);
-        let pause = match error.code {
-            ErrorCode::ServerForbidden | ErrorCode::ServerUnauthorized => refusal_pause(),
-            _ => backoff
-                .next()
-                .expect("the backoff has no maximum of attempts"),
-        };
-        Self {
-            stamp,
-            error,
-            backoff,
-            due: Instant::now() + pause,
-        }
-    }
-
-    /// Whether `stamp` waits for the pause before it is asked again.
-    pub(super) fn waits(&self, stamp: &Stamp) -> bool {
-        self.was_for(stamp) && !self.due()
-    }
-
-    /// Whether it is the failure of the request for `stamp`.
-    pub(super) fn was_for(&self, stamp: &Stamp) -> bool {
-        self.stamp == *stamp
-    }
-
-    /// Whether `stamp` is a version of the Secret it was for.
-    pub(super) fn same_secret(&self, stamp: &Stamp) -> bool {
-        self.stamp.same_secret(stamp)
-    }
-
-    pub(super) fn due(&self) -> bool {
-        Instant::now() >= self.due
-    }
-
-    /// The server listed again: ask at once.
-    pub(super) fn relisted(&mut self) {
-        self.due = Instant::now();
-    }
-
-    pub(super) fn error(&self) -> &IpcError {
-        &self.error
-    }
-}
 
 /// The status of a revision that cannot be read, which a list counts as
 /// failing.
@@ -300,11 +214,11 @@ pub(super) struct Known<'a> {
 
 impl<'a> Known<'a> {
     /// What is known of the revision whose Secret stands at `stamp`, from
-    /// the last decode of its Secret and the `failed` request for it.
+    /// the last decode of its Secret and why the request for it `fails`.
     pub(super) fn of(
         stamp: &Stamp,
         decoded: Option<(&Stamp, Result<&'a Summary, ErrorCode>)>,
-        failed: Option<&Failing>,
+        fails: Option<&IpcError>,
     ) -> Self {
         let (summary, unreadable) = match decoded {
             Some((at, Ok(summary))) if at == stamp => (Some((summary, true)), None),
@@ -315,9 +229,7 @@ impl<'a> Known<'a> {
         Known {
             summary,
             unreadable,
-            failing: failed
-                .filter(|failed| failed.was_for(stamp))
-                .map(|failed| failed.error().code),
+            failing: fails.map(|error| error.code),
         }
     }
 
@@ -342,13 +254,8 @@ struct Held {
     /// The Secrets of each release by revision, the one that is no revision
     /// first.
     releases: HashMap<Release, BTreeMap<Option<u32>, Arc<Row>>>,
-    /// What the last decode of each release's newest revision decided, by
-    /// the version of its Secret decoded.
-    decoded: HashMap<Release, (Stamp, Decoded)>,
-    /// The version of each release's newest revision being fetched.
-    asked: HashMap<Release, Stamp>,
-    /// Each release whose newest revision's Secret had a request fail.
-    failed: HashMap<Release, Failing>,
+    /// The reads of each release's newest revision.
+    reads: Reads<Release, Decoded>,
 }
 
 impl Held {
@@ -358,25 +265,15 @@ impl Held {
         for secret in secrets {
             self.place(secret);
         }
-        let releases = &self.releases;
-        self.decoded
-            .retain(|release, _| releases.contains_key(release));
-        self.asked
-            .retain(|release, _| releases.contains_key(release));
-        self.forget_other_secrets();
-        for failing in self.failed.values_mut() {
-            failing.relisted();
-        }
+        self.forget_gone();
+        self.reads.relisted();
     }
 
-    /// Drops each failed request whose release's newest revision is no
-    /// longer held in the Secret it was for.
-    fn forget_other_secrets(&mut self) {
+    /// Forgets what was read of each release that holds no revision now.
+    fn forget_gone(&mut self) {
         let releases = &self.releases;
-        self.failed.retain(|release, failing| {
-            newest(releases, release)
-                .is_some_and(|secret| failing.same_secret(&Stamp::of(&secret.meta)))
-        });
+        self.reads
+            .retain(|release| newest(releases, release).is_some());
     }
 
     fn rows(&self) -> Vec<Arc<Row>> {
@@ -393,7 +290,9 @@ impl Held {
         for secret in upserted {
             touched.insert(self.place(secret));
         }
-        self.forget_other_secrets();
+        if !touched.is_empty() {
+            self.forget_gone();
+        }
         touched
     }
 
@@ -415,9 +314,6 @@ impl Held {
             revisions.remove(&revision);
             if revisions.is_empty() {
                 self.releases.remove(&release);
-                self.decoded.remove(&release);
-                self.asked.remove(&release);
-                self.failed.remove(&release);
             }
         }
         Some(release)
@@ -427,7 +323,7 @@ impl Held {
         newest(&self.releases, release)
     }
 
-    /// Keeps what a fetch of the release's newest revision as it stands
+    /// Keeps what the fetch of the release's newest revision asked last
     /// answered, and says which release's row it changed.
     fn answered(
         &mut self,
@@ -435,56 +331,22 @@ impl Held {
         stamp: Stamp,
         read: Result<Summary, Failed>,
     ) -> Option<Release> {
-        if self.asked.get(&release) == Some(&stamp) {
-            self.asked.remove(&release);
-        }
-        let newest = self.newest(&release)?;
-        if Stamp::of(&newest.meta) != stamp {
-            return None;
-        }
-        match read {
-            Err(Failed::Request(error)) => {
-                let last = self.failed.remove(&release);
-                let failing = Failing::after(last, stamp, error);
-                self.failed.insert(release.clone(), failing);
-            }
-            read => {
-                self.failed.remove(&release);
-                let decoded = read.map_err(|failed| failed.error().code);
-                self.decoded.insert(release.clone(), (stamp, decoded));
-            }
-        }
-        Some(release)
+        self.reads
+            .answered(release.clone(), stamp, read, |read| {
+                read.map_err(|error| error.code)
+            })
+            .then_some(release)
     }
 
-    /// The releases whose failed request is due to be asked again.
-    fn due(&self) -> Vec<Release> {
-        self.failed
-            .iter()
-            .filter(|(_, failing)| failing.due())
-            .map(|(release, _)| release.clone())
-            .collect()
-    }
-
-    /// The release's newest revision when no decode of it as it stands is
-    /// held or under way and no failed request for it waits, which marks it
+    /// The release's newest revision where it wants a fetch, which marks it
     /// asked.
     fn unread(&mut self, release: Release) -> Option<Unread> {
         let secret = self.newest(&release)?;
         let stamp = Stamp::of(&secret.meta);
         let name = secret.meta.name.clone();
-        let read = |held: Option<&Stamp>| held == Some(&stamp);
-        let waits = self
-            .failed
-            .get(&release)
-            .is_some_and(|failing| failing.waits(&stamp));
-        if read(self.decoded.get(&release).map(|(stamp, _)| stamp))
-            || read(self.asked.get(&release))
-            || waits
-        {
+        if !self.reads.ask(release.clone(), &stamp) {
             return None;
         }
-        self.asked.insert(release.clone(), stamp.clone());
         Some(Unread {
             release,
             stamp,
@@ -496,11 +358,12 @@ impl Held {
     /// known of that revision.
     fn row(&self, release: &Release) -> Option<Arc<Row>> {
         let (revision, secret) = self.releases.get(release)?.last_key_value()?;
+        let stamp = Stamp::of(&secret.meta);
         let decoded = self
-            .decoded
+            .reads
             .get(release)
             .map(|(stamp, decoded)| (stamp, decoded.as_ref().map_err(|code| *code)));
-        let known = Known::of(&Stamp::of(&secret.meta), decoded, self.failed.get(release));
+        let known = Known::of(&stamp, decoded, self.reads.failure(release, &stamp));
         let (cells, created) = cells(&release.name, *revision, &secret.meta, &known);
         Some(Arc::new(Row {
             meta: Meta {

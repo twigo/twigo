@@ -3,6 +3,7 @@
 //! release, an open release's revisions, and two revisions compared.
 
 mod fetch;
+mod reads;
 mod release;
 mod releases;
 

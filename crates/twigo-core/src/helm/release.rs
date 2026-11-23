@@ -34,7 +34,8 @@ use twigo_ipc::{
 use twigo_panic::contain;
 
 use super::fetch::{self, AT_ONCE, Failed};
-use super::releases::{Decoded, Failing, Known, Stamp, UNREADABLE, cells, printed};
+use super::reads::{Reads, Stamp};
+use super::releases::{Decoded, Known, UNREADABLE, cells, printed};
 
 /// The seam of an open release, as `TWIGO_PANIC` names it.
 pub(crate) const ITEM: &str = "helm release";
@@ -257,7 +258,6 @@ struct Revision {
 /// The revision shown, decoded, or why it cannot be.
 struct Shown {
     revision: u32,
-    stamp: Option<Stamp>,
     page: Result<Arc<Page>, IpcError>,
 }
 
@@ -295,15 +295,11 @@ async fn run(
     let mut fetching: FuturesUnordered<BoxFuture<'static, Answer>> = FuturesUnordered::new();
     let mut revisions: BTreeMap<u32, Revision> = BTreeMap::new();
     let mut placed: HashMap<RowKey, u32> = HashMap::new();
-    let mut shown: Option<Shown> = None;
-    let mut asked_page: Option<(u32, Stamp)> = None;
-    let mut page_failed: Option<(u32, Failing)> = None;
-    let mut lines: HashMap<u32, (Stamp, RevisionLine)> = HashMap::new();
-    let mut asked_lines: HashMap<u32, Stamp> = HashMap::new();
-    let mut lines_failed: HashMap<u32, Failing> = HashMap::new();
-    let mut newest: Option<(Stamp, Decoded)> = None;
-    let mut asked_newest: Option<Stamp> = None;
-    let mut newest_failed: Option<Failing> = None;
+    let mut pages: Reads<(), Shown> = Reads::default();
+    // The wanted revision Helm no longer keeps, said until a page lands.
+    let mut gone: Option<(u32, IpcError)> = None;
+    let mut lines: Reads<u32, RevisionLine> = Reads::default();
+    let mut newest: Reads<(), Decoded> = Reads::default();
     let mut dirty = Dirty {
         page: true,
         values: true,
@@ -324,61 +320,23 @@ async fn run(
             Some(answer) = fetching.next(), if !fetching.is_empty() => {
                 match answer {
                     Answer::Page(revision, stamp, page) => {
-                        if asked_page.as_ref() == Some(&(revision, stamp.clone())) {
-                            asked_page = None;
-                            match page {
-                                Err(Failed::Request(error)) => {
-                                    let last = page_failed
-                                        .take()
-                                        .filter(|(at, _)| *at == revision)
-                                        .map(|(_, failing)| failing);
-                                    page_failed =
-                                        Some((revision, Failing::after(last, stamp, error)));
-                                }
-                                page => {
-                                    page_failed = None;
-                                    let page = page.map_err(Failed::error);
-                                    shown = Some(Shown { revision, stamp: Some(stamp), page });
-                                    dirty.page = true;
-                                    dirty.values = true;
-                                    dirty.manifest = true;
-                                }
-                            }
+                        let kept = !matches!(page, Err(Failed::Request(_)));
+                        if pages.answered((), stamp, page, |page| Shown { revision, page }) && kept {
+                            gone = None;
+                            dirty.page = true;
+                            dirty.values = true;
+                            dirty.manifest = true;
                         }
                     }
                     Answer::Line(revision, stamp, line) => {
-                        if asked_lines.get(&revision) == Some(&stamp) {
-                            asked_lines.remove(&revision);
-                            let last = lines_failed.remove(&revision);
-                            match line {
-                                Err(Failed::Request(error)) => {
-                                    lines_failed
-                                        .insert(revision, Failing::after(last, stamp, error));
-                                }
-                                line => {
-                                    let line = line.unwrap_or_else(|failed| {
-                                        undecoded(revision, UNREADABLE, Some(failed.error()))
-                                    });
-                                    lines.insert(revision, (stamp, line));
-                                }
-                            }
-                        }
+                        lines.answered(revision, stamp, line, |line| {
+                            line.unwrap_or_else(|error| undecoded(revision, UNREADABLE, Some(error)))
+                        });
                     }
                     Answer::Latest(stamp, decoded) => {
-                        if asked_newest.as_ref() == Some(&stamp) {
-                            asked_newest = None;
-                            match decoded {
-                                Err(Failed::Request(error)) => {
-                                    newest_failed =
-                                        Some(Failing::after(newest_failed.take(), stamp, error));
-                                }
-                                decoded => {
-                                    newest_failed = None;
-                                    let decoded = decoded.map_err(|failed| failed.error().code);
-                                    newest = Some((stamp, decoded));
-                                }
-                            }
-                        }
+                        newest.answered((), stamp, decoded, |decoded| {
+                            decoded.map_err(|error| error.code)
+                        });
                     }
                 }
                 false
@@ -409,14 +367,9 @@ async fn run(
         if reset {
             revisions.clear();
             placed.clear();
-            for failing in page_failed
-                .iter_mut()
-                .map(|(_, failing)| failing)
-                .chain(lines_failed.values_mut())
-                .chain(newest_failed.iter_mut())
-            {
-                failing.relisted();
-            }
+            pages.relisted();
+            lines.relisted();
+            newest.relisted();
         }
         for key in &removed {
             if let Some(revision) = placed.remove(key) {
@@ -435,165 +388,98 @@ async fn run(
             }
         }
 
-        // So that no Reveal reads a Secret that is gone while the next page
-        // is fetched.
-        if shown.as_ref().is_some_and(|shown| {
-            shown.stamp.as_ref().is_some_and(|stamp| {
-                revisions
-                    .get(&shown.revision)
-                    .is_none_or(|held| !stamp.same_secret(&held.stamp))
-            })
-        }) {
-            shown = None;
-        }
         let latest = revisions.keys().next_back().copied();
         let wanted = pinned.or(latest);
         let wanted_held = wanted.and_then(|revision| revisions.get(&revision));
+        pages.retain(|()| wanted_held.is_some());
         match wanted.map(|revision| (revision, wanted_held)) {
             Some((revision, Some(held))) => {
-                if page_failed.as_ref().is_some_and(|(at, failing)| {
-                    *at != revision || !failing.same_secret(&held.stamp)
-                }) {
-                    page_failed = None;
-                }
-                let current = shown.as_ref().is_some_and(|shown| {
-                    shown.revision == revision && shown.stamp.as_ref() == Some(&held.stamp)
-                });
-                let asked = asked_page.as_ref() == Some(&(revision, held.stamp.clone()));
-                let waits = page_failed
-                    .as_ref()
-                    .is_some_and(|(_, failing)| failing.waits(&held.stamp));
-                if !current && !asked && !waits {
-                    asked_page = Some((revision, held.stamp.clone()));
+                if pages.ask((), &held.stamp) {
                     fetching.push(page_of(&target, &held.row, revision, held.stamp.clone()));
                 }
             }
             Some((revision, None)) if latest.is_some() => {
-                let said = shown
-                    .as_ref()
-                    .is_some_and(|shown| shown.revision == revision && shown.stamp.is_none());
-                if !said {
-                    shown = Some(Shown {
-                        revision,
-                        stamp: None,
-                        page: Err(IpcError::new(
-                            ErrorCode::HelmRevisionGone,
-                            format!(
-                                "Helm no longer keeps revision {revision} of {}",
-                                target.name
-                            ),
-                        )),
-                    });
-                    asked_page = None;
-                    page_failed = None;
+                if gone.as_ref().is_none_or(|(at, _)| *at != revision) {
+                    let error = IpcError::new(
+                        ErrorCode::HelmRevisionGone,
+                        format!(
+                            "Helm no longer keeps revision {revision} of {}",
+                            target.name
+                        ),
+                    );
+                    gone = Some((revision, error));
                 }
             }
-            _ => {
-                shown = None;
-                asked_page = None;
-                page_failed = None;
-            }
+            _ => gone = None,
         }
         // A failure of the request for the wanted revision's Secret as it
         // stands, which withdraws the page shown.
-        let page_failing = page_failed
-            .as_ref()
-            .map(|(_, failing)| failing)
-            .filter(|failing| wanted_held.is_some_and(|held| failing.was_for(&held.stamp)));
+        let page_failing = wanted_held.and_then(|held| pages.failure(&(), &held.stamp));
+        // So that no Reveal reads a Secret that is gone while the next page
+        // is fetched.
+        let shown = pages.get(&()).filter(|(stamp, _)| {
+            revisions
+                .values()
+                .any(|held| stamp.same_secret(&held.stamp))
+        });
         // The page shown is an earlier version of the wanted revision's
         // Secret, whose rewrite is decoded again.
         let rewritten = shown
-            .as_ref()
             .zip(wanted_held)
-            .is_some_and(|(shown, held)| {
-                Some(shown.revision) == wanted
-                    && shown
-                        .stamp
-                        .as_ref()
-                        .is_some_and(|stamp| *stamp != held.stamp)
+            .is_some_and(|((stamp, shown), held)| {
+                Some(shown.revision) == wanted && *stamp != held.stamp
             });
         let page = shown
-            .as_ref()
             .filter(|_| page_failing.is_none())
-            .and_then(|shown| shown.page.as_ref().ok().map(|page| (shown, page)));
-        *control.shown.lock().expect("release lock") = page.map(|(shown, page)| ShownPage {
+            .and_then(|(stamp, shown)| shown.page.as_ref().ok().map(|page| (stamp, shown, page)));
+        *control.shown.lock().expect("release lock") = page.map(|(stamp, shown, page)| ShownPage {
             revision: shown.revision,
-            secret: shown.stamp.as_ref().and_then(Stamp::uid).map(Into::into),
+            secret: stamp.uid().map(Into::into),
             page: Arc::clone(page),
         });
-        let page = page.map(|(_, page)| page);
+        let page = page.map(|(_, _, page)| page);
 
         // The newest revision's summary, which the overview's header prints
         // as the list's row does: the page's where the editor shows that
         // revision, else decoded on its own.
         let newest_row =
             latest.and_then(|latest| revisions.get(&latest).map(|held| (latest, held)));
-        if newest_failed.as_ref().is_some_and(|failing| {
-            newest_row.is_none_or(|(_, held)| !failing.same_secret(&held.stamp))
-        }) {
-            newest_failed = None;
-        }
+        newest.retain(|()| newest_row.is_some());
         let known = match newest_row {
             None => Known::default(),
             Some((latest, held)) if wanted == Some(latest) => {
-                let paged = shown.as_ref().and_then(|shown| {
-                    let stamp = shown.stamp.as_ref()?;
-                    let summary = shown.page.as_ref().map(|page| page.summary());
-                    (shown.revision == latest).then(|| (stamp, summary.map_err(|error| error.code)))
-                });
+                let paged =
+                    shown
+                        .filter(|(_, shown)| shown.revision == latest)
+                        .map(|(stamp, shown)| {
+                            let summary = shown.page.as_ref().map(|page| page.summary());
+                            (stamp, summary.map_err(|error| error.code))
+                        });
                 Known::of(&held.stamp, paged, page_failing)
             }
             Some((_, held)) => {
-                let decoded = newest
-                    .as_ref()
-                    .map(|(stamp, decoded)| (stamp, decoded.as_ref().map_err(|code| *code)));
-                let read = decoded.is_some_and(|(stamp, _)| *stamp == held.stamp);
-                let asked = asked_newest.as_ref() == Some(&held.stamp);
-                let waits = newest_failed
-                    .as_ref()
-                    .is_some_and(|failing| failing.waits(&held.stamp));
-                if !read && !asked && !waits && parts.overview {
-                    asked_newest = Some(held.stamp.clone());
+                if parts.overview && newest.ask((), &held.stamp) {
                     fetching.push(newest_of(&target, &held.row, held.stamp.clone()));
                 }
-                Known::of(&held.stamp, decoded, newest_failed.as_ref())
+                let decoded = newest
+                    .get(&())
+                    .map(|(stamp, decoded)| (stamp, decoded.as_ref().map_err(|code| *code)));
+                Known::of(&held.stamp, decoded, newest.failure(&(), &held.stamp))
             }
         };
 
         if parts.history {
-            lines.retain(|revision, (stamp, _)| {
-                revisions
-                    .get(revision)
-                    .is_some_and(|held| stamp.same_secret(&held.stamp))
-            });
-            lines_failed.retain(|revision, failing| {
-                revisions
-                    .get(revision)
-                    .is_some_and(|held| failing.same_secret(&held.stamp))
-            });
+            lines.retain(|revision| revisions.contains_key(revision));
             for (&revision, held) in &revisions {
-                let read = lines
-                    .get(&revision)
-                    .is_some_and(|(stamp, _)| *stamp == held.stamp);
-                let paged = asked_page.as_ref() == Some(&(revision, held.stamp.clone()));
-                let waits = lines_failed
-                    .get(&revision)
-                    .is_some_and(|failing| failing.waits(&held.stamp));
-                if read || paged || waits || asked_lines.get(&revision) == Some(&held.stamp) {
+                if pages.asking(&(), &held.stamp) || !lines.wants(&revision, &held.stamp) {
                     continue;
                 }
-                match &shown {
-                    Some(Shown {
-                        revision: at,
-                        stamp: Some(stamp),
-                        page: Ok(page),
-                    }) if *at == revision && *stamp == held.stamp => {
-                        let line = twigo_helm::line(page);
-                        lines.insert(revision, (held.stamp.clone(), line));
-                        lines_failed.remove(&revision);
+                match shown {
+                    Some((stamp, Shown { page: Ok(page), .. })) if *stamp == held.stamp => {
+                        lines.keep(revision, held.stamp.clone(), twigo_helm::line(page));
                     }
                     _ => {
-                        asked_lines.insert(revision, held.stamp.clone());
+                        lines.ask(revision, &held.stamp);
                         fetching.push(line_of(
                             &target,
                             &held.row,
@@ -606,8 +492,6 @@ async fn run(
             }
         } else {
             lines.clear();
-            asked_lines.clear();
-            lines_failed.clear();
         }
 
         let printed = newest_row
@@ -626,18 +510,15 @@ async fn run(
                 .iter()
                 .rev()
                 .map(|(&revision, held)| {
-                    let failed = lines_failed
-                        .get(&revision)
-                        .filter(|failing| failing.was_for(&held.stamp))
-                        .map(|failing| failing.error().clone());
+                    let failed = lines.failure(&revision, &held.stamp).cloned();
                     match lines.get(&revision) {
                         Some((stamp, line)) if *stamp == held.stamp => line.clone(),
-                        Some((_, line)) => RevisionLine {
+                        Some((stamp, line)) if stamp.same_secret(&held.stamp) => RevisionLine {
                             status: held.row.meta.label("status").unwrap_or_default().to_owned(),
                             problem: failed,
                             ..line.clone()
                         },
-                        None => undecoded(
+                        _ => undecoded(
                             revision,
                             held.row.meta.label("status").unwrap_or_default(),
                             failed,
@@ -646,9 +527,10 @@ async fn run(
                 })
                 .collect::<Vec<_>>()
         });
-        let revision = match &page_failed {
-            Some((revision, _)) => Some(*revision),
-            None => shown.as_ref().map(|shown| shown.revision),
+        let revision = match (page_failing, &gone) {
+            (Some(_), _) => wanted,
+            (None, Some((revision, _))) => Some(*revision),
+            (None, None) => shown.map(|(_, shown)| shown.revision),
         };
         let now = Sent {
             status,
@@ -663,11 +545,9 @@ async fn run(
                         .next_back()
                         .map(|(&previous, _)| previous)
                 }),
-            problem: match page_failing {
-                Some(failing) => Some(failing.error().clone()),
-                None => shown
-                    .as_ref()
-                    .and_then(|shown| shown.page.as_ref().err().cloned()),
+            problem: match (page_failing, &gone) {
+                (Some(error), _) | (None, Some((_, error))) => Some(error.clone()),
+                (None, None) => shown.and_then(|(_, shown)| shown.page.as_ref().err().cloned()),
             },
             header: (printed, deployed),
             history,
