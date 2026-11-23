@@ -14,7 +14,8 @@ use flate2::Compression;
 use flate2::write::GzEncoder;
 use twigo_helm::{Page, Release, Stored, compared, line, overview, page};
 use twigo_ipc::{
-    Block, ComparedPart, ErrorCode, Fold, HelmPart, Printed, Span, Tone, Value, ValueStep,
+    Block, ComparedPart, ErrorCode, Fold, Gvr, HelmPart, Printed, Resource, Span, Tone, Value,
+    ValueStep,
 };
 
 fn opened(file: &str) -> Page {
@@ -31,6 +32,7 @@ fn shown(release: &Page, deployed: Option<u32>) -> twigo_ipc::Overview {
         &Release {
             printed: &printed,
             deployed,
+            resources: &[],
         },
     )
 }
@@ -379,16 +381,49 @@ fn an_object_whose_document_writes_an_empty_namespace_links_to_the_release_s() {
     );
 }
 
+fn served(group: &str, kind: &str, namespaced: bool) -> Resource {
+    Resource {
+        gvr: Gvr {
+            group: group.to_owned(),
+            version: "v1".to_owned(),
+            resource: format!("{}s", kind.to_lowercase()),
+        },
+        kind: kind.to_owned(),
+        singular: kind.to_lowercase(),
+        short_names: Vec::new(),
+        namespaced,
+        subresources: Vec::new(),
+    }
+}
+
 #[test]
-fn the_objects_say_the_namespace_they_live_in_where_the_manifest_or_the_kind_tells_it() {
+fn the_objects_say_the_namespace_they_live_in_as_discovery_scopes_their_kind() {
     let release = serde_json::json!({
         "name": "spread",
         "namespace": "payments",
         "version": 1,
         "info": { "status": "deployed" },
-        "manifest": "---\nkind: ConfigMap\napiVersion: v1\nmetadata: {name: none}\n---\nkind: ConfigMap\napiVersion: v1\nmetadata: {name: empty, namespace: \"\"}\n---\nkind: ConfigMap\napiVersion: v1\nmetadata: {name: elsewhere, namespace: other}\n---\nkind: Deployment\napiVersion: apps/v1\nmetadata: {name: web}\n---\nkind: ClusterRole\napiVersion: rbac.authorization.k8s.io/v1\nmetadata: {name: reader}\n---\nkind: ServiceMonitor\napiVersion: monitoring.coreos.com/v1\nmetadata: {name: scrape}\n",
+        "manifest": "---\nkind: ConfigMap\napiVersion: v1\nmetadata: {name: none}\n---\nkind: ConfigMap\napiVersion: v1\nmetadata: {name: elsewhere, namespace: other}\n---\nkind: Deployment\napiVersion: apps/v1\nmetadata: {name: web}\n---\nkind: ServiceMonitor\napiVersion: monitoring.coreos.com/v1\nmetadata: {name: scrape}\n---\nkind: ClusterRole\napiVersion: rbac.authorization.k8s.io/v1\nmetadata: {name: reader, namespace: payments}\n---\nkind: ClusterIssuer\napiVersion: cert-manager.io/v1\nmetadata: {name: issuer}\n---\nkind: Widget\napiVersion: example.com/v1\nmetadata: {name: unknown}\n---\nkind: Widget\napiVersion: example.com/v1\nmetadata: {name: written, namespace: other}\n",
     });
-    let overview = shown(&built(&release), Some(1));
+    let resources = [
+        served("", "ConfigMap", true),
+        served("apps", "Deployment", true),
+        served("monitoring.coreos.com", "ServiceMonitor", true),
+        served("rbac.authorization.k8s.io", "ClusterRole", false),
+        served("cert-manager.io", "ClusterIssuer", false),
+    ];
+    let printed = [Printed {
+        column: "Status".to_owned(),
+        value: "deployed".to_owned(),
+    }];
+    let overview = overview(
+        &built(&release),
+        &Release {
+            printed: &printed,
+            deployed: Some(1),
+            resources: &resources,
+        },
+    );
     let objects = overview
         .sections
         .iter()
@@ -410,11 +445,13 @@ fn the_objects_say_the_namespace_they_live_in_where_the_manifest_or_the_kind_tel
         lives,
         [
             ("none", "payments"),
-            ("empty", "payments"),
             ("elsewhere", "other"),
             ("web", "payments"),
+            ("scrape", "payments"),
             ("reader", ""),
-            ("scrape", ""),
+            ("issuer", ""),
+            ("unknown", ""),
+            ("written", "other"),
         ]
     );
 }

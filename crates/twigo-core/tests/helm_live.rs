@@ -3,7 +3,8 @@
 //! of it, in a context that is `read-only`, and a namespace the account may
 //! not read says so beside the one it may; its History is `helm history`'s,
 //! each revision's notes, values and manifest are `helm get`'s once revealed
-//! and hold no value before, a truncated release Secret says so on its own
+//! and hold no value before, its overview places its objects in the release's
+//! namespace by the cluster's discovery, a truncated release Secret says so on its own
 //! row, and a release near the 1 MiB limit opens while the runtime keeps
 //! ticking. The chart renders a ConfigMap, a Secret from its values and
 //! notes that print the revision, and no pod.
@@ -33,9 +34,9 @@ use tokio::sync::{mpsc, watch};
 use twigo_core::{Core, Started};
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    Ack, Cell, Column, Execute, HelmPart, ListBatch, Mode, OpenRelease, OperationEvent, Part,
-    Parts, PlanRequest, ReleaseBatch, ReleaseListQuery, ReleaseManifest, ReleaseParts, ReleaseRef,
-    RevisionLine, SetReleaseView, SetWindow, SubscriptionId, ViewState,
+    Ack, Block, Cell, Column, Execute, HelmPart, ListBatch, Mode, OpenRelease, OperationEvent,
+    Overview, Part, Parts, PlanRequest, ReleaseBatch, ReleaseListQuery, ReleaseManifest,
+    ReleaseParts, ReleaseRef, RevisionLine, SetReleaseView, SetWindow, SubscriptionId, ViewState,
 };
 
 const WAIT: Duration = Duration::from_secs(60);
@@ -427,6 +428,8 @@ const ALL: ReleaseParts = ReleaseParts {
 struct Shown {
     revision: Option<u32>,
     overview: bool,
+    /// The namespace of each object the overview lists.
+    placed: Vec<String>,
     notes: Option<String>,
     values: bool,
     manifest: Option<ReleaseManifest>,
@@ -488,8 +491,9 @@ impl Editor {
                 assert!(batch.problem.is_none(), "{:?}", batch.problem);
                 self.sent.push(serde_json::to_string(&batch).unwrap());
                 self.shown.revision = batch.revision;
-                if batch.overview.is_some() {
+                if let Some(overview) = &batch.overview {
                     self.shown.overview = true;
+                    self.shown.placed = placed(overview);
                     self.shown.notes = batch.notes.map(|notes| notes.text);
                 }
                 self.shown.values |= batch.values.is_some();
@@ -605,6 +609,23 @@ fn documents(manifest: &str) -> Vec<&str> {
         .collect()
 }
 
+/// The Namespace column of the overview's Objects.
+fn placed(overview: &Overview) -> Vec<String> {
+    let objects = overview
+        .sections
+        .iter()
+        .find(|section| section.id == "helm.objects");
+    let Some(Block::Table { rows, .. }) = objects.and_then(|section| section.blocks.first()) else {
+        return Vec::new();
+    };
+    rows.iter()
+        .map(|row| match &row[2] {
+            twigo_ipc::Value::Text { text } => text.clone(),
+            other => panic!("a text: {other:?}"),
+        })
+        .collect()
+}
+
 fn yaml(document: &str) -> Value {
     serde_saphyr::from_str(document).unwrap()
 }
@@ -650,6 +671,9 @@ async fn an_open_release_shows_what_helm_gets_and_no_value_before_a_reveal() {
         .await;
     let mut editor = Editor::open(&core, &space, namespace, "app").await;
     editor.whole(2, 2).await;
+    editor
+        .until(|shown| shown.placed == [namespace.as_str(), namespace.as_str()])
+        .await;
     editor.whole(1, 2).await;
     for text in list.sent.iter().chain(&editor.sent) {
         assert!(!text.contains("H4sI"), "a raw release before a Reveal");

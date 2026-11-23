@@ -15,7 +15,7 @@ use twigo_ipc::{
     ReleaseBatch, ReleaseListQuery,
 };
 
-pub(crate) use release::{Opened, Showing, ShownPage};
+pub(crate) use release::{Discovery, Opened, Showing, ShownPage};
 use releases::Releases;
 
 /// The seam of a list of releases, as `TWIGO_PANIC` names it.
@@ -82,12 +82,14 @@ pub(crate) async fn list(
     ))
 }
 
-/// The release `request` opens in `context`, whose batches go through
-/// `send` until it says the window is gone.
+/// The release `request` opens in `context`, whose overview places its
+/// objects by `discovery`, and whose batches go through `send` until it says
+/// the window is gone.
 pub(crate) async fn open(
     hub: &Hub,
     context: String,
     request: OpenRelease,
+    discovery: Discovery,
     send: impl FnMut(ReleaseBatch) -> bool + Send + 'static,
 ) -> Result<Opened, IpcError> {
     let OpenRelease {
@@ -104,7 +106,9 @@ pub(crate) async fn open(
         namespace: release.namespace,
         name: release.name,
     };
-    Ok(Opened::spawn(target, secrets, revision, parts, send))
+    Ok(Opened::spawn(
+        target, secrets, revision, parts, discovery, send,
+    ))
 }
 
 /// Two revisions of a release in `context`, each fetched and decoded, then

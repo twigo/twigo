@@ -10,7 +10,9 @@
 //! lands; a page goes at once when its revision no longer holds the Secret
 //! it came from, whichever revision is wanted. A request that fails is said
 //! while it fails for that version of the Secret, and asked again as the
-//! list asks. Batches go with flow control, as an open object's do (3.5).
+//! list asks. The overview places the manifest's objects by the space's
+//! discovery, and goes again when discovery answers otherwise. Batches go
+//! with flow control, as an open object's do (3.5).
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
@@ -21,12 +23,14 @@ use tokio::sync::{Notify, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 use twigo_cache::batcher::FLUSH;
+use twigo_cache::discovery::Resources;
 use twigo_cache::hub::{Delta, Hub, Subscription};
 use twigo_cache::store::RowKey;
 use twigo_cache::table::Row;
 use twigo_helm::{Page, Stored, Summary};
 use twigo_ipc::{
-    ErrorCode, IpcError, ReleaseBatch, ReleaseParts, RevisionLine, Scrubbed, ViewState,
+    Discovered, ErrorCode, IpcError, ReleaseBatch, ReleaseParts, Resource, RevisionLine, Scrubbed,
+    ViewState,
 };
 use twigo_panic::contain;
 
@@ -38,6 +42,9 @@ pub(crate) const ITEM: &str = "helm release";
 
 /// How many revisions History fetches at once, as the list does.
 const AT_ONCE: usize = 4;
+
+/// The space's discovery, once the context's follower is at hand.
+pub(crate) type Discovery = BoxFuture<'static, Resources>;
 
 /// An open release: dropping it ends its task and its upstream.
 pub(crate) struct Opened {
@@ -85,6 +92,7 @@ impl Opened {
         secrets: Subscription<Row>,
         revision: Option<u32>,
         parts: ReleaseParts,
+        discovery: Discovery,
         send: impl FnMut(ReleaseBatch) -> bool + Send + 'static,
     ) -> Self {
         let control = Arc::new(Control::default());
@@ -97,6 +105,7 @@ impl Opened {
             target,
             secrets,
             (revision, parts),
+            Served::new(discovery),
             Arc::clone(&control),
             send,
         ));
@@ -160,6 +169,7 @@ async fn serve(
     target: Target,
     secrets: Subscription<Row>,
     view: (Option<u32>, ReleaseParts),
+    served: Served,
     control: Arc<Control>,
     mut send: impl FnMut(ReleaseBatch) -> bool,
 ) {
@@ -177,7 +187,14 @@ async fn serve(
     };
     let ran = contain(
         ITEM,
-        run(target, secrets, view, Arc::clone(&control), &mut tell),
+        run(
+            target,
+            secrets,
+            view,
+            served,
+            Arc::clone(&control),
+            &mut tell,
+        ),
     )
     .await;
     if ran.is_ok() {
@@ -204,6 +221,46 @@ async fn serve(
         manifest: None,
         history: None,
     });
+}
+
+/// What the space's discovery serves, as the overview reads it: nothing
+/// until the follower is at hand and has answered, and nothing while it
+/// names a cluster it has not asked yet or reaches none.
+struct Served {
+    opening: Option<Discovery>,
+    followed: Option<Resources>,
+    resources: Vec<Resource>,
+}
+
+impl Served {
+    fn new(opening: Discovery) -> Self {
+        Self {
+            opening: Some(opening),
+            followed: None,
+            resources: Vec::new(),
+        }
+    }
+
+    /// Waits until discovery answers otherwise than it last did.
+    async fn changed(&mut self) {
+        loop {
+            if let Some(opening) = &mut self.opening {
+                self.followed = Some(opening.await);
+                self.opening = None;
+            }
+            let Some(followed) = &mut self.followed else {
+                return std::future::pending().await;
+            };
+            let resources = match followed.next().await {
+                Discovered::Ready { resources, .. } => resources,
+                Discovered::Pending { .. } | Discovered::Failed { .. } => Vec::new(),
+            };
+            if resources != self.resources {
+                self.resources = resources;
+                return;
+            }
+        }
+    }
 }
 
 /// A revision of the release, by the Secret that holds it.
@@ -243,6 +300,7 @@ async fn run(
     target: Target,
     secrets: Subscription<Row>,
     (mut pinned, mut parts): (Option<u32>, ReleaseParts),
+    mut served: Served,
     control: Arc<Control>,
     mut send: impl FnMut(ReleaseBatch) -> bool,
 ) {
@@ -274,6 +332,10 @@ async fn run(
         let ticked = tokio::select! {
             _ = interval.tick() => true,
             () = control.wake.notified() => false,
+            () = served.changed() => {
+                dirty.page = true;
+                false
+            }
             Some(answer) = fetching.next(), if !fetching.is_empty() => {
                 match answer {
                     Answer::Page(revision, stamp, page) => {
@@ -657,6 +719,7 @@ async fn run(
                 let release = twigo_helm::Release {
                     printed: &now.header.0,
                     deployed: now.header.1,
+                    resources: &served.resources,
                 };
                 (
                     Some(twigo_helm::overview(page, &release)),

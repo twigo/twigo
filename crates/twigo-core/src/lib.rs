@@ -802,7 +802,8 @@ impl Core {
     ) -> Result<SubscriptionId, IpcError> {
         let ticket = self.releases.ticket(window);
         let context = self.context(&request.release.space)?;
-        let opened = helm::open(&self.hub, context, request, send).await?;
+        let discovery = self.discovery(&context);
+        let opened = helm::open(&self.hub, context, request, discovery, send).await?;
         self.releases.keep(ticket, opened)
     }
 
@@ -833,6 +834,18 @@ impl Core {
     ) -> Result<ComparedRevisions, IpcError> {
         let context = self.context(&request.release.space)?;
         helm::compare(&self.hub, &context, request).await
+    }
+
+    /// The context's discovery as an open release follows it, which does not wait for the
+    /// catalog to list the context.
+    fn discovery(&self, context: &str) -> helm::Discovery {
+        let (core, context) = (self.this.clone(), context.to_owned());
+        Box::pin(async move {
+            let Some(core) = core.upgrade() else {
+                return std::future::pending().await;
+            };
+            core.followed(&context).await.follow()
+        })
     }
 
     /// A list or an object does not wait for the catalog to list the context, and has the

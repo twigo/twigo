@@ -16,7 +16,7 @@ use serde_json::Value;
 use twigo_helm::{Page, Release, compared, line, overview, page};
 use twigo_ipc::{
     ComparedPart, ComparedRevisions, HelmPart, IpcError, Overview, Printed, ReleaseManifest,
-    ReleaseValues, RevisionLine, Scrubbed, ValueStep,
+    ReleaseValues, Resource, RevisionLine, Scrubbed, ValueStep,
 };
 use twigo_policy::redact::is_mask;
 
@@ -113,7 +113,14 @@ fn read(namespace: &str, name: &str, revisions: &[u32]) -> Vec<Read> {
         .collect()
 }
 
-fn mocked(namespace: &str, name: &str, read: &[Read]) -> Mocked {
+/// The discovery the mock's spaces answer, recorded from kind 1.37.
+fn recorded_resources() -> Vec<Resource> {
+    let file = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packages/protocol/src/mock/resources.json");
+    serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap()
+}
+
+fn mocked(namespace: &str, name: &str, read: &[Read], resources: &[Resource]) -> Mocked {
     let newest = read.last().unwrap();
     let summary = newest.page.as_ref().ok().map(Page::summary);
     let latest = Latest {
@@ -152,6 +159,7 @@ fn mocked(namespace: &str, name: &str, read: &[Read]) -> Mocked {
     let release = Release {
         printed: &printed,
         deployed,
+        resources,
     };
     let revisions = read
         .iter()
@@ -318,6 +326,7 @@ fn the_mock_answers_with_the_recorded_releases_and_none_of_their_secrets() {
     let mut releases = Vec::new();
     let mut revealed: BTreeMap<String, BTreeMap<u32, Vec<Revealed>>> = BTreeMap::new();
     let mut secrets = Vec::new();
+    let resources = recorded_resources();
     for (namespace, name, revisions) in RELEASES {
         let read = read(namespace, name, revisions);
         for read in &read {
@@ -347,7 +356,7 @@ fn the_mock_answers_with_the_recorded_releases_and_none_of_their_secrets() {
                 .or_default()
                 .insert(read.revision, answers);
         }
-        releases.push(mocked(namespace, name, &read));
+        releases.push(mocked(namespace, name, &read, &resources));
     }
     let json =
         serde_json::to_string_pretty(&serde_json::json!({ "releases": releases })).unwrap() + "\n";

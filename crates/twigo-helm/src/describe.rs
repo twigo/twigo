@@ -5,8 +5,8 @@
 //! goes scrubbed beside the overview.
 
 use twigo_ipc::{
-    Block, Field, Finding, Fold, Header, Label, ObjectRef, Overview, Printed, RevisionLine,
-    Scrubbed, Section, Span, Tone, Value, Vital,
+    Block, Field, Finding, Fold, Header, Label, ObjectRef, Overview, Printed, Resource,
+    RevisionLine, Scrubbed, Section, Span, Tone, Value, Vital,
 };
 
 use crate::{Page, Status, Summary};
@@ -17,6 +17,9 @@ pub struct Release<'a> {
     pub printed: &'a [Printed],
     /// The highest revision Helm keeps whose status is `deployed`.
     pub deployed: Option<u32>,
+    /// The resources the space's cluster serves, as its discovery last
+    /// answered, which say whether a kind of the manifest is namespaced.
+    pub resources: &'a [Resource],
 }
 
 /// What a vital without a value shows.
@@ -40,7 +43,7 @@ pub fn overview(page: &Page, release: &Release<'_>) -> Overview {
             )
         });
     }
-    sections.extend(objects(page));
+    sections.extend(objects(page, release.resources));
     sections.extend(hooks(page));
     sections.push(chart(page));
     sections.push(metadata(page));
@@ -157,51 +160,14 @@ fn vitals(summary: &Summary, deployed: Option<u32>) -> Vec<Vital> {
     ]
 }
 
-/// The built-in kinds whose objects live in a namespace, by API group and
-/// kind, as the discovery of Kubernetes 1.37 lists them. A manifest does not
-/// say a custom resource's scope, only the cluster does, so such a kind is
-/// left out and its object is shown with no namespace unless its document
-/// writes one.
-const NAMESPACED: [(&str, &str); 32] = [
-    ("", "ConfigMap"),
-    ("", "Endpoints"),
-    ("", "Event"),
-    ("", "LimitRange"),
-    ("", "PersistentVolumeClaim"),
-    ("", "Pod"),
-    ("", "PodTemplate"),
-    ("", "ReplicationController"),
-    ("", "ResourceQuota"),
-    ("", "Secret"),
-    ("", "Service"),
-    ("", "ServiceAccount"),
-    ("apps", "ControllerRevision"),
-    ("apps", "DaemonSet"),
-    ("apps", "Deployment"),
-    ("apps", "ReplicaSet"),
-    ("apps", "StatefulSet"),
-    ("autoscaling", "HorizontalPodAutoscaler"),
-    ("batch", "CronJob"),
-    ("batch", "Job"),
-    ("certificates.k8s.io", "PodCertificateRequest"),
-    ("coordination.k8s.io", "Lease"),
-    ("discovery.k8s.io", "EndpointSlice"),
-    ("events.k8s.io", "Event"),
-    ("networking.k8s.io", "Ingress"),
-    ("networking.k8s.io", "NetworkPolicy"),
-    ("policy", "PodDisruptionBudget"),
-    ("rbac.authorization.k8s.io", "Role"),
-    ("rbac.authorization.k8s.io", "RoleBinding"),
-    ("resource.k8s.io", "ResourceClaim"),
-    ("resource.k8s.io", "ResourceClaimTemplate"),
-    ("storage.k8s.io", "CSIStorageCapacity"),
-];
-
 /// What the manifest makes, each a link to its object, with the namespace it
-/// lives in: the one its document writes, else the release's where its kind is
-/// namespaced, as cli-runtime's `SetNamespace` places it, and none for a
-/// cluster-scoped kind.
-fn objects(page: &Page) -> Option<Section> {
+/// lives in by what discovery says of its kind: for a namespaced kind the one
+/// its document writes, else the release's, as cli-runtime's `SetNamespace`
+/// places it; none for a cluster-scoped kind, whose namespace the API server
+/// clears
+/// ([meta.go](https://github.com/kubernetes/apiserver/blob/v0.37.2/pkg/registry/rest/meta.go#L47-L76));
+/// and for a kind discovery does not list, the one its document writes.
+fn objects(page: &Page, resources: &[Resource]) -> Option<Section> {
     if page.objects.is_empty() {
         return None;
     }
@@ -214,11 +180,15 @@ fn objects(page: &Page) -> Option<Section> {
                 .api_version
                 .split_once('/')
                 .unwrap_or(("", &head.api_version));
-            let namespace = head.namespace.as_deref().or_else(|| {
-                NAMESPACED
-                    .contains(&(group, head.kind.as_str()))
-                    .then_some(target)
-            });
+            let namespaced = resources
+                .iter()
+                .find(|resource| resource.gvr.group == group && resource.kind == head.kind)
+                .map(|resource| resource.namespaced);
+            let namespace = match namespaced {
+                Some(true) => Some(head.namespace.as_deref().unwrap_or(target)),
+                Some(false) => None,
+                None => head.namespace.as_deref(),
+            };
             vec![
                 Value::Text {
                     text: head.kind.clone(),

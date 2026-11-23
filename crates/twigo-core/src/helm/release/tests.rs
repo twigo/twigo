@@ -4,13 +4,16 @@ use std::time::Duration;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use serde_json::{Value, json};
-use twigo_cache::fake::Fake;
+use tokio::sync::watch;
+use twigo_cache::discovery::Followers;
+use twigo_cache::fake::{Fake, Group};
 use twigo_cache::hub::Hub;
 use twigo_ipc::{
-    CompareRevisions, ComparedPart, ErrorCode, IpcError, OpenRelease, ReleaseParts, ReleaseRef,
-    ViewState,
+    Block, CompareRevisions, ComparedPart, ErrorCode, IpcError, OpenRelease, ReleaseParts,
+    ReleaseRef, ViewState,
 };
 use twigo_kube::client::{Budgets, Clients};
+use twigo_kube::discovery::Cache;
 
 use super::*;
 use crate::helm::fetch::{DECODE, secret_name};
@@ -40,13 +43,43 @@ struct Rig {
 impl Rig {
     async fn open(fake: Fake, revision: Option<u32>, parts: ReleaseParts) -> Self {
         let (hub, clients) = fake.hub(Budgets::default());
+        Self::over(
+            fake,
+            (hub, clients),
+            revision,
+            parts,
+            Box::pin(std::future::pending()),
+        )
+        .await
+    }
+
+    /// Opens the release with the fake's discovery, as the core follows it.
+    async fn discovering(fake: Fake, parts: ReleaseParts, cache: &std::path::Path) -> Self {
+        let (hub, clients) = fake.hub(Budgets::default());
+        let followers = Followers::new(hub.clone(), Arc::new(Cache::new(cache)));
+        let discovery = Box::pin(async move {
+            followers
+                .get("kind-test", async { watch::channel(None).1 })
+                .await
+                .follow()
+        });
+        Self::over(fake, (hub, clients), None, parts, discovery).await
+    }
+
+    async fn over(
+        fake: Fake,
+        (hub, clients): (Hub, Arc<Clients>),
+        revision: Option<u32>,
+        parts: ReleaseParts,
+        discovery: Discovery,
+    ) -> Self {
         let (watched, send) = Watched::new();
         let request = OpenRelease {
             release: release_ref(),
             revision,
             parts,
         };
-        let opened = crate::helm::open(&hub, "kind-test".to_owned(), request, send)
+        let opened = crate::helm::open(&hub, "kind-test".to_owned(), request, discovery, send)
             .await
             .unwrap();
         Self {
@@ -140,6 +173,80 @@ async fn an_open_release_shows_its_latest_revision_fetched_once_and_each_part_as
     assert_eq!(rig.gets(2), 1, "the page is held while the editor is open");
     let shown = rig.opened.showing().now().expect("a page is held");
     assert_eq!(shown.revision, 2);
+}
+
+/// The names and namespaces of the overview's Objects.
+fn placed(shown: &Shown) -> Vec<(String, String)> {
+    let Some(overview) = &shown.overview else {
+        return Vec::new();
+    };
+    let objects = overview
+        .sections
+        .iter()
+        .find(|section| section.id == "helm.objects");
+    let Some(Block::Table { rows, .. }) = objects.and_then(|section| section.blocks.first()) else {
+        return Vec::new();
+    };
+    rows.iter()
+        .map(|row| match (&row[1], &row[2]) {
+            (twigo_ipc::Value::Link { text, .. }, twigo_ipc::Value::Text { text: namespace }) => {
+                (text.clone(), namespace.clone())
+            }
+            other => panic!("a link and a text: {other:?}"),
+        })
+        .collect()
+}
+
+fn group(resources: &[(&str, &str)]) -> Group {
+    Group {
+        version: "v1".to_owned(),
+        stale: false,
+        resources: resources
+            .iter()
+            .map(|(resource, kind)| ((*resource).to_owned(), (*kind).to_owned(), true))
+            .collect(),
+        verbs: vec!["get", "list", "watch"],
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_overview_places_a_custom_resource_once_the_space_s_discovery_serves_its_kind() {
+    let fake = Fake::default();
+    fake.state()
+        .served
+        .insert(String::new(), group(&[("configmaps", "ConfigMap")]));
+    let mut release = testing::release("a", "app", 1, "deployed");
+    release["manifest"] = json!(
+        release["manifest"].as_str().unwrap().to_owned()
+            + "---\n# Source: demo/templates/monitor.yaml\napiVersion: monitoring.coreos.com/v1\nkind: ServiceMonitor\nmetadata:\n  name: app\n"
+    );
+    testing::put(&fake, &release, "deployed");
+    let cache = tempfile::tempdir().unwrap();
+    let mut rig = Rig::discovering(fake.clone(), OVERVIEW, cache.path()).await;
+    let pair = |name: &str, namespace: &str| (name.to_owned(), namespace.to_owned());
+    rig.until("the ConfigMap in the release's namespace", |shown| {
+        placed(shown) == [pair("app", "a"), pair("app", "")]
+    })
+    .await;
+
+    fake.state().served.insert(
+        "monitoring.coreos.com".to_owned(),
+        group(&[("servicemonitors", "ServiceMonitor")]),
+    );
+    fake.put(
+        "apiextensions.k8s.io",
+        "customresourcedefinitions",
+        None,
+        json!({
+            "kind": "CustomResourceDefinition",
+            "apiVersion": "apiextensions.k8s.io/v1",
+            "metadata": { "name": "servicemonitors.monitoring.coreos.com", "uid": "crd" },
+        }),
+    );
+    rig.until("the ServiceMonitor in the release's namespace", |shown| {
+        placed(shown) == [pair("app", "a"), pair("app", "a")]
+    })
+    .await;
 }
 
 #[tokio::test(start_paused = true)]
