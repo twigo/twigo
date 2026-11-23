@@ -233,7 +233,7 @@ async fn a_release_that_cannot_be_read_says_its_code_and_shows_no_part() {
     assert_eq!(shown.revision, Some(1));
     assert!(shown.overview.is_none() && shown.values.is_none() && shown.manifest.is_none());
     let line = &shown.history.as_ref().unwrap()[0];
-    assert_eq!(line.status, "deployed", "its label's");
+    assert_eq!(line.status, "unreadable", "as the list's row says it");
     assert_eq!(
         line.problem.as_ref().unwrap().code,
         ErrorCode::HelmTruncated
@@ -330,6 +330,11 @@ async fn requests_that_fail_are_said_while_they_do_and_the_revisions_shown_once_
     .await;
     assert_eq!(rig.watched.shown.revision, Some(2));
     assert!(rig.opened.showing().now().is_none());
+    let lines = rig.watched.shown.history.as_ref().unwrap();
+    assert_eq!(
+        lines[1].status, "superseded",
+        "a request's failure keeps the label's"
+    );
 
     for path in &paths {
         rig.fake.state().forbidden.remove(path);

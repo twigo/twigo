@@ -31,7 +31,7 @@ use twigo_ipc::{
 use twigo_panic::contain;
 
 use super::fetch::{self, Failed};
-use super::releases::{Decoded, Failing, Known, Stamp, cells, printed};
+use super::releases::{Decoded, Failing, Known, Stamp, UNREADABLE, cells, printed};
 
 /// The seam of an open release, as `TWIGO_PANIC` names it.
 pub(crate) const ITEM: &str = "helm release";
@@ -302,7 +302,7 @@ async fn run(
                                 }
                                 line => {
                                     let line = line.unwrap_or_else(|failed| {
-                                        unread(&revisions, revision, failed.error())
+                                        unreadable(revision, failed.error())
                                     });
                                     lines.insert(revision, (stamp, line));
                                 }
@@ -715,19 +715,18 @@ fn labelled(revision: u32, row: &Row, problem: Option<IpcError>) -> RevisionLine
     }
 }
 
-fn unread(revisions: &BTreeMap<u32, Revision>, revision: u32, error: IpcError) -> RevisionLine {
-    match revisions.get(&revision) {
-        Some(held) => labelled(revision, &held.row, Some(error)),
-        None => RevisionLine {
-            revision,
-            status: String::new(),
-            updated: None,
-            chart: None,
-            app_version: None,
-            description: None,
-            rollback_of: None,
-            problem: Some(error),
-        },
+/// The line of a revision whose Secret, as it stands, cannot be read, as
+/// the list's row says it.
+fn unreadable(revision: u32, error: IpcError) -> RevisionLine {
+    RevisionLine {
+        revision,
+        status: UNREADABLE.to_owned(),
+        updated: None,
+        chart: None,
+        app_version: None,
+        description: None,
+        rollback_of: None,
+        problem: Some(error),
     }
 }
 

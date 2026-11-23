@@ -195,7 +195,9 @@ pub struct RevisionLine {
     pub revision: u32,
     /// Helm's word: `deployed`, `superseded`, `failed`, `pending-upgrade`…,
     /// the label's until the revision is decoded, then the release's, which
-    /// `helm history` prints where the two differ.
+    /// `helm history` prints where the two differ; `unreadable` where what
+    /// its Secret holds cannot be read, as a list's row says it, and the
+    /// label's while a request for it fails.
     pub status: String,
     /// RFC 3339, `info.last_deployed`; null until decoded.
     pub updated: Option<String>,

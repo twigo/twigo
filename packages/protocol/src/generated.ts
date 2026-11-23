@@ -1877,7 +1877,9 @@ export type RevisionLine = { revision: number,
 /**
  * Helm's word: `deployed`, `superseded`, `failed`, `pending-upgrade`…,
  * the label's until the revision is decoded, then the release's, which
- * `helm history` prints where the two differ.
+ * `helm history` prints where the two differ; `unreadable` where what
+ * its Secret holds cannot be read, as a list's row says it, and the
+ * label's while a request for it fails.
  */
 status: string, 
 /**

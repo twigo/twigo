@@ -302,7 +302,7 @@ impl Failing {
 
 /// The status of a revision that cannot be read, which a list counts as
 /// failing.
-const UNREADABLE: &str = "unreadable";
+pub(super) const UNREADABLE: &str = "unreadable";
 
 /// What a row shows of its newest revision beyond the labels.
 #[derive(Default)]

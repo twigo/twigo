@@ -2711,7 +2711,7 @@
             },
             "revision": 1,
             "rollbackOf": null,
-            "status": "deployed",
+            "status": "unreadable",
             "updated": null
           },
           "manifest": null,

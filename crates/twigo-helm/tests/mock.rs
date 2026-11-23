@@ -176,7 +176,7 @@ fn mocked(namespace: &str, name: &str, read: &[Read]) -> Mocked {
                 manifest: None,
                 line: RevisionLine {
                     revision: read.revision,
-                    status: read.status.clone(),
+                    status: "unreadable".to_owned(),
                     updated: None,
                     chart: None,
                     app_version: None,
