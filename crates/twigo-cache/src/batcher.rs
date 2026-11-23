@@ -42,7 +42,7 @@ pub const FLUSH: Duration = Duration::from_millis(50);
 pub trait Source: Send + 'static {
     /// What changed in the rows that show since the last call, and the state
     /// and the parts that say which these are ([`Subscription::drain_shown`]).
-    fn drain_shown(&self) -> Shown<Row>;
+    fn drain_shown(&mut self) -> Shown<Row>;
 
     /// The rows are those of the namespaces the person may list, which all
     /// namespaces came to ([`Subscription::resolved`]).
@@ -50,7 +50,7 @@ pub trait Source: Send + 'static {
 }
 
 impl Source for Subscription<Row> {
-    fn drain_shown(&self) -> Shown<Row> {
+    fn drain_shown(&mut self) -> Shown<Row> {
         Subscription::drain_shown(self)
     }
 
@@ -186,7 +186,7 @@ async fn serve(
 }
 
 async fn run(
-    source: impl Source,
+    mut source: impl Source,
     spec: Spec,
     mut opening: Option<Opening>,
     control: Arc<Control>,

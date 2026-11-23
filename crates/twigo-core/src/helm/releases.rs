@@ -20,7 +20,7 @@
 //! a change of its row there, coalesced with the others as any change is.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::Arc;
 
 use backon::ExponentialBackoff;
 use tokio::sync::Semaphore;
@@ -43,8 +43,8 @@ const AT_ONCE: usize = 4;
 pub(super) struct Releases {
     secrets: Subscription<Row>,
     columns: Arc<[Column]>,
-    held: Mutex<Held>,
-    fetches: Mutex<Fetches>,
+    held: Held,
+    fetches: Fetches,
 }
 
 impl Releases {
@@ -52,34 +52,26 @@ impl Releases {
         Self {
             secrets,
             columns: columns(),
-            held: Mutex::default(),
-            fetches: Mutex::new(Fetches {
+            held: Held::default(),
+            fetches: Fetches {
                 hub,
                 context,
                 running: JoinSet::new(),
                 permits: Arc::new(Semaphore::new(AT_ONCE)),
-            }),
+            },
         }
-    }
-
-    fn held(&self) -> MutexGuard<'_, Held> {
-        self.held.lock().expect("releases lock")
-    }
-
-    fn fetches(&self) -> MutexGuard<'_, Fetches> {
-        self.fetches.lock().expect("releases lock")
     }
 }
 
 impl Source for Releases {
-    fn drain_shown(&self) -> Shown<Row> {
+    fn drain_shown(&mut self) -> Shown<Row> {
         let Shown {
             delta,
             status,
             parts,
         } = self.secrets.drain_shown();
-        let answers = self.fetches().answers();
-        let mut held = self.held();
+        let answers = self.fetches.answers();
+        let held = &mut self.held;
         let (delta, touched) = match delta {
             Delta::Reset { rows, .. } => {
                 held.reset(rows);
@@ -118,10 +110,8 @@ impl Source for Releases {
             .chain(due)
             .filter_map(|release| held.unread(release))
             .collect();
-        drop(held);
-        let mut fetches = self.fetches();
         for unread in unread {
-            fetches.fetch(unread);
+            self.fetches.fetch(unread);
         }
         Shown {
             delta,
