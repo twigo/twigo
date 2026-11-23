@@ -14,7 +14,6 @@ import type {
 import { OpenView } from "./openView";
 
 export interface ReleaseSnapshot {
-  readonly seq: number;
   /**
    * Names what a page holds of the parts it shows, such as a value a person
    * revealed: another number for another view, for the view's next revision,
@@ -48,7 +47,6 @@ export interface ReleaseSnapshot {
 }
 
 export const INITIAL_RELEASE: ReleaseSnapshot = {
-  seq: 0,
   epoch: 0,
   life: 0,
   status: { state: "connecting" },
@@ -114,7 +112,6 @@ export class ReleaseView extends OpenView<
   ): ReleaseSnapshot {
     const kept = batch.exists && batch.revision === previous.revision;
     return {
-      seq: batch.seq,
       epoch: kept ? previous.epoch : ++epochs,
       life: batch.exists && !previous.exists ? ++epochs : previous.life,
       status: batch.status,
