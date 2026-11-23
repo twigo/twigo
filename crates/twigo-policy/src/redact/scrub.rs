@@ -151,7 +151,7 @@ pub fn secret_values(objects: &[&Value]) -> Vec<String> {
                         .map(|bytes| String::from_utf8_lossy(&bytes).into_owned()),
                 };
                 if let Some(stored) = stored {
-                    if let Ok(number) = stored.parse::<Number>() {
+                    if let Some(number) = numeric(&stored) {
                         values.extend(spellings(&number));
                     }
                     values.insert(stored);
@@ -166,6 +166,19 @@ pub fn secret_values(objects: &[&Value]) -> Vec<String> {
         .collect();
     values.sort_by_key(|value| std::cmp::Reverse(value.len()));
     values
+}
+
+/// `text` as a number where it reads whole as a JSON number, its float read
+/// as Go's `strconv.ParseFloat` reads it, the nearest to the text, which
+/// serde_json's parse without `float_roundtrip` misses past 15 significant
+/// digits.
+fn numeric(text: &str) -> Option<Number> {
+    let number = text.parse::<Number>().ok()?;
+    if number.is_f64() {
+        text.parse::<f64>().ok().and_then(Number::from_f64)
+    } else {
+        Some(number)
+    }
 }
 
 /// The strings and numbers in `value`, at any depth, as text: a number in
@@ -395,6 +408,7 @@ mod tests {
             (1.797_693_134_862_315_7e308, "1.7976931348623157e+308"),
             (25_864_340_602_886.812, "2.5864340602886812e+13"),
             (830_985_716_167_268.0 + 0.25, "8.309857161672682e+14"),
+            (2f64.powi(-24), "5.960464477539063e-08"),
         ];
         for (value, go) in printed {
             assert_eq!(go_float(value), go, "{value:e}");
@@ -408,11 +422,11 @@ mod tests {
             (1e21, "1e+21"),
             (1.5e300, "1.5e+300"),
             (0.000_001, "0.000001"),
-            (2f64.powi(-24), "5.960464477539063e-08"),
             (-0.000_001_234, "-0.000001234"),
             (1e-7, "1e-7"),
             (1.5e-10, "1.5e-10"),
             (830_985_716_167_268.0 + 0.25, "830985716167268.2"),
+            (2f64.powi(-24), "5.960464477539063e-8"),
         ];
         for (value, go) in written {
             assert_eq!(go_json(value), go, "{value:e}");
@@ -426,7 +440,6 @@ mod tests {
             "stringData": { "pin": 1_234_567.0, "port": 5432, "n": 1_152_921_504_606_846_976.0 },
         })]);
         assert_eq!(
-            (2f64.powi(-24), "5.960464477539063e-8"),
             scrub(
                 "PIN 1.234567e+06, got &value.valueUnstructured{Value:1234567}, port 5432, n {Value:1152921504606847000}.",
                 &secrets
@@ -451,6 +464,10 @@ mod tests {
             (
                 json!({ "stringData": { "pin": "1.234567e+06" } }),
                 "Your PIN is 1234567.",
+            ),
+            (
+                json!({ "stringData": { "pin": "53245135483241.0196" } }),
+                "Your PIN is 5.324513548324102e+13.",
             ),
         ] {
             let mut secret = secret;
