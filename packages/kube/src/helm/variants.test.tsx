@@ -194,13 +194,23 @@ test("helm:view is a second view of the Explorer container, and the explorer has
 
 test("mask:tree shows the values as rows of key paths in a tree that the list keys walk, where Enter or a click on a masked row reveals it until the same is done again", async () => {
   variant("mask:tree");
-  await open(alpha);
+  const workbench = await open(alpha);
   fireEvent.click(screen.getByRole("tab", { name: "Values" }));
   await settle(6);
   const tree = screen.getByRole("tree", { name: "Values" });
   const item = (name: RegExp) => within(tree).getByRole("treeitem", { name });
-  expect(item(/password/).textContent).toContain("<16 bytes>");
-  expect(item(/password/).getAttribute("aria-level")).toBe("2");
+  const row = item(/password/);
+  expect(row.textContent).toContain("16 B");
+  expect(row.textContent).not.toContain("<16 bytes>");
+  expect(row.getAttribute("aria-level")).toBe("2");
+  expect(row.className).toContain("h-6");
+  expect(row.querySelector(".font-mono")?.className).not.toContain(
+    "text-support",
+  );
+  const eye = within(row).getByRole("button", {
+    name: "Reveal database.password",
+  });
+  expect(eye.className).toContain("size-6");
 
   const press = (code: string) => {
     fireEvent.keyDown(tree, { code, key: code });
@@ -223,12 +233,31 @@ test("mask:tree shows the values as rows of key paths in a tree that the list ke
   );
   fireEvent.click(screen.getByRole("button", { name: "Reveal" }));
   await settle(4);
-  expect(tree.textContent).toContain("user-password-r2");
   expect(tree.textContent).not.toContain("<16 bytes>");
+  expect(tree.querySelector("pre")?.textContent).toBe("user-password-r2");
+  expect(tree.querySelector("pre")?.className).toContain("bg-muted");
+  expect(item(/password/).textContent).not.toContain("user-password-r2");
+  expect(
+    within(item(/password/)).getByRole("button", {
+      name: "Hide database.password",
+    }),
+  ).toBeTruthy();
   fireEvent.click(item(/password/));
   await settle(2);
   expect(tree.textContent).not.toContain("user-password-r2");
-  expect(tree.textContent).toContain("<16 bytes>");
+  expect(tree.querySelector("pre")).toBeNull();
+  expect(item(/password/).textContent).toContain("16 B");
+  const asked = vi.spyOn(workbench.operations, "run");
+  fireEvent.click(
+    within(item(/password/)).getByRole("button", {
+      name: "Reveal database.password",
+    }),
+  );
+  await settle(3);
+  expect(asked).toHaveBeenCalledTimes(1);
+  expect(screen.getAllByRole("dialog")).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: /^Cancel/ }));
+  await settle(2);
   fireEvent.click(screen.getByRole("tab", { name: "YAML" }));
   await settle(2);
   expect(screen.queryByRole("tree", { name: "Values" })).toBeNull();

@@ -24,10 +24,17 @@ export interface TreeRow {
   readonly trailing?: ReactNode;
   /** A small label over a run of rows, which the cursor passes by. */
   readonly heading?: boolean;
+  /** `label` is a block drawn under the row above it, which the cursor passes by. */
+  readonly block?: boolean;
 }
 
+/** A row the cursor passes by. */
+const passive = (row: TreeRow | undefined): boolean =>
+  row?.heading === true || row?.block === true;
+
 /**
- * A tree of 22 px rows (ARCHITECTURE 4.9), as wide as the tree so a click
+ * A tree of 22 px rows, or 24 px where `tall`, for rows that hold a button
+ * (ARCHITECTURE 4.9), as wide as the tree so a click
  * anywhere along one lands, with hover and selection drawn as plates inset
  * 6 px from its edges: a click on a folding row folds it, on a leaf opens
  * it, a double click keeps what it opened. The list commands move through it
@@ -37,12 +44,14 @@ export function Tree({
   label,
   rows,
   active,
+  tall = false,
   onOpen,
   onToggle,
   register,
 }: {
   label: string;
   rows: readonly TreeRow[];
+  tall?: boolean;
   /** The row of what is open elsewhere, such as the active editor. */
   active?: string;
   onOpen: (id: string, keep: boolean) => void;
@@ -67,7 +76,7 @@ export function Tree({
     const moveTo = (index: number, step: number) => {
       const { rows: shown } = latest.current;
       let target = Math.min(Math.max(index, 0), shown.length - 1);
-      while (shown[target]?.heading) target += step;
+      while (passive(shown[target])) target += step;
       const row = shown[target];
       if (row) setCursor(row.id);
     };
@@ -84,7 +93,7 @@ export function Tree({
       },
       activate() {
         const target = row();
-        if (!target || target.heading) return;
+        if (!target || passive(target)) return;
         if (target.open !== undefined) latest.current.onToggle(target.id);
         else latest.current.onOpen(target.id, false);
       },
@@ -121,7 +130,7 @@ export function Tree({
       tabIndex={0}
       aria-label={label}
       aria-activedescendant={
-        current && !current.heading ? rowId(at) : undefined
+        current && !passive(current) ? rowId(at) : undefined
       }
       className="group/tree h-full overflow-auto pb-2 outline-none"
     >
@@ -135,11 +144,22 @@ export function Tree({
           >
             {row.label}
           </div>
+        ) : row.block ? (
+          <div
+            key={row.id}
+            id={rowId(index)}
+            role="presentation"
+            style={{ paddingLeft: 12 + row.depth * 16 }}
+            className="pr-3.5"
+          >
+            {row.label}
+          </div>
         ) : (
           <TreeItem
             key={row.id}
             id={rowId(index)}
             row={row}
+            tall={tall}
             active={row.open === undefined && row.id === active}
             cursor={index === at}
             onClick={() => {
@@ -160,6 +180,7 @@ export function Tree({
 function TreeItem({
   id,
   row,
+  tall,
   active,
   cursor,
   onClick,
@@ -167,6 +188,7 @@ function TreeItem({
 }: {
   id: string;
   row: TreeRow;
+  tall: boolean;
   active: boolean;
   cursor: boolean;
   onClick: () => void;
@@ -185,7 +207,8 @@ function TreeItem({
       onDoubleClick={onDoubleClick}
       style={{ paddingLeft: (folds ? 8 : 12) + row.depth * 16 }}
       className={cn(
-        "relative isolate flex h-[22px] items-center gap-1 pr-3.5 text-body select-none before:absolute before:inset-x-1.5 before:inset-y-0 before:-z-10 before:rounded-sm",
+        "relative isolate flex items-center gap-1 pr-3.5 text-body select-none before:absolute before:inset-x-1.5 before:inset-y-0 before:-z-10 before:rounded-sm",
+        tall ? "h-6" : "h-[22px]",
         active ? "before:bg-selected-unfocused" : "hover:before:bg-row-hover",
         cursor &&
           "group-focus/tree:before:bg-selected group-focus/tree:hover:before:bg-selected",

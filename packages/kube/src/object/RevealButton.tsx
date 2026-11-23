@@ -1,3 +1,4 @@
+import type { MouseEvent } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@twigo/ui";
 
@@ -13,7 +14,7 @@ export function RevealButton({
   /** Whether the value shows, which the button then hides. */
   showing: boolean;
   loading?: boolean;
-  onClick: () => void;
+  onClick: (event: MouseEvent<HTMLButtonElement>) => void;
 }) {
   return (
     <Button
