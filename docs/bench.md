@@ -96,7 +96,7 @@ Limits:
 | Idle CPU, sessions open                | CPU time of the app and its WebKit processes over 30 s with the window hidden and the sessions open; shown, never judged                                                                                                                                                                                      |
 | Terminal watch through the proxy       | CPU time of the app process alone over 20 s while the terminal's `kubectl get pods -A -w` runs through the policy proxy, the mean of the two proxy windows, as a share of one core                                                                                                                            |
 | The same watch straight to the cluster | The same, with the cluster's own kubeconfig named on the command line, in the same terminal, the mean of the two direct windows; the difference between the two rows is the proxy's, since the terminal's output is the same                                                                                  |
-| Gate, share of the core's CPU          | At most: the requests the API server counted in the steady phase that were not patches, and the polls it does not count, times the dearest request's cost in `gate_cost`, over the core's CPU time in that phase; shown, never judged ([how](#what-the-gate-takes))                                           |
+| Gate, share of the core's CPU          | An estimate: the requests the API server counted in the steady phase that were not patches, and the polls it does not count, times the dearest request's cost in `gate_cost` with the caches evicted, over the core's CPU time in that phase; shown, never judged ([how](#what-the-gate-takes))               |
 
 `twigo-bench report`, and so the harness, exits 1 when a judged row misses its target.
 The pods of `bench/pods.sh` all run, so a Status sort would leave the first rows in the order of their ids either way, and the driver stops when a click leaves them as they were: the sort sequence is Status-free.
@@ -147,16 +147,24 @@ Limits:
 ### What the gate takes
 
 The gate checks a request as it leaves and again above the socket; the events of a watch and the batches of a list pass none.
-So its share of the core's CPU in the steady phase is the requests the app sends there times what the gate costs one, over the core's CPU time in the phase, and the row says "at most", since the requests cannot be counted exactly.
+So its share of the core's CPU in the steady phase is the requests the app sends there times what the gate costs one, over the core's CPU time in the phase.
+The row is an estimate, not a bound: neither factor is exact.
 
-- **The cost of a request** is `cargo run --release -p twigo-policy --example gate_cost`: the UI's gate on a guarded context, both its layers, over a service that answers at once, against that service alone, for six kinds of request the app sends (a list, a watch, the metrics list, discovery, an access review, a patch), 1,000,000 of each with the code and the policy's data in the cache.
-  It read 220 to 496 ns in four runs of 2026-11-26 (Apple M4 Max, macOS 27.2.1), and a request that comes seconds apart meets them cold.
+- **The cost of a request** is `cargo run --release -p twigo-policy --example gate_cost`: the UI's gate on a guarded context, both its layers, over a service that answers at once, against that service alone, for six kinds of request the app sends (a list, a watch, the metrics list, discovery, an access review, a patch).
+  Each is timed twice: 1,000,000 calls in a loop, with the code and the policy's data in the cache, and 1,000 calls one at a time, gated and bare in turn, with a 64 MiB buffer written before each call, which a request that comes seconds apart in the app meets.
+  The cold figure is the mean, since the share is a sum over requests.
+  Whether the buffer evicts the system-level cache as well as the core's own was not checked.
+  Two runs of 2026-11-26 (Apple M4 Max, macOS 27.2.1, release build of this branch, load average 5 to 12) read 228 to 468 ns hot and 1,226 to 2,357 ns cold, 3.6 to 6.2 times; four earlier runs of that day read 220 to 496 ns hot.
+  The row prices every request at the higher figure, the cold one, of the dearest class but the patch.
 - **The requests** are counted by the API server's `apiserver_request_total`, which has no label for who sent them, and counts none to an aggregated API, so none of the metrics API's, which the app polls every 15 s: its output held no series of the group `metrics.k8s.io` in three runs of 2026-11-26.
   Of the 6,324 to 6,331 requests it counted over 61 s of the steady phase in them, 6,060 to 6,064 were patches of `pods/status`, the churn's, and 264 to 268 were not (leases, probes, discovery).
-  The app sends no patch in the phase, so the row takes the requests that were not patches, whoever sent them, and the polls of 61 s, 5, and prices each at the dearest class's cost.
+  The app sends no patch in the phase, so the row takes the requests that were not patches, whoever sent them, and the polls of 61 s, 5.
+  Those 264 to 268 are mostly other clients' (run 1's held 132 lease updates, 60 `/readyz` and 13 `openapi/v3`), so they overcount the app's requests.
+  Run 1's 264 requests and 5 polls at the cold 1,786 ns of the first run above, over its 2,530 ms of the core's CPU, come to 1.9e-2 %, where the hot loop's 474 ns gave 5.0e-3 %.
+  A watch the app starts in the phase and leaves open at its end may not be in the count either, if the server adds a watch once it ends; how it records one was not checked against its source.
 - **A `sample` counted by frames** shows what ran, and the release build keeps symbols for it: `nm target/release/twigo` lists 1,106 `twigo_policy` symbols (2026-11-26, a build of this branch).
   It cannot show a share this small.
-  `sample` at 1 ms over 20 s of the visible phase's sleep in one run of 2026-11-26 took 598 active samples of the app, 3.0 % of a core, and none had a `twigo_policy` frame; at the row's bound, 5.0e-3 % of the core's CPU, one active sample in 20,000 would.
+  `sample` at 1 ms over 20 s of the visible phase's sleep in one run of 2026-11-26 took 598 active samples of the app, 3.0 % of a core, and none had a `twigo_policy` frame; at the estimate of 1.9e-2 % of the core's CPU, one active sample in about 5,300 would.
 
 ## Which WebKit processes are the app's
 

@@ -94,7 +94,11 @@ pub struct GateCost {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GateClass {
+    pub method: String,
+    /// In a hot loop.
     pub gate_ns: f64,
+    /// With the caches evicted before each call.
+    pub cold_gate_ns: f64,
 }
 
 pub struct Inputs {
@@ -253,7 +257,8 @@ pub fn counted(metrics: &str, count: impl Fn(&HashMap<&str, &str>) -> bool) -> u
         .sum()
 }
 
-/// The most the gate can have taken of the core's CPU in the steady phase.
+/// What the gate takes of the core's CPU in the steady phase, as far as the count and the cost of
+/// a request tell.
 #[derive(Debug, PartialEq)]
 pub struct GateShare {
     /// The requests the API server counted that are not patches, whoever sent them: the churn's
@@ -263,10 +268,13 @@ pub struct GateShare {
     pub polls: u64,
     pub seconds: f64,
     pub core_ms: f64,
-    /// What the dearest request of `gate_cost` costs the gate.
-    pub dearest_ns: f64,
+    /// What the dearest request but a patch costs the gate in `gate_cost`, the higher of its cold
+    /// and its hot figure.
+    pub cost_ns: f64,
+    /// The same request's figure in a hot loop.
+    pub hot_ns: f64,
     /// Percent of the core's CPU time.
-    pub at_most: f64,
+    pub estimate: f64,
 }
 
 pub fn gate_share(
@@ -274,12 +282,15 @@ pub fn gate_share(
     apiserver: &(String, String),
     gate: &GateCost,
 ) -> Result<GateShare, String> {
-    let dearest_ns = gate
-        .classes
-        .iter()
+    let priced = || gate.classes.iter().filter(|class| class.method != "PATCH");
+    let cost_ns = priced()
+        .map(|class| class.gate_ns.max(class.cold_gate_ns))
+        .reduce(f64::max)
+        .ok_or("gate-cost.json has no class but a patch")?;
+    let hot_ns = priced()
         .map(|class| class.gate_ns)
         .reduce(f64::max)
-        .ok_or("gate-cost.json has no class")?;
+        .ok_or("gate-cost.json has no class but a patch")?;
     let counted = counted(&apiserver.1, |l| l.get("verb") != Some(&"PATCH"))
         .saturating_sub(counted(&apiserver.0, |l| l.get("verb") != Some(&"PATCH")));
     let seconds = (steady.1.at_ms - steady.0.at_ms) / 1000.0;
@@ -290,8 +301,9 @@ pub fn gate_share(
         polls,
         seconds,
         core_ms: core_ns / 1e6,
-        dearest_ns,
-        at_most: (counted + polls) as f64 * dearest_ns / core_ns * 100.0,
+        cost_ns,
+        hot_ns,
+        estimate: (counted + polls) as f64 * cost_ns / core_ns * 100.0,
     })
 }
 
@@ -442,10 +454,15 @@ pub fn rows(inputs: &Inputs, baseline: &Baseline) -> Result<Vec<Row>, String> {
     let share = gate_share(steady, apiserver, gate)?;
     rows.push(shown(
         "Gate, share of the core's CPU, steady phase",
-        Some(format!("at most {}", percent(share.at_most))),
+        Some(format!("about {}", percent(share.estimate))),
         format!(
-            "an upper bound: the {} requests that were not patches which the API server counted in {:.0} s, whoever sent them, and the {} polls of the metrics API that it does not count, each at the dearest class's {:.0} ns of gate_cost (both layers, a guarded context, the UI), over the core's {:.0} ms of CPU; the churn's patches are the only ones, and the app sends none (docs/bench.md)",
-            share.counted, share.seconds, share.polls, share.dearest_ns, share.core_ms,
+            "an estimate, not a bound: the {} requests that were not patches which the API server counted in {:.0} s, whoever sent them, and the {} polls of the metrics API that it does not count, each at {:.0} ns, the dearest class's cost in gate_cost with the caches evicted before the call ({:.0} ns in a hot loop; both layers, a guarded context, the UI), over the core's {:.0} ms of CPU; the churn's patches are the only ones, and the app sends none (docs/bench.md)",
+            share.counted,
+            share.seconds,
+            share.polls,
+            share.cost_ns,
+            share.hot_ns,
+            share.core_ms,
         ),
     ));
     Ok(rows)
@@ -500,6 +517,14 @@ apiserver_request_total{code="200",component="apiserver",dry_run="",group="coord
 apiserver_request_duration_seconds_count{verb="GET"} 99999
 "#;
 
+    pub(crate) fn class(method: &str, gate_ns: f64, cold_gate_ns: f64) -> GateClass {
+        GateClass {
+            method: method.into(),
+            gate_ns,
+            cold_gate_ns,
+        }
+    }
+
     pub(crate) fn inputs(core_ms_in_a_proxy_window: u64, core_ms_in_a_direct_one: u64) -> Inputs {
         let opened = Opened {
             shell: OpenedShell {
@@ -542,7 +567,11 @@ apiserver_request_duration_seconds_count{verb="GET"} 99999
                     .replace("} 40\n", "} 70\n"),
             ),
             gate: GateCost {
-                classes: vec![GateClass { gate_ns: 300.0 }, GateClass { gate_ns: 450.0 }],
+                classes: vec![
+                    class("GET", 300.0, 1200.0),
+                    class("GET", 450.0, 1500.0),
+                    class("PATCH", 400.0, 3000.0),
+                ],
             },
         }
     }
@@ -550,7 +579,7 @@ apiserver_request_duration_seconds_count{verb="GET"} 99999
 
 #[cfg(test)]
 mod tests {
-    use super::fixture::{METRICS, inputs, sample};
+    use super::fixture::{METRICS, class, inputs, sample};
     use super::*;
 
     fn baseline() -> Baseline {
@@ -635,16 +664,41 @@ mod tests {
     }
 
     #[test]
-    fn the_gate_is_at_most_the_requests_that_were_not_patches_times_the_dearest_cost() {
+    fn the_gate_is_the_requests_that_were_not_patches_times_the_dearest_cold_cost() {
         let sessions = inputs(1, 1);
         let share = gate_share(&sessions.steady, &sessions.apiserver, &sessions.gate).unwrap();
         assert_eq!((share.counted, share.polls), (34, 4));
         assert_eq!(share.seconds, 60.0);
         assert_eq!(share.core_ms, 600.0);
-        assert_eq!(share.dearest_ns, 450.0);
-        assert!((share.at_most - 38.0 * 450.0 / 600e6 * 100.0).abs() < 1e-12);
-        assert_eq!(percent(share.at_most), "2.9e-3 %");
+        assert_eq!((share.cost_ns, share.hot_ns), (1500.0, 450.0));
+        assert!((share.estimate - 38.0 * 1500.0 / 600e6 * 100.0).abs() < 1e-12);
+        assert_eq!(percent(share.estimate), "9.5e-3 %");
         assert_eq!(percent(1.5), "1.50 %");
+    }
+
+    #[test]
+    fn a_hot_figure_above_the_cold_one_is_the_cost() {
+        let mut sessions = inputs(1, 1);
+        sessions.gate.classes = vec![class("GET", 500.0, 400.0)];
+        let share = gate_share(&sessions.steady, &sessions.apiserver, &sessions.gate).unwrap();
+        assert_eq!(share.cost_ns, 500.0);
+    }
+
+    #[test]
+    fn the_gate_row_is_an_estimate_with_its_method() {
+        let rows = rows_of(300, 200);
+        let row = rows
+            .iter()
+            .find(|row| row.metric.starts_with("Gate"))
+            .unwrap();
+        assert_eq!(row.value.as_deref(), Some("about 9.5e-3 %"));
+        assert!(
+            row.measured.contains("an estimate, not a bound"),
+            "{}",
+            row.measured
+        );
+        assert!(row.measured.contains("1500 ns"), "{}", row.measured);
+        assert!(row.measured.contains("caches evicted"), "{}", row.measured);
     }
 
     #[test]
@@ -653,11 +707,11 @@ mod tests {
     }
 
     #[test]
-    fn a_gate_cost_without_a_class_is_an_error() {
+    fn a_gate_cost_without_a_class_but_a_patch_is_an_error() {
         let mut sessions = inputs(1, 1);
-        sessions.gate.classes.clear();
+        sessions.gate.classes = vec![class("PATCH", 400.0, 3000.0)];
         let error = gate_share(&sessions.steady, &sessions.apiserver, &sessions.gate).unwrap_err();
-        assert!(error.contains("no class"), "{error}");
+        assert!(error.contains("no class but a patch"), "{error}");
     }
 
     fn run_dir(windows: usize, ends: usize) -> tempfile::TempDir {
@@ -705,7 +759,9 @@ mod tests {
         std::fs::write(dir.path().join("apiserver-end.txt"), METRICS).unwrap();
         put(
             "gate-cost.json",
-            serde_json::json!({ "classes": [{ "name": "pods list", "gateNs": 300.0 }] }),
+            serde_json::json!({
+                "classes": [{ "name": "pods list", "method": "GET", "gateNs": 300.0, "coldGateNs": 1200.0 }]
+            }),
         );
         dir
     }
