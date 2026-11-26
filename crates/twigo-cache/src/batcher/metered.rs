@@ -322,6 +322,22 @@ async fn the_first_batch_has_the_columns_and_so_has_one_of_a_list_opened_again_a
     );
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_list_with_metric_columns_builds_its_rows_once() {
+    let mut list = Metered::start(cluster(true).await, None).await;
+    sleep(Duration::from_secs(1)).await;
+    crate::view::take_inserts();
+    list.batcher().set_window(0, 6, true);
+    let opened = first(&mut list).await;
+    assert!(has_metric_columns(&opened), "{:?}", opened.columns);
+    assert_eq!(opened.total, 6);
+    assert_eq!(
+        crate::view::take_inserts(),
+        6,
+        "each of the six rows is built once, with the columns"
+    );
+}
+
 async fn refused_list(window: u32, watched: Duration) -> Metered {
     let fake = cluster(true).await;
     for namespace in ["a", "b"] {

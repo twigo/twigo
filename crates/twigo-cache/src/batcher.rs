@@ -243,6 +243,9 @@ async fn run(
             metrics = Some(reader);
             opening = None;
         }
+        if let Some(metrics) = &metrics {
+            view.set_api(metrics.api());
+        }
         let Shown {
             delta,
             status,
@@ -251,7 +254,6 @@ async fn run(
         view.apply(delta);
         let mut settled = true;
         if let Some(metrics) = &mut metrics {
-            view.set_api(metrics.api());
             if source.resolved() {
                 view.resolved();
             }

@@ -12,6 +12,8 @@ mod labels;
 mod sort;
 
 use std::borrow::Cow;
+#[cfg(test)]
+use std::cell::Cell as Counter;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
@@ -34,6 +36,18 @@ use labels::Selector;
 use sort::{SortKey, natural};
 
 pub use filter::TextFilter;
+
+#[cfg(test)]
+thread_local! {
+    /// The rows `insert` was asked to place on this thread, which a test of one runtime counts.
+    static INSERTS: Counter<usize> = const { Counter::new(0) };
+}
+
+/// The rows placed on this thread since the last call.
+#[cfg(test)]
+pub(crate) fn take_inserts() -> usize {
+    INSERTS.with(|inserts| inserts.replace(0))
+}
 
 /// The column a list without a sort of its own is sorted by, and which
 /// the text filter always reads.
@@ -708,6 +722,8 @@ impl QueryView {
     }
 
     fn insert(&mut self, row: Arc<Row>, sample: Option<Arc<Sample>>) {
+        #[cfg(test)]
+        INSERTS.with(|inserts| inserts.set(inserts.get() + 1));
         let layout = &self.layout;
         if let Some(labels) = &self.spec.labels
             && !labels.matches(&row.meta.labels)
