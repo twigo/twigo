@@ -1,8 +1,9 @@
 //! What the poller's polls of the cluster-wide scope cost in heap at 5,000 pods
 //! (`bench/pods.sh`, kwok's usage, `bench/cluster.sh`), with one reader of the
-//! scope, next to the hub's `hub_memory`: the first poll, and the polls after it
-//! over a window of four intervals, each in bytes and blocks allocated and in
-//! the most the heap held above where it stood when the window opened.
+//! scope, next to the hub's `hub_memory`: the first poll, and each of the next
+//! four that tells the reader a changed key, from one landing to the next, in
+//! bytes and blocks allocated and in the most the heap held above where it stood
+//! when the poll before landed.
 //!
 //! A counting allocator wraps the system's, so a realloc counts as an
 //! allocation of its new size.
@@ -151,8 +152,8 @@ fn zoned() -> String {
     })
 }
 
-/// Intervals the window after the first poll spans, each with one poll.
-const POLLS: u32 = 4;
+/// Polls after the first that are measured.
+const POLLS: usize = 4;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
@@ -210,12 +211,14 @@ async fn main() {
     let zones_first = zoned();
 
     let window = Mark::open();
-    let mut seen = Vec::new();
-    let end = tokio::time::Instant::now() + INTERVAL * POLLS + Duration::from_secs(5);
-    while tokio::time::Instant::now() < end {
+    let mut cycle = window;
+    let mut polls = Vec::new();
+    let give_up = tokio::time::Instant::now() + INTERVAL * (POLLS as u32 + 2);
+    while polls.len() < POLLS && tokio::time::Instant::now() < give_up {
         let changed = reader.drain().changes.len();
         if changed > 0 {
-            seen.push(changed);
+            polls.push((cycle.allocated(), cycle.blocks(), cycle.peak(), changed));
+            cycle = Mark::open();
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -238,17 +241,18 @@ async fn main() {
         first_blocks,
         mib(first_peak)
     );
-    println!(
-        "Over the next {POLLS} intervals the poller allocated {} in {} blocks per poll and held at most {} above the heap when they began; the heap grew by {} meanwhile.",
-        mib(window.allocated() / POLLS as usize),
-        window.blocks() / POLLS as usize,
-        mib(window.peak()),
-        mib(window.held())
-    );
-    println!(
-        "{} of those polls told changed keys, {seen:?} of them.",
-        seen.len()
-    );
+    println!("| The next polls | Allocated | Blocks | Peak above the heap | Keys told |");
+    println!("| --- | --- | --- | --- | --- |");
+    for (n, (allocated, blocks, peak, changed)) in polls.iter().enumerate() {
+        println!(
+            "| {} | {} | {blocks} | {} | {changed} |",
+            n + 2,
+            mib(*allocated),
+            mib(*peak)
+        );
+    }
+    println!();
+    println!("The heap grew by {} over those polls.", mib(window.held()));
     println!(
         "The process's resident set: {resident_before} before the poll, {resident_first} after the first, {resident_after} after the others."
     );
