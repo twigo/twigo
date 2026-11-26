@@ -2,14 +2,15 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
 
 use jiff::Timestamp;
 use serde::Deserialize;
+use serde::de::{DeserializeSeed, Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use twigo_quantity::Quantity;
 
 use super::Kind;
-use crate::decode::nullable;
 
 #[derive(Debug, Clone)]
 pub struct Sample {
@@ -82,9 +83,11 @@ impl Samples {
 }
 
 #[derive(Deserialize)]
-struct List<'a> {
-    #[serde(borrow, default, deserialize_with = "nullable")]
-    items: Vec<Item<'a>>,
+#[serde(field_identifier, rename_all = "camelCase")]
+enum Field {
+    Items,
+    #[serde(other)]
+    Other,
 }
 
 #[derive(Deserialize)]
@@ -170,19 +173,69 @@ impl Item<'_> {
     }
 }
 
+/// Reads a list's items one at a time, each into its sample as it comes.
+#[derive(Clone, Copy)]
+struct Parser {
+    kind: Kind,
+}
+
+impl<'de> Visitor<'de> for Parser {
+    type Value = Samples;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a list of metrics")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Samples, A::Error> {
+        let mut samples = Samples::default();
+        while let Some(field) = map.next_key()? {
+            match field {
+                Field::Items => samples = map.next_value_seed(self)?,
+                Field::Other => {
+                    map.next_value::<IgnoredAny>()?;
+                }
+            }
+        }
+        Ok(samples)
+    }
+
+    fn visit_none<E>(self) -> Result<Samples, E> {
+        Ok(Samples::default())
+    }
+
+    fn visit_some<D: Deserializer<'de>>(self, deserializer: D) -> Result<Samples, D::Error> {
+        deserializer.deserialize_seq(self)
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Samples, A::Error> {
+        let mut samples = Samples::default();
+        while let Some(item) = seq.next_element::<Item<'de>>()? {
+            if let Some(sample) = item.sample(self.kind) {
+                let namespace = match self.kind {
+                    Kind::Pods => item.metadata.namespace.as_deref().unwrap_or_default(),
+                    Kind::Nodes => "",
+                };
+                samples.insert(namespace, &item.metadata.name, sample);
+            }
+        }
+        Ok(samples)
+    }
+}
+
+impl<'de> DeserializeSeed<'de> for Parser {
+    type Value = Samples;
+
+    /// A list that holds no item may send `null`, as Go encodes a nil slice.
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Samples, D::Error> {
+        deserializer.deserialize_option(self)
+    }
+}
+
 /// An item whose usage does not parse has no sample, as a pod the server leaves out.
 pub fn parse(body: &[u8], kind: Kind) -> Result<Samples, serde_json::Error> {
-    let list: List<'_> = serde_json::from_slice(body)?;
-    let mut samples = Samples::default();
-    for item in &list.items {
-        if let Some(sample) = item.sample(kind) {
-            let namespace = match kind {
-                Kind::Pods => item.metadata.namespace.as_deref().unwrap_or_default(),
-                Kind::Nodes => "",
-            };
-            samples.insert(namespace, &item.metadata.name, sample);
-        }
-    }
+    let mut deserializer = serde_json::Deserializer::from_slice(body);
+    let samples = (&mut deserializer).deserialize_map(Parser { kind })?;
+    deserializer.end()?;
     Ok(samples)
 }
 
@@ -327,6 +380,43 @@ mod tests {
             Kind::Pods,
         );
         assert_ne!(first, moved, "the same total, another split");
+    }
+
+    #[test]
+    fn an_answer_that_is_no_list_or_has_a_malformed_item_is_undecodable() {
+        let usage = json!({ "cpu": "1m", "memory": "1Mi" });
+        for body in [
+            json!({ "items": [{ "containers": [] }] }),
+            json!({ "items": [{ "metadata": { "name": "p" }, "containers": [{ "name": "c" }] }] }),
+            json!({ "items": [{ "metadata": { "name": "p" }, "containers": [{ "usage": usage }] }] }),
+            json!({ "items": [{ "metadata": { "name": "p" }, "containers": "c" }] }),
+            json!({ "items": {} }),
+            json!(null),
+        ] {
+            assert!(
+                parse(body.to_string().as_bytes(), Kind::Pods).is_err(),
+                "{body}"
+            );
+        }
+        assert!(parse(br#"{"items":[]} x"#, Kind::Pods).is_err());
+        assert!(parse(br#"{"items":[{"metadata":{"name":"p""#, Kind::Pods).is_err());
+    }
+
+    #[test]
+    fn a_list_reads_whatever_the_order_of_its_keys_and_skips_what_it_does_not_know() {
+        let list = br#"{
+            "items": [{
+                "containers": [{ "usage": { "memory": "1Mi", "cpu": "2m" }, "name": "c" }],
+                "window": "15s", "extra": { "deep": [1, 2, { "x": null }] },
+                "timestamp": "2026-11-13T16:00:00Z",
+                "metadata": { "namespace": "a", "name": "p", "labels": { "app": "p" } }
+            }],
+            "metadata": {}, "apiVersion": "metrics.k8s.io/v1beta1", "kind": "PodMetricsList"
+        }"#;
+        let samples = parse(list, Kind::Pods).unwrap();
+        assert_eq!(samples.len(), 1);
+        let sample = samples.get("a", "p").unwrap();
+        assert_eq!((sample.cpu, sample.memory), (2_000_000, 1024 * 1024));
     }
 
     #[test]
