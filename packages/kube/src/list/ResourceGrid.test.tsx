@@ -6,8 +6,9 @@ import {
   screen,
   within,
 } from "@testing-library/react";
+import { useCallback } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { Backend, ListBatch, ListQuery } from "@twigo/protocol";
+import type { Backend, ListBatch, ListQuery, Row } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import {
   hoverIcons,
@@ -17,7 +18,7 @@ import {
   withScreenSize,
 } from "../../test/workbench";
 
-const gridRenders = vi.hoisted(() => ({ count: 0 }));
+const gridRenders = vi.hoisted(() => ({ count: 0, rows: [] as string[] }));
 
 vi.mock("@twigo/ui", async (original) => {
   const ui = await original<typeof import("@twigo/ui")>();
@@ -25,7 +26,15 @@ vi.mock("@twigo/ui", async (original) => {
     ...ui,
     DataGrid: (props: Parameters<typeof ui.DataGrid>[0]) => {
       gridRenders.count++;
-      return <ui.DataGrid {...props} />;
+      const { cell } = props;
+      const counted = useCallback<typeof cell>(
+        (row, column) => {
+          if (column.id === "Name") gridRenders.rows.push((row as Row).id);
+          return cell(row, column);
+        },
+        [cell],
+      );
+      return <ui.DataGrid {...props} cell={counted} />;
     },
   };
 });
@@ -40,6 +49,7 @@ afterEach(() => {
   cleanup();
   vi.clearAllTimers();
   vi.useRealTimers();
+  gridRenders.rows = [];
 });
 
 const header = (name: string) => screen.getByRole("columnheader", { name });
@@ -407,6 +417,41 @@ test("a changed cell flashes through the next batch, and a storm flashes nothing
       restarts(id)?.className.includes("animate-flash"),
     ),
   ).toEqual([]);
+});
+
+test("a batch draws the rows whose cells it changed, and the one whose flash ended, and no other", async () => {
+  const script = scriptedBackend();
+  await openList(script.backend);
+  const send = async (b: ListBatch) => {
+    gridRenders.rows = [];
+    act(() => {
+      script.send(b);
+    });
+    await settle(1);
+    return [...new Set(gridRenders.rows)];
+  };
+
+  expect(
+    await send(batch(1, Object.fromEntries(IDS.map((id) => [id, "0"])), true)),
+  ).toEqual(IDS);
+  expect(await send(batch(2, { a: "1", c: "1" }))).toEqual(["a", "c"]);
+  expect(await send(batch(3, {}))).toEqual([]);
+  await act(() => vi.advanceTimersByTimeAsync(1100));
+  expect(await send(batch(4, {}))).toEqual(["a", "c"]);
+  expect(await send(batch(5, {}))).toEqual([]);
+});
+
+test("a scroll that keeps rows in the window draws none of them again", async () => {
+  await openList();
+  const before = new Set(gridRenders.rows);
+  expect(before.size).toBeGreaterThan(20);
+  gridRenders.rows = [];
+  grid().scrollTop = 3 * 24;
+  fireEvent.scroll(grid());
+  await settle(3);
+  const after = new Set(gridRenders.rows);
+  expect(after.size).toBeGreaterThan(0);
+  expect([...after].filter((id) => before.has(id))).toEqual([]);
 });
 
 test("seconds passing render the ages and not the grid", async () => {

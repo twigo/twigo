@@ -11,7 +11,7 @@ import { Copy } from "lucide-react";
 import { resize } from "../../test/resize";
 import type { ListController } from "../lib/list";
 import { DataGrid } from "./DataGrid";
-import type { GridItem } from "./types";
+import type { GridItem, RowFlash } from "./types";
 
 beforeAll(() => {
   Object.defineProperty(HTMLElement.prototype, "clientHeight", {
@@ -1141,3 +1141,105 @@ test("a header's sort button is the same element with and without a note, so its
     screen.getByRole("columnheader", { name: "CPU" }).textContent,
   ).toContain("you may not read metrics");
 });
+
+const drawn = (cell: { mock: { calls: readonly [Pod, ...unknown[]][] } }) =>
+  cell.mock.calls.map(([row]) => row.name);
+
+const NAME_ONLY = [{ id: "Name", title: "Name", width: 200, grow: true }];
+
+test("a scroll that keeps rows in the window draws none of them again, only the rows that enter", () => {
+  const cell = vi.fn((row: Pod) => row.name);
+  grid({ ...list(PODS), cell });
+  const before = drawn(cell);
+  expect(before.length).toBeGreaterThan(20);
+  cell.mockClear();
+  scroll(scrollable(PODS.length), 5 * 24);
+  const after = drawn(cell);
+  expect(after.length).toBeGreaterThan(0);
+  expect(after.filter((name) => before.includes(name))).toEqual([]);
+  expect(screen.getByText("pod-6")).toBeTruthy();
+});
+
+test("an owner's new handlers, menu and icons draw no row, and the menu a row opens is the new one", () => {
+  const cell = vi.fn((row: Pod) => row.name);
+  const inline = vi.fn(() => [
+    { id: "copy", label: "Copy Name", icon: Copy, run: vi.fn() },
+  ]);
+  const { rerender } = grid({
+    ...list(PODS),
+    columns: NAME_ONLY,
+    cell,
+    selected: "p1",
+    menu: [[{ id: "copy", label: "Copy Name", run: vi.fn() }]],
+    inline,
+  });
+  cell.mockClear();
+  const runs = vi.fn();
+  rerender({
+    ...list(PODS),
+    onSelect: vi.fn(),
+    onActivate: vi.fn(),
+    onMark: vi.fn(),
+    menu: [[{ id: "paste", label: "Paste Name", run: runs }]],
+    inline: () => [],
+    flash: () => undefined,
+  });
+  expect(cell).not.toHaveBeenCalled();
+  const button = within(rowNamed("pod-1")).getByRole("button", {
+    name: "Row actions",
+  });
+  fireEvent.pointerDown(button, { button: 0, ctrlKey: false });
+  expect(screen.queryByText("Copy Name")).toBeNull();
+  expect(screen.getByText("Paste Name")).toBeTruthy();
+});
+
+test("a row draws again when its data, its cursor, its mark or its flash changes, and no other row does", () => {
+  const cell = vi.fn((row: Pod) => row.name);
+  const { rerender } = grid({
+    ...list(PODS),
+    columns: NAME_ONLY,
+    cell,
+    selected: "p1",
+  });
+  let now: Props = {};
+  const changes = (more: Props) => {
+    cell.mockClear();
+    now = { ...now, ...more };
+    rerender(now);
+    return drawn(cell);
+  };
+
+  expect(
+    changes(
+      list(
+        PODS.map((item) =>
+          item.type === "row" && item.id === "p3"
+            ? { ...item, data: { name: "pod-3" } }
+            : item,
+        ),
+      ),
+    ),
+  ).toEqual(["pod-3"]);
+  expect(changes({ selected: "p5" })).toEqual(["pod-1", "pod-5"]);
+  expect(
+    changes({ marked: new Set(["p2"]) }).length,
+    "the first mark changes what every row says of its selection",
+  ).toBeGreaterThan(20);
+  expect(changes({ marked: new Set(["p2", "p4"]) })).toEqual(["pod-4"]);
+  expect(changes({ flash: (id) => (id === "p7" ? FLASH : undefined) })).toEqual(
+    ["pod-7"],
+  );
+  expect(
+    rowNamed("pod-7").querySelector('[data-column="Name"] > span')?.className,
+  ).toContain("animate-flash");
+  expect(
+    changes({ flash: (id) => (id === "p7" ? FLASH : undefined) }),
+    "the same flash",
+  ).toEqual([]);
+  expect(
+    changes({ columns: [...NAME_ONLY] }).length,
+    "new columns",
+  ).toBeGreaterThan(20);
+});
+
+const FLASH: RowFlash = new Map([["Name", 1]]);
