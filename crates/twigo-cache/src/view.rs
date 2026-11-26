@@ -716,7 +716,7 @@ impl QueryView {
 
     /// The namespaces of the window's rows, or every one of the list when it is sorted by a
     /// metric, which for a list of all namespaces adds the cluster: one request, with the
-    /// namespaces to fall back on when it is refused (decision 69).
+    /// namespaces to fall back on when it is refused (ARCHITECTURE 3.6).
     pub fn wants(&self, reading: bool) -> HashSet<Scope> {
         let Some(metrics) = self.metrics.as_ref().filter(|_| reading) else {
             return HashSet::new();

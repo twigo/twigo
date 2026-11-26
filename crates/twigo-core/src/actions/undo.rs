@@ -1,4 +1,4 @@
-//! Undo (decision 5 of M2): what the last action of a space changed goes
+//! Undo (ARCHITECTURE 6.4): what the last action of a space changed goes
 //! back for 30 s, from its toast or ⌘Z; the last is the one that started
 //! last. It is refused once anyone else changed the object since: it was
 //! replaced, its generation moved, or, for a node, which has none, the field

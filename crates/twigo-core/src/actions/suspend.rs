@@ -1,6 +1,6 @@
 //! Suspends a Job or a CronJob, or resumes it: a merge patch of
 //! `spec.suspend`, as `kubectl patch` sends it, since kubectl has no verb
-//! for it. Either runs at once with an undo (decision 1 of M2), but for
+//! for it. Either runs at once with an undo (ARCHITECTURE 6.4), but for
 //! suspending a Job that runs pods, whose work an undo cannot bring back:
 //! that asks first and lists them. A CronJob's resume asks too, as its
 //! trigger does, since the run it may start at once no undo stops. A Job that ended or is ending is
