@@ -1,6 +1,14 @@
 import { expect, test } from "vitest";
-import type { Backend, Cell, Column, ListBatch, Row } from "@twigo/protocol";
-import { type CellChange, ListProbe, Probe } from "./probe";
+import type {
+  Backend,
+  Cell,
+  Column,
+  ForwardEvent,
+  ListBatch,
+  Row,
+  ShellMessage,
+} from "@twigo/protocol";
+import { type CellChange, ListProbe, Probe, ShellProbe } from "./probe";
 
 const COLUMNS: Column[] = [
   { name: "Name", kind: "string", priority: 0 },
@@ -185,4 +193,92 @@ test("the next view change sent for a list resolves with its number, and another
   await probe.backend.invoke("list_set_view", { id: a, view: 4, ...shape });
   await Promise.resolve();
   expect(heard).toEqual([4]);
+});
+
+function bytes(text: string): ArrayBuffer {
+  return new TextEncoder().encode(text).buffer;
+}
+
+test("a session's state is what its last event said, and its output is counted and kept at its end", () => {
+  const shell = new ShellProbe(3);
+  expect(shell.state).toEqual({ state: "connecting" });
+  shell.record(10, { state: "running" });
+  shell.record(20, bytes("a".repeat(3000)));
+  shell.record(30, bytes("b".repeat(3000)));
+  expect(shell.state).toEqual({ state: "running" });
+  expect(shell.bytes).toBe(6000);
+  expect(shell.lastAt).toBe(30);
+  expect(shell.tail).toHaveLength(4000);
+  expect(shell.tail.endsWith("bbb")).toBe(true);
+  expect(shell.tail.startsWith("a")).toBe(true);
+});
+
+test("a character that a chunk cuts in two is decoded whole in the output's end", () => {
+  const shell = new ShellProbe(3);
+  const [first, second] = [
+    new Uint8Array([0xe2, 0x82]).buffer,
+    new Uint8Array([0xac]).buffer,
+  ];
+  shell.record(1, first);
+  shell.record(2, second);
+  expect(shell.tail).toBe("\u20ac");
+});
+
+test("a shell's channel is recorded as it opens and passed on to the terminal", async () => {
+  let send: ((message: ShellMessage) => void) | undefined;
+  const inner: Backend = {
+    invoke: () => Promise.resolve(null as never),
+    subscribe: (_command, _request, onMessage) => {
+      send = onMessage;
+      return Promise.resolve(null as never);
+    },
+  };
+  const probe = new Probe(inner);
+  const heard: ShellMessage[] = [];
+  await probe.backend.subscribe(
+    "shell_open",
+    { id: 9, cols: 80, rows: 24 },
+    (message) => heard.push(message),
+  );
+  send?.({ state: "running" });
+  send?.(bytes("hi"));
+  expect(
+    probe.shells.map((shell) => [shell.id, shell.state, shell.bytes]),
+  ).toEqual([[9, { state: "running" }, 2]]);
+  expect(heard).toHaveLength(2);
+});
+
+test("what a terminal's creation and a forward's start answered is kept", async () => {
+  const created = { id: 4, kind: { kind: "proxy", why: "mode" } };
+  const started = { outcome: "busy", local: 8080, why: "inUse", free: 8081 };
+  const inner: Backend = {
+    invoke: ((command: string) =>
+      Promise.resolve(
+        command === "terminal_create" ? created : started,
+      )) as Backend["invoke"],
+    subscribe: () => Promise.resolve(null as never),
+  };
+  const probe = new Probe(inner);
+  await probe.backend.invoke("terminal_create", {} as never);
+  await probe.backend.invoke("forward_start", {} as never);
+  expect(probe.terminal).toEqual(created);
+  expect(probe.forwardStarted).toEqual(started);
+});
+
+test("the forwards the core tells of are kept until it removes them", async () => {
+  let send: ((event: ForwardEvent) => void) | undefined;
+  const inner: Backend = {
+    invoke: () => Promise.resolve(null as never),
+    subscribe: (_command, _request, onMessage) => {
+      send = onMessage;
+      return Promise.resolve([] as never);
+    },
+  };
+  const probe = new Probe(inner);
+  await probe.backend.subscribe("forwards_watch", null, () => undefined);
+  const forward = { id: 2, state: { state: "starting" } } as never;
+  send?.({ event: "changed", forward });
+  expect([...probe.forwards.keys()]).toEqual([2]);
+  send?.({ event: "removed", id: 2 });
+  expect(probe.forwards.size).toBe(0);
 });

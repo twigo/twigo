@@ -4,9 +4,13 @@
 # ARCHITECTURE 3.8's six metrics at 5k pods, on macOS. Builds the app's bench mode in release,
 # runs the churn generator at 100 changes/s against a kwok cluster, launches the app with
 # TWIGO_BENCH and the cluster's kubeconfig as TWIGO_KUBECONFIG, samples its memory with the pod
-# list open and its CPU with the window on screen and hidden, and prints the report. Without a kubeconfig it creates the cluster (bench/cluster.sh up bench,
-# bench/pods.sh 5000) and deletes it at the end; a given one must hold the 5,000 pods already.
-# report.json and the files it is built from land in $TWIGO_BENCH_DIR/harness.
+# list open and its CPU with the window on screen and hidden; then, with a shell in a pod, a
+# port-forward and a terminal open, which the app opens through its own commands, samples them
+# again, with the terminal watching the pods through the policy proxy and straight to the
+# cluster. It prints the report. Without a kubeconfig it creates the cluster (bench/cluster.sh up
+# bench, bench/pods.sh 5000) and deletes it at the end; a given one must hold the 5,000 pods
+# already. The terminal runs the kubectl of PATH. report.json and the files it is built from
+# land in $TWIGO_BENCH_DIR/harness.
 set -euo pipefail
 
 PODS=5000
@@ -18,6 +22,10 @@ VISIBLE_SETTLE=5
 VISIBLE_SAMPLE=20
 IDLE_SETTLE=5
 IDLE_SAMPLE=30
+# As many as the driver's WATCHES (apps/desktop/bench/sessions.ts).
+WINDOWS=4
+SESSIONS_NAMESPACE=bench-sessions
+FORWARD_PORT=8080
 
 usage() {
   echo "usage: $0 [kubeconfig]" >&2
@@ -33,10 +41,13 @@ target=${CARGO_TARGET_DIR:-$root/target}
 tool=$target/release/twigo-bench
 rm -rf "$out"
 mkdir -p "$out"
+kubectl_path=$(command -v kubectl) || { echo "the terminal runs kubectl from PATH, and there is none" >&2; exit 2; }
+command -v curl >/dev/null || { echo "the harness reads the forward with curl, and there is none" >&2; exit 2; }
 
 created=
 app=
 churn=
+sessions_kubeconfig=
 stop_wait() {
   i=0
   while kill -0 "$1" 2>/dev/null; do
@@ -54,6 +65,10 @@ cleanup() {
     wait "$churn" 2>/dev/null || true
   fi
   if [ -n "$app" ]; then kill "$app" 2>/dev/null || true; fi
+  if [ -n "$sessions_kubeconfig" ] && [ -z "$created" ]; then
+    kubectl --kubeconfig "$sessions_kubeconfig" delete namespace "$SESSIONS_NAMESPACE" \
+      --ignore-not-found --timeout=90s >&2 || true
+  fi
   if [ -n "$created" ]; then "$root/bench/cluster.sh" down bench >&2 || true; fi
 }
 trap cleanup EXIT
@@ -67,8 +82,52 @@ else
   "$root/bench/pods.sh" "$kubeconfig" "$PODS" >&2
 fi
 
+kubeconfig=$(cd "$(dirname "$kubeconfig")" && pwd)/$(basename "$kubeconfig")
+k() { kubectl --kubeconfig "$kubeconfig" "$@"; }
+
+# The pod the app opens a shell in runs on kind's node, from the image the node holds, so that
+# nothing is pulled: it has bash and no other command, so it sleeps by reading a coprocess that
+# never writes (crates/twigo-sessions/tests/logs_live.rs). The forward reaches CoreDNS's health
+# port, which answers over HTTP.
+node=$(k get nodes -l node-role.kubernetes.io/control-plane -o jsonpath='{.items[0].metadata.name}')
+image=$(k get node "$node" -o jsonpath='{.status.images[*].names[*]}' |
+  tr ' ' '\n' | grep -m1 '^docker.io/kindest/local-path-helper:')
+[ -n "$image" ] || { echo "$node holds no docker.io/kindest/local-path-helper image" >&2; exit 1; }
+forward_pod=$(k -n kube-system get pods -l k8s-app=kube-dns -o jsonpath='{.items[0].metadata.name}')
+sessions_kubeconfig=$kubeconfig
+k create namespace "$SESSIONS_NAMESPACE" >&2
+for _ in $(seq 1 60); do
+  k -n "$SESSIONS_NAMESPACE" get serviceaccount default >/dev/null 2>&1 && break
+  sleep 1
+done
+k -n "$SESSIONS_NAMESPACE" apply -f - >&2 <<YAML
+apiVersion: v1
+kind: Pod
+metadata:
+  name: shell
+spec:
+  nodeName: $node
+  terminationGracePeriodSeconds: 0
+  containers:
+    - name: shell
+      image: $image
+      imagePullPolicy: Never
+      command:
+        - sh
+        - -c
+        - 'coproc S { read; }; while :; do read -t 3600 -u "\${S[0]}"; done'
+YAML
+k -n "$SESSIONS_NAMESPACE" wait --for=condition=Ready pod/shell --timeout=120s >&2
+sessions=$(jq -cn --arg namespace "$SESSIONS_NAMESPACE" --arg forward "$forward_pod" \
+  --argjson port "$FORWARD_PORT" --arg kubectl "$kubectl_path" --arg kubeconfig "$kubeconfig" \
+  '{shell: {namespace: $namespace, pod: "shell", container: "shell"},
+    forward: {namespace: "kube-system", pod: $forward, port: $port},
+    kubectl: $kubectl, kubeconfig: $kubeconfig}')
+
 echo "building in release" >&2
 cargo build --manifest-path "$root/Cargo.toml" --release -p twigo-bench >&2
+cargo run --manifest-path "$root/Cargo.toml" --release -p twigo-policy --example gate_cost \
+  >"$out/gate-cost.json" 2>"$out/gate-cost.log" || { cat "$out/gate-cost.log" >&2; exit 1; }
 if ! (cd "$root" && pnpm tauri build --no-bundle --features bench \
   --config src-tauri/tauri.bench.conf.json) >"$out/build.log" 2>&1; then
   tail -40 "$out/build.log" >&2
@@ -121,8 +180,11 @@ done
 # left open would subscribe before the driver opens it.
 bench_data="$HOME/Library/Application Support/io.twigo.ide.bench"
 rm -f "$bench_data/.window-state.json" "$bench_data/state.json"
-TWIGO_BENCH=$out TWIGO_KUBECONFIG=$kubeconfig "$tool" launch "$target/release/twigo" \
-  >"$out/app.log" 2>&1 &
+# The terminal's login shell reads no startup file of the person's, which an empty ZDOTDIR gives it,
+# so that what it prints and runs is the same on every Mac.
+mkdir -p "$out/zdotdir"
+TWIGO_BENCH=$out TWIGO_BENCH_SESSIONS=$sessions TWIGO_KUBECONFIG=$kubeconfig ZDOTDIR=$out/zdotdir \
+  "$tool" launch "$target/release/twigo" >"$out/app.log" 2>&1 &
 app=$!
 
 # The webview writes failure.json and then idle.json, so a failure is checked after the file.
@@ -150,7 +212,13 @@ wait_for() {
 }
 
 echo "app running, its window at the screen's left edge; keep the screen unlocked" >&2
+# What the API server has counted, for the gate's share of the core's CPU over the steady phase.
+snapshot() {
+  "$tool" sample "$app" >"$out/steady-$1.json"
+  k get --raw /metrics >"$out/apiserver-$1.txt"
+}
 wait_for steady.json 180
+snapshot start
 sleep "$SETTLE"
 for n in $(seq 1 "$MEMORY_SAMPLES"); do
   [ "$n" -eq 1 ] || sleep "$MEMORY_EVERY"
@@ -158,6 +226,7 @@ for n in $(seq 1 "$MEMORY_SAMPLES"); do
   "$tool" sample "$app" >"$out/memory-$n.json"
 done
 wait_for visible.json 120
+snapshot end
 sleep "$VISIBLE_SETTLE"
 "$tool" sample "$app" >"$out/visible-start.json"
 sleep "$VISIBLE_SAMPLE"
@@ -171,6 +240,40 @@ sleep "$IDLE_SETTLE"
 "$tool" sample "$app" >"$out/idle-start.json"
 sleep "$IDLE_SAMPLE"
 "$tool" sample "$app" >"$out/idle-end.json"
+
+echo "the window is back; the app opens a shell, a port-forward and a terminal" >&2
+wait_for sessions.json 180
+local_port=$(jq -r .forward.local "$out/sessions.json")
+status=$(curl -sS --max-time 10 -o "$out/forward-read.body" -w '%{http_code}' \
+  "http://127.0.0.1:$local_port/health") || {
+  echo "the forward on localhost:$local_port does not answer" >&2
+  exit 1
+}
+[ "$status" = 200 ] || { echo "the forward answers HTTP $status, not 200" >&2; exit 1; }
+jq -n --argjson status "$status" --argjson bytes "$(wc -c <"$out/forward-read.body")" \
+  '{status: $status, bytes: $bytes}' >"$out/forward-read.json"
+sleep "$SETTLE"
+for n in $(seq 1 "$MEMORY_SAMPLES"); do
+  [ "$n" -eq 1 ] || sleep "$MEMORY_EVERY"
+  no_failure
+  "$tool" sample "$app" >"$out/sessions-memory-$n.json"
+done
+for n in $(seq 1 "$WINDOWS"); do
+  wait_for "watch-$n.json" 120
+  sleep "$VISIBLE_SETTLE"
+  "$tool" sample "$app" >"$out/window-$n-start.json"
+  sleep "$VISIBLE_SAMPLE"
+  "$tool" sample "$app" >"$out/window-$n-end.json"
+  if [ -e "$out/watched-$n.json" ]; then
+    echo "watch window $n ended before its sample did" >&2
+    exit 1
+  fi
+done
+wait_for idle-sessions.json 180
+sleep "$IDLE_SETTLE"
+"$tool" sample "$app" >"$out/idle-sessions-start.json"
+sleep "$IDLE_SAMPLE"
+"$tool" sample "$app" >"$out/idle-sessions-end.json"
 if ! wait "$app"; then
   echo "the app failed after its last sample" >&2
   tail -40 "$out/app.log" >&2 2>/dev/null || true

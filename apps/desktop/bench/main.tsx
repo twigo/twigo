@@ -11,11 +11,14 @@ import {
 } from "@twigo/workbench";
 import { installNativeMenu } from "../src/nativeMenu";
 import { installZoom } from "../src/zoom";
-import { drive } from "./driver";
+import { drive, podsUri } from "./driver";
 import { Probe } from "./probe";
+import { driveSessions, type Target } from "./sessions";
 import "../src/index.css";
 
 const CATALOG_WAIT_MS = 30_000;
+/** Twice what `idle` keeps the window hidden for, which the harness samples through. */
+const AWAY_MS = 90_000;
 
 const root = document.getElementById("root");
 if (!root) throw new Error("index.html has no #root");
@@ -57,8 +60,10 @@ function whileVisible<T>(work: () => Promise<T>): Promise<T> {
   });
 }
 
-/** The space of the one context TWIGO_KUBECONFIG names, the harness's cluster. */
-async function benchSpace(workbench: Workbench): Promise<string> {
+/** The one context TWIGO_KUBECONFIG names, the harness's cluster, and its space. */
+async function benchSpace(
+  workbench: Workbench,
+): Promise<{ space: string; context: string }> {
   const deadline = performance.now() + CATALOG_WAIT_MS;
   while (workbench.catalog.list === undefined) {
     if (performance.now() > deadline) throw new Error("no catalog");
@@ -70,10 +75,53 @@ async function benchSpace(workbench: Workbench): Promise<string> {
       `the bench needs one context, its cluster's; the catalog lists ${String(workbench.catalog.list.length)}`,
     );
   }
-  return (await workbench.spaces.open(context.name)).id;
+  return {
+    space: (await workbench.spaces.open(context.name)).id,
+    context: context.name,
+  };
+}
+
+/** Resolves once the document is `state`, which it must be within `AWAY_MS`. */
+function becomes(state: DocumentVisibilityState): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (document.visibilityState === state) {
+      resolve();
+      return;
+    }
+    const changed = () => {
+      if (document.visibilityState !== state) return;
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", changed);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      document.removeEventListener("visibilitychange", changed);
+      reject(
+        new Error(
+          `the document did not turn ${state} within ${String(AWAY_MS)} ms`,
+        ),
+      );
+    }, AWAY_MS);
+    document.addEventListener("visibilitychange", changed);
+  });
+}
+
+/**
+ * Hides the window as `idle.json` or `idle-sessions.json` says, and writes
+ * what the page says of its visibility. The app then quits, or shows the
+ * window again, which this waits for.
+ */
+async function hide(name: string, hidden: string, quit: boolean) {
+  const hiding = becomes("hidden").then(() =>
+    write(hidden, { visibility: document.visibilityState }),
+  );
+  await invoke("plugin:twigo-bench|idle", { name, quit });
+  await hiding;
+  if (!quit) await becomes("visible");
 }
 
 async function run(container: HTMLElement) {
+  const target = await invoke<Target>("plugin:twigo-bench|setup");
   const probe = new Probe(tauriBackend);
   const workbench = await createWorkbench(
     probe.backend,
@@ -87,7 +135,7 @@ async function run(container: HTMLElement) {
       <WorkbenchView workbench={workbench} />
     </StrictMode>,
   );
-  const space = await benchSpace(workbench);
+  const { space, context } = await benchSpace(workbench);
   const results = await whileVisible(() =>
     drive(workbench, probe, {
       space,
@@ -96,14 +144,20 @@ async function run(container: HTMLElement) {
     }),
   );
   await write("webview", results);
+  await hide("idle", "hidden", false);
+  await whileVisible(() =>
+    driveSessions(workbench, probe, {
+      space,
+      context,
+      list: podsUri(space),
+      rows: results.rows,
+      target,
+      write,
+    }),
+  );
 }
 
 await run(root).catch((error: unknown) =>
   write("failure", { message: toIpcError(error).message }),
 );
-document.addEventListener(
-  "visibilitychange",
-  () => void write("hidden", { visibility: document.visibilityState }),
-  { once: true },
-);
-await invoke("plugin:twigo-bench|idle");
+await hide("idle-sessions", "hidden-sessions", true);

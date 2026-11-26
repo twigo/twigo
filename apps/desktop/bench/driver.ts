@@ -89,7 +89,7 @@ async function paintedWhen(
   }
 }
 
-function sleep(ms: number): Promise<void> {
+export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
@@ -218,10 +218,15 @@ async function openEditor(workbench: Workbench, uri: string): Promise<number> {
   }
 }
 
+/** The URI of a space's pod list. */
+export function podsUri(space: string): string {
+  return `k8s-list://${space}/v1/pods`;
+}
+
 /** Opens the space's pod list: from the click to its first rows painted. */
 async function open(workbench: Workbench, probe: Probe, space: string) {
   const opened = probe.next();
-  const clicked = await openEditor(workbench, `k8s-list://${space}/v1/pods`);
+  const clicked = await openEditor(workbench, podsUri(space));
   const list = await within(
     opened,
     FIRST_PAINT_WAIT_MS,

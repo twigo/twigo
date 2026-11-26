@@ -52,6 +52,7 @@ export { notifyError } from "./notifyError";
 export type { Look, Outcome } from "./operations/service";
 export { canUnlock, unlockAction } from "./operations/unlock";
 export { StateStore } from "./state/store";
+export { SET_CONTEXT_ENVIRONMENT } from "./spaces/modeCommands";
 export type { SpaceConnection, SpaceStatusProvider } from "./spaces/status";
 export type {
   Location,

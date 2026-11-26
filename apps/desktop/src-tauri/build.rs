@@ -78,7 +78,7 @@ fn main() {
     if std::env::var_os("CARGO_FEATURE_BENCH").is_some() {
         attributes = attributes.plugin(
             "twigo-bench",
-            tauri_build::InlinedPlugin::new().commands(&["write", "idle"]),
+            tauri_build::InlinedPlugin::new().commands(&["write", "idle", "setup"]),
         );
     }
     tauri_build::try_build(attributes).expect("tauri-build");
