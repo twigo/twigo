@@ -33,6 +33,7 @@ const TARGET: Target = {
   kubeconfig: "/tmp/it's/kubeconfig",
 };
 const ROWS = 100;
+const CONTEXT = "kind-twigo";
 const TERMINAL = 7;
 const SHELL = 5;
 const encoder = new TextEncoder();
@@ -91,6 +92,7 @@ function fake({
   const senders = new Map<number, (message: ShellMessage) => void>();
   let tell: ((event: ForwardEvent) => void) | undefined;
   let environment: string | null = null;
+  const marks: unknown[] = [];
   let confirmed: string | undefined | null = null;
   let asking:
     | {
@@ -160,7 +162,10 @@ function fake({
   };
   const workbench = {
     keys: { lookup: () => () => undefined },
-    catalog: { find: () => ({ access: { environment } }) },
+    catalog: {
+      find: (name: string) =>
+        name === CONTEXT ? { access: { environment } } : undefined,
+    },
     editors: {
       open: (uri: string) => {
         log.push(`open ${uri}`);
@@ -186,10 +191,11 @@ function fake({
         log.push(id);
         switch (id) {
           case "workbench.action.setContextEnvironment":
+            marks.push(args);
             environment = (args as { value: string }).value;
             break;
           case "k8s.shell.open":
-            if (asks) {
+            if (asks && environment === "staging") {
               await new Promise<void>((resolve) => {
                 asking = {
                   plan: { friction, question: "Open a shell in shell?" },
@@ -228,12 +234,13 @@ function fake({
     log,
     typed,
     written,
+    marks,
     say: (text: string) => senders.get(TERMINAL)?.(encoder.encode(text).buffer),
     confirmed: () => confirmed,
     run: () =>
       driveSessions(workbench as never, probe, {
         space: "s",
-        context: "kind-twigo",
+        context: CONTEXT,
         list: "k8s-list://s/v1/pods",
         rows: ROWS,
         target,
@@ -265,6 +272,12 @@ test("the sessions open in the order a person opens them, through the friction t
       terminal: { kind: "proxy", shell: "zsh" },
     },
   ]);
+});
+
+test("the context is marked staging, the type that asks before a shell and sends the terminal through the proxy", async () => {
+  const bench = fake();
+  await bench.run();
+  expect(bench.marks).toEqual([{ context: "kind-twigo", value: "staging" }]);
 });
 
 test("a dialog that asks for a name typed has it typed", async () => {
