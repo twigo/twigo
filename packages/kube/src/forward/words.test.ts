@@ -281,6 +281,11 @@ test.each<
     { running: true, startable: true, movable: true, web: false },
   ],
   [
+    "refused on clients of a cluster its context no longer names, which a start builds anew",
+    { state: REFUSED({ kind: "moved" }) },
+    { running: true, startable: true, movable: true, web: false },
+  ],
+  [
     "refused by a policy file, which no one here lifts",
     {
       state: REFUSED({
