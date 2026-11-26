@@ -219,8 +219,7 @@ async fn a_reader_hears_only_the_keys_whose_values_changed_appeared_or_went() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_poll_keeps_the_sample_of_a_key_that_did_not_change_and_a_pod_that_came_back_has_a_new_one()
- {
+async fn a_poll_builds_every_sample_anew_and_holds_no_answer_but_the_last_while_it_sleeps() {
     let rig = rig().await;
     let mut reader = rig.context.reader(Kind::Pods);
     reader.want(namespace("a"));
@@ -230,33 +229,16 @@ async fn a_poll_keeps_the_sample_of_a_key_that_did_not_change_and_a_pod_that_cam
     let (p1, p2) = (held("p1"), held("p2"));
 
     sleep(INTERVAL + Duration::from_secs(1)).await;
-    assert!(
-        Arc::ptr_eq(&p1, &held("p1")),
-        "the same values at the next poll"
-    );
-    assert!(Arc::ptr_eq(&p2, &held("p2")));
-
-    rig.fake.pod_usage("a", "p1", &[("main", "60m", "204Ki")]);
-    sleep(INTERVAL).await;
-    assert!(!Arc::ptr_eq(&p1, &held("p1")));
-    assert_eq!(held("p1").cpu, 60_000_000);
-    assert!(Arc::ptr_eq(&p2, &held("p2")), "the other one did not move");
-    assert_eq!(
-        Arc::strong_count(&p1),
-        1,
-        "the poll holds the answer before only while it reads the next"
-    );
-
-    rig.fake.delete_from(GROUP, "pods", Some("a"), "p2");
-    sleep(INTERVAL).await;
-    assert!(reader.sample("a", "p2").is_none());
-    rig.fake.pod_usage("a", "p2", &[("main", "1", "40Mi")]);
-    sleep(INTERVAL).await;
-    assert_eq!(held("p2"), p2, "the same values");
-    assert!(
-        !Arc::ptr_eq(&p2, &held("p2")),
-        "of the answer it came back in, not of the one it left"
-    );
+    for (before, name) in [(&p1, "p1"), (&p2, "p2")] {
+        let now = held(name);
+        assert_eq!(*before, now, "the same values at the next poll");
+        assert!(!Arc::ptr_eq(before, &now), "{name}");
+        assert_eq!(
+            Arc::strong_count(before),
+            1,
+            "{name}: the poll holds the answer before only while it reads the next"
+        );
+    }
 }
 
 #[tokio::test(start_paused = true)]

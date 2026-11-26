@@ -25,7 +25,6 @@ Findings that belong to no step yet.
   - Listing and storing 5,000 pods by a streaming list allocates 44.2 MiB in all, HTTP/2 reads and body chunks included, to keep 4.0 MiB (`examples/hub_memory.rs`, kind 1.37 with `bench/pods.sh` at 5,000, 2026-11-02); a paged list of the same pods was not measured the same way, and step 11's budgets say whether it matters.
 - Metrics (`twigo_cache::metrics`, ARCHITECTURE 3.6):
   - A pod deleted and created again under one name, with the same values at the next scrape, shows no sample until its values change: the view drops a sample with its row's uid, and the poller tells only what changed, since the API carries no uid.
-    A row that enters the filters after that takes none either, since the poller keeps the sample of the same values with the time of the scrape that first read them, which `taken_since` finds older than the new pod.
   - A view keeps its last samples while it reads none, as a hidden window does, so they show for as long as the first answer takes when the window comes back; nothing marks them as old.
   - An open pod's requests and limits come from its containers: a pod-level `spec.resources` is not read.
   - The bench's Core RSS is over its budget of 150 MB with the metric columns shown: 161 to 166 MB against 145 to 146 MB on the commit before them, and 152 MB with the Metrics API removed (`bench/harness.sh`, kind 1.37, 2026-11-14).

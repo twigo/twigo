@@ -14,8 +14,7 @@ use super::Kind;
 
 #[derive(Debug, Clone)]
 pub struct Sample {
-    /// Moves with every scrape, so a sample is not compared by it, and a poll that finds the same
-    /// values keeps the sample and the time of the scrape that first read them.
+    /// Moves with every scrape, so a sample is not compared by it.
     pub sampled: Option<Timestamp>,
     /// Nanocores; a pod's is the sum over its containers, as kubectl sums them
     /// ([`metrics_printer.go`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/kubectl/pkg/metricsutil/metrics_printer.go#L188-L202)).
@@ -49,8 +48,8 @@ impl PartialEq for Sample {
 
 impl Eq for Sample {}
 
-/// By namespace, empty for a node, then name. An answer shares the names and the samples it finds
-/// the same with the one before.
+/// By namespace, empty for a node, then name. An answer shares the names it finds again with the
+/// one before.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Samples(HashMap<Arc<str>, HashMap<Arc<str>, Arc<Sample>>>);
 
@@ -76,7 +75,7 @@ impl Samples {
     }
 
     /// `expected` sizes the table of a namespace that is new to this answer.
-    fn insert(&mut self, namespace: &str, name: Arc<str>, sample: Arc<Sample>, expected: usize) {
+    fn insert(&mut self, namespace: &str, name: Arc<str>, sample: Sample, expected: usize) {
         let samples = match self.0.get_mut(namespace) {
             Some(samples) => samples,
             None => self
@@ -84,7 +83,7 @@ impl Samples {
                 .entry(namespace.into())
                 .or_insert_with(|| HashMap::with_capacity(expected)),
         };
-        samples.insert(name, sample);
+        samples.insert(name, Arc::new(sample));
     }
 }
 
@@ -162,26 +161,18 @@ impl Item<'_> {
             .and_then(|timestamp| timestamp.0.parse().ok())
     }
 
-    /// The sample of an item, or `held` where it is the same, and none for an item the server
-    /// leaves out.
-    fn sample(&self, kind: Kind, held: Option<&Arc<Sample>>) -> Option<Arc<Sample>> {
+    fn sample(&self, kind: Kind) -> Option<Sample> {
         match kind {
             Kind::Nodes => {
                 let (cpu, memory) = usage(self.usage.as_ref()?)?;
-                if let Some(held) = held.filter(|held| held.cpu == cpu && held.memory == memory) {
-                    return Some(Arc::clone(held));
-                }
-                Some(Arc::new(Sample {
+                Some(Sample {
                     sampled: self.sampled(),
                     cpu,
                     memory,
                     containers: Box::default(),
-                }))
+                })
             }
             Kind::Pods => {
-                if let Some(held) = held.filter(|held| self.same_as(held)) {
-                    return Some(Arc::clone(held));
-                }
                 let mut containers = Vec::with_capacity(self.containers.len());
                 for container in &self.containers {
                     let (cpu, memory) = container.usage?;
@@ -194,26 +185,14 @@ impl Item<'_> {
                 if containers.is_empty() {
                     return None;
                 }
-                Some(Arc::new(Sample {
+                Some(Sample {
                     sampled: self.sampled(),
                     cpu: containers.iter().map(|container| container.cpu).sum(),
                     memory: containers.iter().map(|container| container.memory).sum(),
                     containers: containers.into(),
-                }))
+                })
             }
         }
-    }
-
-    fn same_as(&self, sample: &Sample) -> bool {
-        sample.containers.len() == self.containers.len()
-            && sample
-                .containers
-                .iter()
-                .zip(&self.containers)
-                .all(|(held, container)| {
-                    *held.name == *container.name
-                        && container.usage == Some((held.cpu, held.memory))
-                })
     }
 }
 
@@ -259,15 +238,16 @@ impl<'de> Visitor<'de> for Parser<'_> {
                 Kind::Pods => item.metadata.namespace.as_ref().map_or("", |text| &text.0),
                 Kind::Nodes => "",
             };
-            let names = self.previous.and_then(|previous| previous.0.get(namespace));
-            let before = names.and_then(|names| names.get_key_value(&*item.metadata.name));
-            let Some(sample) = item.sample(self.kind, before.map(|(_, sample)| sample)) else {
+            let Some(sample) = item.sample(self.kind) else {
                 continue;
             };
-            let name = before.map_or_else(
-                || Arc::from(&*item.metadata.name),
-                |(name, _)| Arc::clone(name),
-            );
+            let names = self.previous.and_then(|previous| previous.0.get(namespace));
+            let name = names
+                .and_then(|names| names.get_key_value(&*item.metadata.name))
+                .map_or_else(
+                    || Arc::from(&*item.metadata.name),
+                    |(name, _)| Arc::clone(name),
+                );
             samples.insert(namespace, name, sample, names.map_or(0, HashMap::len));
         }
         Ok(samples)
@@ -283,8 +263,8 @@ impl<'de> DeserializeSeed<'de> for Parser<'_> {
     }
 }
 
-/// An item whose usage does not parse has no sample, as a pod the server leaves out. `previous`
-/// is the answer before for the same scope.
+/// An item whose usage does not parse has no sample, as a pod the server leaves out. A pod or node
+/// that `previous`, the answer before for the same scope, has too keeps its name.
 pub fn parse(
     body: &[u8],
     kind: Kind,
@@ -490,6 +470,16 @@ mod tests {
         })
     }
 
+    const FIRST: &str = "2026-11-13T16:00:00Z";
+    const LATER: &str = "2026-11-13T16:00:15Z";
+
+    fn stamped(mut list: serde_json::Value, time: &str) -> serde_json::Value {
+        for item in list["items"].as_array_mut().unwrap() {
+            item["timestamp"] = json!(time);
+        }
+        list
+    }
+
     fn after(previous: &Samples, list: &serde_json::Value) -> Samples {
         parse(list.to_string().as_bytes(), Kind::Pods, Some(previous)).unwrap()
     }
@@ -499,7 +489,7 @@ mod tests {
     }
 
     #[test]
-    fn a_poll_keeps_the_sample_and_the_name_of_what_it_finds_the_same() {
+    fn a_poll_keeps_the_names_of_what_it_finds_again_and_builds_every_sample_anew() {
         let first = parsed(
             &json!({ "items": [
                 pod("a", "same", &[("x", "1m"), ("y", "2m")]),
@@ -509,100 +499,98 @@ mod tests {
             ] }),
             Kind::Pods,
         );
-        let mut list = json!({ "items": [
-            pod("a", "same", &[("y", "2m"), ("x", "1m")]),
-            pod("a", "moved", &[("x", "2m")]),
-            pod("a", "split", &[("x", "2m"), ("y", "1m")]),
-            pod("a", "new", &[("x", "1m")]),
-            pod("b", "other", &[("x", "1m")]),
-        ] });
-        list["items"][0]["timestamp"] = json!("2026-11-13T16:00:15Z");
-        let second = after(&first, &list);
+        let second = after(
+            &first,
+            &stamped(
+                json!({ "items": [
+                    pod("a", "same", &[("y", "2m"), ("x", "1m")]),
+                    pod("a", "moved", &[("x", "2m")]),
+                    pod("a", "split", &[("x", "2m"), ("y", "1m")]),
+                    pod("a", "new", &[("x", "1m")]),
+                    pod("b", "other", &[("x", "1m")]),
+                ] }),
+                LATER,
+            ),
+        );
 
-        let (before, now) = (
-            first.get("a", "same").unwrap(),
-            second.get("a", "same").unwrap(),
-        );
-        assert!(
-            Arc::ptr_eq(before, now),
-            "the same values, in another order and a later scrape"
-        );
-        assert_eq!(
-            now.sampled,
-            Some("2026-11-13T16:00:00Z".parse().unwrap()),
-            "of the scrape that first read them"
-        );
-        assert!(Arc::ptr_eq(
-            key(&first, "a", "same"),
-            key(&second, "a", "same")
-        ));
-        assert!(Arc::ptr_eq(
-            first.get("b", "other").unwrap(),
-            second.get("b", "other").unwrap()
-        ));
-
-        for name in ["moved", "split"] {
-            let (before, now) = (
-                first.get("a", name).unwrap(),
-                second.get("a", name).unwrap(),
-            );
-            assert!(!Arc::ptr_eq(before, now), "{name}");
-            assert_ne!(before, now, "{name}");
+        assert_eq!(second.len(), 5);
+        for (namespace, name, sample) in second.iter() {
+            let found = format!("{namespace}/{name}");
+            assert_eq!(sample.sampled, Some(LATER.parse().unwrap()), "{found}");
+            let Some(before) = first.get(namespace, name) else {
+                assert_eq!(&*found, "a/new");
+                continue;
+            };
+            assert!(!Arc::ptr_eq(before, sample), "{found}");
             assert!(
-                Arc::ptr_eq(key(&first, "a", name), key(&second, "a", name)),
-                "its name is the same"
+                Arc::ptr_eq(key(&first, namespace, name), key(&second, namespace, name)),
+                "{found}"
             );
+        }
+        assert_eq!(first.get("a", "same"), second.get("a", "same"));
+        assert_eq!(first.get("b", "other"), second.get("b", "other"));
+        for name in ["moved", "split"] {
+            assert_ne!(first.get("a", name), second.get("a", name), "{name}");
         }
         assert_eq!(
             second.get("a", "split").unwrap().cpu,
             3_000_000,
             "the same total, another split"
         );
-        assert_eq!(second.len(), 5);
-        assert!(first.get("a", "new").is_none() && second.get("a", "new").is_some());
     }
 
     #[test]
-    fn a_node_that_reads_the_same_keeps_its_sample() {
-        let node = |cpu: &str| {
+    fn a_node_that_reads_the_same_keeps_its_name_and_has_a_sample_of_its_own_answer() {
+        let node = |cpu: &str, time: &str| {
             json!({ "items": [{
                 "metadata": { "name": "n" },
-                "timestamp": "2026-11-13T16:28:56Z",
+                "timestamp": time,
                 "usage": { "cpu": cpu, "memory": "1Mi" },
             }] })
         };
-        let first = parsed(&node("1m"), Kind::Nodes);
-        let same = parse(node("1m").to_string().as_bytes(), Kind::Nodes, Some(&first)).unwrap();
-        let moved = parse(node("2m").to_string().as_bytes(), Kind::Nodes, Some(&first)).unwrap();
-        assert!(Arc::ptr_eq(
-            first.get("", "n").unwrap(),
-            same.get("", "n").unwrap()
-        ));
-        assert!(!Arc::ptr_eq(
-            first.get("", "n").unwrap(),
-            moved.get("", "n").unwrap()
-        ));
+        let first = parsed(&node("1m", FIRST), Kind::Nodes);
+        let next = |cpu| {
+            let list = node(cpu, LATER);
+            parse(list.to_string().as_bytes(), Kind::Nodes, Some(&first)).unwrap()
+        };
+        let (same, moved) = (next("1m"), next("2m"));
+        for answer in [&same, &moved] {
+            let sample = answer.get("", "n").unwrap();
+            assert!(!Arc::ptr_eq(first.get("", "n").unwrap(), sample));
+            assert!(Arc::ptr_eq(key(&first, "", "n"), key(answer, "", "n")));
+            assert_eq!(sample.sampled, Some(LATER.parse().unwrap()));
+        }
+        assert_eq!(first.get("", "n"), same.get("", "n"));
         assert_eq!(moved.get("", "n").unwrap().cpu, 2_000_000);
     }
 
     #[test]
-    fn a_pod_that_left_and_came_back_under_its_name_is_a_new_sample() {
+    fn a_pod_made_again_under_its_name_with_the_same_values_has_a_sample_taken_since_it_was_made() {
+        let list = json!({ "items": [pod("a", "p", &[("x", "1m")])] });
+        let first = parsed(&list, Kind::Pods);
+        let second = after(&first, &stamped(list, LATER));
+        let made = "2026-11-13T16:00:10Z".parse::<Timestamp>().unwrap();
+        let made = Some(made.as_millisecond());
+        assert!(
+            !first.get("a", "p").unwrap().taken_since(made),
+            "the sample of the pod before"
+        );
+        assert!(second.get("a", "p").unwrap().taken_since(made));
+    }
+
+    #[test]
+    fn a_name_is_kept_from_the_answer_before_only_so_a_pod_that_came_back_has_a_new_one() {
         let with =
             json!({ "items": [pod("a", "p", &[("x", "1m")]), pod("a", "q", &[("x", "1m")])] });
         let without = json!({ "items": [pod("a", "q", &[("x", "1m")])] });
         let first = parsed(&with, Kind::Pods);
         let gone = after(&first, &without);
         assert!(gone.get("a", "p").is_none());
-        assert!(Arc::ptr_eq(
-            first.get("a", "q").unwrap(),
-            gone.get("a", "q").unwrap()
-        ));
+        assert!(Arc::ptr_eq(key(&first, "a", "q"), key(&gone, "a", "q")));
 
         let back = after(&gone, &with);
-        let (before, now) = (first.get("a", "p").unwrap(), back.get("a", "p").unwrap());
-        assert_eq!(before, now, "the same values");
-        assert!(!Arc::ptr_eq(before, now), "from the answer it left");
         assert!(!Arc::ptr_eq(key(&first, "a", "p"), key(&back, "a", "p")));
+        assert!(Arc::ptr_eq(key(&gone, "a", "q"), key(&back, "a", "q")));
     }
 
     #[test]
@@ -628,7 +616,7 @@ mod tests {
         let unparsed = json!({ "items": [pod("a", "p", &[("x", "lots")])] });
         assert!(
             after(&first, &unparsed).is_empty(),
-            "an item that does not parse is no sample, kept or not"
+            "an item that does not parse is no sample, whatever the answer before held"
         );
     }
 
