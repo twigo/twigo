@@ -44,7 +44,8 @@ The judged rows are all measured once the idle sample is taken, so where a failu
 - **Until the idle sample is taken, or in a phase the report judges, a failure stops the run.**
   The harness prints what failed and exits 1, with no report.
   The driver writes `failure.json` when the pod list's first paint, scroll, sorts or changes fail, or the hide for the judged idle sample, and then calls `idle` all the same, so the harness checks for the file after every wait, whenever it comes.
-  A page that never turns hidden for that sample is one of them: the driver reports it 90 s after the hide, 55 s after the harness's sample ended, and the run stops then rather than judge the row on a sample nothing showed was hidden.
+  A page that never turns hidden for that sample is one of them: the driver reports it 90 s after the hide, 55 s after the harness's sample ended.
+  The harness waits for `hidden.json`, which the page writes as the document turns hidden, before it starts on the sessions, so the run stops then rather than judge the row on a sample nothing showed was hidden, whatever the sessions' part does meanwhile.
   The churn exiting, the app quitting, a wait that times out and the window hiding before the visible sample ended stop the run the same way before that sample is taken.
 - **After it, a failure of the sessions' part leaves the sessions' rows unmeasured and the run goes on.**
   These are the driver's steps (opening a shell, a forward or a terminal, a watch window, the check that the terminal printed no more than a prompt) and the harness's own there: a forward that does not answer, a window that ended before its sample did, the window hiding before the sessions' visible sample ended, the app quitting, a wait that times out, and the pod `shell` that was not made ready at the start.
