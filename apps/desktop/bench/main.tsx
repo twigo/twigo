@@ -109,7 +109,7 @@ function becomes(state: DocumentVisibilityState): Promise<void> {
 /**
  * Hides the window as `idle.json` or `idle-sessions.json` says, and writes
  * what the page says of its visibility. The app then quits, or shows the
- * window again, which this waits for.
+ * window again, which the sessions wait for.
  */
 async function hide(name: string, hidden: string, quit: boolean) {
   const hiding = becomes("hidden").then(() =>
@@ -117,7 +117,6 @@ async function hide(name: string, hidden: string, quit: boolean) {
   );
   await invoke("plugin:twigo-bench|idle", { name, quit });
   await hiding;
-  if (!quit) await becomes("visible");
 }
 
 /** `failure` stops the harness; `sessions-failure` only leaves the sessions' rows unmeasured. */
@@ -151,16 +150,20 @@ async function run(container: HTMLElement) {
   );
   await write("webview", results);
   await hide("idle", "hidden", false);
-  await whileVisible(() =>
-    driveSessions(workbench, probe, {
-      space,
-      context,
-      list: podsUri(space),
-      rows: results.rows,
-      target,
-      write,
-    }),
-  ).catch(failed("sessions-failure"));
+  await becomes("visible")
+    .then(() =>
+      whileVisible(() =>
+        driveSessions(workbench, probe, {
+          space,
+          context,
+          list: podsUri(space),
+          rows: results.rows,
+          target,
+          write,
+        }),
+      ),
+    )
+    .catch(failed("sessions-failure"));
 }
 
 await run(root).catch(failed("failure"));

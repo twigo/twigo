@@ -273,6 +273,7 @@ sleep "$IDLE_SETTLE"
 "$tool" sample "$app" >"$out/idle-start.json"
 sleep "$IDLE_SAMPLE"
 "$tool" sample "$app" >"$out/idle-end.json"
+churn_alive
 # A page that never turned hidden is reported 90 s after the hide, and that stops the run.
 wait_for hidden.json 120
 
