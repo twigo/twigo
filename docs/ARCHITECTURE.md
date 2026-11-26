@@ -2991,7 +2991,10 @@ Their plans read the objects and what the garbage collector takes with them (eve
   Catalog, environment, credentials, discovery, the watch hub with every upstream kind, explorer tables, resource editors (read), logs.
   Budgets green at 5k pods.
 - **M2, write path and sessions.**
-  Policy and the policy proxy, the dry-run diff and apply, actions, exec, port-forward, terminal, metrics, Helm read.
+  Modes and the gate below every client; the command bus, with friction checked in Rust, Reveal, undo and the audit log; delete of one or several objects, scale, rollout restart, cordon and uncordon, drain, CronJob trigger, and suspend and resume of Jobs and CronJobs.
+  The YAML editor with OpenAPI schemas, a dry-run diff, server-side apply and its conflicts, and new manifests; exec and attach; the policy proxy and its approval broker; the integrated terminal; the port-forward manager; metrics in pod and node lists and their Overviews; Helm releases read from their Secrets.
+  Passes after the steps: readability, security (protection that only a confirmed command lowers, contexts nobody marked that ask), transport (compressed and streaming lists, a connection no stalled stream can freeze), a picker of several namespaces, and panics and diagnostics.
+  Its last step is the budgets at 5k pods (3.8).
 - **M3, MVP beta.**
   MCP server, settings UI, keybindings editor, auto-update, signing, documentation.
 
