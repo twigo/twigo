@@ -371,11 +371,15 @@ impl Policy {
     }
 
     pub fn access(&self, context: &str) -> ContextAccess {
-        self.access_at(context, Timestamp::now())
+        self.access_at(context, (self.metadata)(context), Timestamp::now())
     }
 
-    fn access_at(&self, context: &str, now: Timestamp) -> ContextAccess {
-        let metadata = (self.metadata)(context);
+    fn access_at(
+        &self,
+        context: &str,
+        metadata: Option<Metadata>,
+        now: Timestamp,
+    ) -> ContextAccess {
         let mut held = self.held();
         let ended = held.end_moved(context, metadata);
         let access = self.resolved(&held, context, metadata, now);
@@ -434,8 +438,15 @@ impl Policy {
                     .map(TypeLock::environment)
             }),
         };
-        let (mode, source) =
-            file.unwrap_or_else(|| self.resolve(context, held, metadata, environment));
+        let (mode, source) = match metadata {
+            // Clients built before it went may still run, and nothing says what
+            // it lets through: what its kubeconfig said of it is no longer
+            // known, and the policy file speaks of a name that names nothing now.
+            None => (Mode::ReadOnly, ModeSource::Unlisted),
+            Some(metadata) => {
+                file.unwrap_or_else(|| self.resolve(context, held, &metadata, environment))
+            }
+        };
         let unlocked = held
             .unlocks
             .get(context)
@@ -464,15 +475,10 @@ impl Policy {
         &self,
         context: &str,
         held: &Held,
-        metadata: Option<Metadata>,
+        metadata: &Metadata,
         environment: Option<Environment>,
     ) -> (Mode, ModeSource) {
-        // Clients built before it went may still run, and what its kubeconfig
-        // said of it is no longer known.
-        let Some(metadata) = metadata else {
-            return (Mode::ReadOnly, ModeSource::Unlisted);
-        };
-        let lock = strictest(&metadata, environment);
+        let lock = strictest(metadata, environment);
         if let Some(mode) = held.choices.modes.get(context) {
             let overrides = lock.filter(|lock| lock.mode > *mode);
             return (*mode, ModeSource::User { overrides });
@@ -510,8 +516,8 @@ impl Policy {
     /// [`Policy::authorize`], for clients built for `connection`, of a
     /// request that carries `approval`: once the context's name means
     /// something else, they still reach the old cluster until their owner
-    /// re-opens, and no mode of the new one holds for it. Says the mode it
-    /// let the request through in.
+    /// re-opens, and neither the new one's mode nor the policy file's holds
+    /// for it. Says the mode it let the request through in.
     pub(crate) fn authorize_built(
         &self,
         context: &str,
@@ -520,10 +526,9 @@ impl Policy {
         actor: Actor,
         approval: Option<&Approval>,
     ) -> Result<Mode, Box<Blocked>> {
-        let mut access = self.access(context);
-        let moved = self.file.mode(context).is_none()
-            && (self.metadata)(context).is_some_and(|now| Some(now.connection) != connection);
-        if moved {
+        let listed = (self.metadata)(context);
+        let mut access = self.access_at(context, listed, Timestamp::now());
+        if listed.is_some_and(|listed| Some(listed.connection) != connection) {
             access.mode = Mode::ReadOnly;
             access.source = ModeSource::Moved;
         }
@@ -599,10 +604,10 @@ impl Policy {
     /// lists it, a mode or an unlock where the admin's policy file sets its
     /// mode, and an unlock where it is not `read-only`.
     pub fn plan(&self, context: &str, change: Change) -> Result<PlannedChange, Refused> {
-        self.refuse_policy_file(context, change)?;
         let now = Timestamp::now();
         let metadata =
             (self.metadata)(context).ok_or_else(|| Refused::Unlisted(context.to_owned()))?;
+        self.refuse_policy_file(context, change)?;
         let mut held = self.held();
         let ended = held.end_moved(context, Some(metadata));
         let before = self.resolved(&held, context, Some(metadata), now);
@@ -722,10 +727,10 @@ impl Policy {
         unlock: SignedDuration,
         check: impl FnOnce(&Held, &ContextAccess, &Metadata) -> Result<(), Refused>,
     ) -> Result<(ContextAccess, ContextAccess, Choices), Refused> {
-        self.refuse_policy_file(context, change)?;
         let now = Timestamp::now();
         let metadata =
             (self.metadata)(context).ok_or_else(|| Refused::Unlisted(context.to_owned()))?;
+        self.refuse_policy_file(context, change)?;
         let mut held = self.held();
         let ended = held.end_moved(context, Some(metadata));
         let before = self.resolved(&held, context, Some(metadata), now);

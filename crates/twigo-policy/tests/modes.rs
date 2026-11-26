@@ -5,8 +5,8 @@ use jiff::SignedDuration;
 use twigo_ipc::{BlockReason, Environment, Friction, Lock, LockSource, Mode, ModeSource};
 use twigo_policy::friction::friction;
 use twigo_policy::{
-    Actor, Attributes, Audit, Change, Choices, Metadata, Policy, PolicyFile, ProviderLock, Refused,
-    TypeLock,
+    Actor, Attributes, Audit, Change, Choices, Gate, Metadata, Policy, PolicyFile, ProviderLock,
+    Refused, TypeLock,
 };
 
 const NOTHING: Metadata = Metadata {
@@ -34,6 +34,10 @@ fn file(text: &str) -> (tempfile::TempDir, PolicyFile) {
     (dir, file)
 }
 
+fn entries(contexts: &str) -> (tempfile::TempDir, PolicyFile) {
+    file(&format!(r#"{{"contexts": {{{contexts}}}}}"#))
+}
+
 fn with_metadata(metadata: Metadata) -> Arc<Policy> {
     Policy::new(
         PolicyFile::default(),
@@ -45,6 +49,33 @@ fn with_metadata(metadata: Metadata) -> Arc<Policy> {
 
 fn write() -> Attributes {
     Attributes::action("create", "configmaps", None, Some("a"), None)
+}
+
+fn posted() -> http::Request<()> {
+    http::Request::post("/api/v1/namespaces/a/configmaps")
+        .body(())
+        .unwrap()
+}
+
+fn got() -> http::Request<()> {
+    http::Request::get("/api/v1/pods").body(()).unwrap()
+}
+
+fn through(gate: &Gate, request: http::Request<()>) -> Result<(), (Mode, ModeSource)> {
+    use tower::{Layer, ServiceExt};
+
+    let service = gate
+        .layer()
+        .layer(tower::service_fn(|_: http::Request<()>| async {
+            Ok::<_, std::convert::Infallible>(())
+        }));
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    runtime.block_on(service.oneshot(request)).map_err(|error| {
+        let blocked = error.downcast_ref::<twigo_ipc::Blocked>().unwrap();
+        (blocked.mode, blocked.source.clone())
+    })
 }
 
 #[test]
@@ -126,7 +157,7 @@ fn a_mark_in_the_kubeconfig_counts_until_a_person_marks_otherwise() {
 }
 
 #[test]
-fn the_policy_file_comes_first_and_the_person_s_choice_before_any_lock() {
+fn the_policy_file_comes_before_the_person_s_choice_and_that_before_any_lock() {
     let (_dir, entries) = file(r#"{"contexts": {"prod-*": "read-write"}}"#);
     let locked = Metadata {
         read_only: true,
@@ -519,35 +550,63 @@ fn an_unlock_holds_only_for_what_it_was_given_on() {
 
 #[test]
 fn a_context_no_source_lists_lets_no_write_through_whatever_was_chosen() {
-    let policy = Policy::new(
-        PolicyFile::default(),
-        |_| None,
-        Choices::default(),
-        Audit::off(),
-    );
-    let access = policy.access("gone");
-    assert_eq!(access.mode, Mode::ReadOnly);
-    assert_eq!(access.source, ModeSource::Unlisted);
-    assert!(policy.authorize("gone", &write(), Actor::Ui).is_err());
-    assert!(
-        policy
-            .authorize(
-                "gone",
-                &Attributes::action("get", "pods", None, None, None),
-                Actor::Ui
+    for entry in [
+        "",
+        r#""gone": "guarded""#,
+        r#""gone": "read-write""#,
+        r#""gone": "read-only""#,
+    ] {
+        let (_dir, filed) = entries(entry);
+        let listed = Arc::new(Mutex::new(Some(NOTHING)));
+        let policy = {
+            let listed = Arc::clone(&listed);
+            Policy::new(
+                filed,
+                move |_| *listed.lock().unwrap(),
+                Choices::default(),
+                Audit::off(),
             )
-            .is_ok()
-    );
-    assert!(matches!(policy.unlock("gone"), Err(Refused::Unlisted(_))));
-    assert!(matches!(
-        policy.plan("gone", Change::Mode { mode: None }),
-        Err(Refused::Unlisted(_))
-    ));
-    assert!(matches!(
-        policy.set_mode("gone", Some(Mode::ReadWrite)),
-        Err(Refused::Unlisted(_))
-    ));
-    assert_eq!(policy.access("gone").mode, Mode::ReadOnly);
+        };
+        let built = policy.gate("gone", Actor::Ui);
+        *listed.lock().unwrap() = None;
+        let access = policy.access("gone");
+        assert_eq!(access.mode, Mode::ReadOnly, "{entry}");
+        assert_eq!(access.source, ModeSource::Unlisted, "{entry}");
+        assert_eq!(
+            through(&built, posted()),
+            Err((Mode::ReadOnly, ModeSource::Unlisted)),
+            "{entry}"
+        );
+        assert_eq!(through(&built, got()), Ok(()), "{entry}");
+        assert!(policy.authorize("gone", &write(), Actor::Ui).is_err());
+        assert!(
+            policy
+                .authorize(
+                    "gone",
+                    &Attributes::action("get", "pods", None, None, None),
+                    Actor::Ui
+                )
+                .is_ok()
+        );
+        for change in [Change::Mode { mode: None }, Change::Unlock] {
+            assert!(
+                matches!(policy.plan("gone", change), Err(Refused::Unlisted(_))),
+                "{entry}: {change:?}"
+            );
+        }
+        assert!(
+            matches!(policy.unlock("gone"), Err(Refused::Unlisted(_))),
+            "{entry}"
+        );
+        assert!(
+            matches!(
+                policy.set_mode("gone", Some(Mode::ReadWrite)),
+                Err(Refused::Unlisted(_))
+            ),
+            "{entry}"
+        );
+        assert_eq!(policy.access("gone").mode, Mode::ReadOnly);
+    }
 }
 
 #[test]
@@ -707,63 +766,59 @@ fn choices_round_trip_as_a_person_left_them() {
 
 #[test]
 fn a_gate_holds_its_clients_to_what_they_were_built_for() {
-    use http::Request;
-    use tower::{Layer, Service, ServiceExt};
-
-    let metadata = Arc::new(Mutex::new(Metadata {
-        connection: 1,
-        ..NOTHING
-    }));
-    let policy = {
-        let metadata = Arc::clone(&metadata);
-        Policy::new(
-            PolicyFile::default(),
-            move |_| Some(*metadata.lock().unwrap()),
-            local(),
-            Audit::off(),
-        )
-    };
-    let gate = policy.gate("c", Actor::Ui);
-    let mut service = gate
-        .layer()
-        .layer(tower::service_fn(|_: Request<()>| async {
-            Ok::<_, std::convert::Infallible>(())
+    let cases = [
+        ("", [Ok(()), Ok(())]),
+        (r#""c": "guarded""#, [Ok(()), Err(Mode::Guarded)]),
+        (r#""c": "read-write""#, [Ok(()), Ok(())]),
+        (
+            r#""c": "read-only""#,
+            [Err(Mode::ReadOnly), Err(Mode::ReadOnly)],
+        ),
+    ];
+    for (entry, answers) in cases {
+        let (dir, filed) = entries(entry);
+        let by_file = ModeSource::PolicyFile {
+            file: dir.path().join("policy.json").display().to_string(),
+            pattern: Some("c".to_owned()),
+            reason: None,
+        };
+        let answers = answers.map(|answer| answer.map_err(|mode| (mode, by_file.clone())));
+        let metadata = Arc::new(Mutex::new(Metadata {
+            connection: 1,
+            ..NOTHING
         }));
-    let write = || {
-        Request::post("/api/v1/namespaces/a/configmaps")
-            .body(())
-            .unwrap()
-    };
-    let read = || Request::get("/api/v1/pods").body(()).unwrap();
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .build()
-        .unwrap();
-    runtime.block_on(async {
-        service.ready().await.unwrap().call(write()).await.unwrap();
+        let policy = {
+            let metadata = Arc::clone(&metadata);
+            Policy::new(
+                filed,
+                move |_| Some(*metadata.lock().unwrap()),
+                local(),
+                Audit::off(),
+            )
+        };
+        let gates = || [Actor::Ui, Actor::Terminal].map(|actor| policy.gate("c", actor));
+        let built = gates();
+        assert_eq!(
+            built.each_ref().map(|gate| through(gate, posted())),
+            answers,
+            "{entry}"
+        );
 
         metadata.lock().unwrap().connection = 2;
-        let error = service
-            .ready()
-            .await
-            .unwrap()
-            .call(write())
-            .await
-            .unwrap_err();
-        let blocked = error.downcast_ref::<twigo_ipc::Blocked>().unwrap();
-        assert_eq!(blocked.source, ModeSource::Moved);
-        assert_eq!(blocked.mode, Mode::ReadOnly);
-        service.ready().await.unwrap().call(read()).await.unwrap();
-
-        // Clients built now reach the new one.
-        let mut rebuilt =
-            policy
-                .gate("c", Actor::Ui)
-                .layer()
-                .layer(tower::service_fn(|_: Request<()>| async {
-                    Ok::<_, std::convert::Infallible>(())
-                }));
-        rebuilt.ready().await.unwrap().call(write()).await.unwrap();
-    });
+        for gate in &built {
+            assert_eq!(
+                through(gate, posted()),
+                Err((Mode::ReadOnly, ModeSource::Moved)),
+                "{entry}"
+            );
+            assert_eq!(through(gate, got()), Ok(()), "{entry}");
+        }
+        assert_eq!(
+            gates().each_ref().map(|gate| through(gate, posted())),
+            answers,
+            "{entry}"
+        );
+    }
 }
 
 fn audited(path: &std::path::Path) -> Vec<serde_json::Value> {
@@ -1166,7 +1221,15 @@ fn the_log_records_what_a_change_of_the_catalog_did_to_a_context_s_access_once()
         connection: 1,
         ..NOTHING
     };
-    let (_dir, path, policy) = audited_policy(locked);
+    let (_filed, filed) = entries(r#""e": "guarded""#);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("audit.jsonl");
+    let policy = Policy::new(
+        filed,
+        move |_| Some(locked),
+        Choices::default(),
+        Audit::open(&path),
+    );
     let open = Metadata {
         connection: 1,
         ..NOTHING
@@ -1185,6 +1248,7 @@ fn the_log_records_what_a_change_of_the_catalog_did_to_a_context_s_access_once()
     policy.catalog_changed("c", Some(locked), Some(moved));
     policy.set_mode("d", Some(Mode::ReadWrite)).unwrap();
     policy.catalog_changed("d", None, Some(locked));
+    policy.catalog_changed("e", Some(open), None);
 
     let lines: Vec<_> = audited(&path)
         .iter()
@@ -1210,7 +1274,14 @@ fn the_log_records_what_a_change_of_the_catalog_did_to_a_context_s_access_once()
                 null.clone()
             ),
             ("relocked", "c", null.clone(), null.clone(), "moved".into()),
-            ("catalog", "d", "unlisted".into(), "user".into(), null),
+            (
+                "catalog",
+                "d",
+                "unlisted".into(),
+                "user".into(),
+                null.clone()
+            ),
+            ("catalog", "e", "policyFile".into(), "unlisted".into(), null),
         ]
         .map(|(event, context, before, after, by)| (
             event.into(),
