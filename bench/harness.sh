@@ -277,7 +277,6 @@ churn_alive
 # A page that never turned hidden is reported 90 s after the hide, and that stops the run.
 wait_for hidden.json 120
 
-# The sessions: the driver opens a shell, a port-forward and a terminal, and the harness samples them.
 sessions_phase() {
   local port status n
   [ -z "$shell_failed" ] || { fail "$shell_failed" || return 1; }

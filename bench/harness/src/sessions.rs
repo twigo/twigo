@@ -326,9 +326,7 @@ pub struct GateShare {
     /// What the dearest class but a patch costs the gate in `gate_cost`, the higher of its cold
     /// and its hot figure.
     pub cost_ns: f64,
-    /// The same class's figure with the caches evicted before the call.
     pub cold_ns: f64,
-    /// The same class's figure in a hot loop.
     pub hot_ns: f64,
     /// Percent of the core's CPU time.
     pub estimate: f64,

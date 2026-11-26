@@ -218,7 +218,6 @@ async function openEditor(workbench: Workbench, uri: string): Promise<number> {
   }
 }
 
-/** The URI of a space's pod list. */
 export function podsUri(space: string): string {
   return `k8s-list://${space}/v1/pods`;
 }
