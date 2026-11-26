@@ -22,6 +22,7 @@ The harness measures the six budgets of [ARCHITECTURE 3.8](ARCHITECTURE.md#38-pe
    The harness takes the same two files at the steady phase's end (`steady-end.json`, `apiserver-end.txt`), waits 5 s, then samples CPU time at the start and the end of 20 s.
 6. The driver writes `webview.json` and calls `idle`: the app hides its window, writes `idle.json` and shows the window again 45 s later.
    The harness waits 5 s, then samples CPU time at the start and the end of 30 s.
+   The report fails the row when the window was shown again before that sample ended, which `idle.json`'s time and the 45 s tell, and says how long before the window's return the sample ended: 8.9 to 9.9 s in the four runs of 2026-11-26 (the sample ended 35.06 to 36.06 s after the hide).
 7. The driver, with the window on screen again, opens a shell, a port-forward and a terminal, and has the terminal run `kubectl get pods -A -w` through the policy proxy.
    It writes `sessions.json` and sleeps for 30 s.
    The harness reads the forward once through its local port (`forward-read.json`), waits 10 s and samples memory five times, 2 s apart (`sessions-memory-N.json`).

@@ -89,6 +89,15 @@ pub struct Hidden {
     pub visibility: String,
 }
 
+/// When `idle` hid the window (`idle.json`) and for how long, before the app showed it again or
+/// quit.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Away {
+    pub at_ms: f64,
+    pub seconds: f64,
+}
+
 /// The run, from `bench/harness.sh`.
 #[derive(Deserialize, Serialize)]
 pub struct Run {
@@ -105,6 +114,7 @@ pub struct Inputs {
     pub memory: Vec<Sample>,
     pub visible: (Sample, Sample),
     pub idle: (Sample, Sample),
+    pub away: Away,
     pub hidden: Option<Hidden>,
     pub churn: Option<Churn>,
     pub log: Vec<Logged>,
@@ -159,6 +169,7 @@ impl Inputs {
                 read(dir, "visible-end.json")?,
             ),
             idle: (read(dir, "idle-start.json")?, read(dir, "idle-end.json")?),
+            away: read(dir, "idle.json")?,
             hidden: read_optional(dir, "hidden.json")?,
             churn: read_optional(dir, "churn.json")?,
             log: read_log(dir)?,
@@ -283,6 +294,7 @@ pub fn build(inputs: Inputs) -> Report {
         memory,
         visible,
         idle,
+        away,
         hidden,
         churn,
         log,
@@ -452,16 +464,25 @@ pub fn build(inputs: Inputs) -> Report {
 
     let (start, end) = &idle;
     let cpu = cpu_percent(start, end);
+    let margin_s = (away.at_ms + away.seconds * 1000.0 - end.at_ms) / 1000.0;
     rows.push(Row {
         metric: "Idle CPU, 100 changes/s, window hidden".into(),
         value: Some(format!("{cpu:.2} %")),
         target: format!("< {IDLE_CPU_PERCENT:.0} %"),
-        status: Status::judged(cpu < IDLE_CPU_PERCENT),
+        status: Status::judged(cpu < IDLE_CPU_PERCENT && margin_s > 0.0),
         measured: format!(
-            "CPU time of the app and its {} WebKit processes over {:.0} s, as a share of one core; document {}; hidden, the webview acknowledges no batch, so Rust coalesces the churn and sends nothing",
+            "CPU time of the app and its {} WebKit processes over {:.0} s, as a share of one core; document {}; hidden, the webview acknowledges no batch, so Rust coalesces the churn and sends nothing; {}",
             end.webkit.len(),
             (end.at_ms - start.at_ms) / 1000.0,
             hidden.map_or("visibility not reported".into(), |h| h.visibility),
+            if margin_s > 0.0 {
+                format!("the sample ended {margin_s:.1} s before the window was shown again")
+            } else {
+                format!(
+                    "void, since the window was shown again {:.1} s before the sample ended",
+                    -margin_s
+                )
+            },
         ),
     });
 
@@ -614,6 +635,10 @@ mod tests {
                 sample(0.0, 1_000, webkit(1_000)),
                 sample(10_000.0, 1_000 + idle_ns, webkit(1_000)),
             ),
+            away: Away {
+                at_ms: -5_000.0,
+                seconds: 45.0,
+            },
             hidden: Some(Hidden {
                 visibility: "hidden".into(),
             }),
@@ -804,6 +829,37 @@ mod tests {
     }
 
     #[test]
+    fn an_idle_sample_that_the_window_came_back_in_is_void() {
+        let mut back = inputs(20.0, 16.7, 1_000_000);
+        back.away.at_ms = -35_001.0;
+        let report = build(back);
+        assert_eq!(report.failed(), ["Idle CPU, 100 changes/s, window hidden"]);
+        let measured = &report.rows[9].measured;
+        assert!(
+            measured.contains("void, since the window was shown again 0.0 s before"),
+            "{measured}"
+        );
+        let mut late = inputs(20.0, 16.7, 1_000_000);
+        late.away.at_ms = -40_000.0;
+        let report = build(late);
+        assert_eq!(report.failed(), ["Idle CPU, 100 changes/s, window hidden"]);
+        let measured = &report.rows[9].measured;
+        assert!(
+            measured.contains("void, since the window was shown again 5.0 s"),
+            "{measured}"
+        );
+        let mut still_hidden = inputs(20.0, 16.7, 1_000_000);
+        still_hidden.away.at_ms = -34_000.0;
+        let report = build(still_hidden);
+        assert!(report.failed().is_empty());
+        let measured = &report.rows[9].measured;
+        assert!(
+            measured.contains("the sample ended 1.0 s before the window was shown again"),
+            "{measured}"
+        );
+    }
+
+    #[test]
     fn visible_cpu_is_shown_and_never_judged() {
         let mut all = inputs(20.0, 16.7, 0);
         all.visible = (
@@ -861,6 +917,10 @@ mod tests {
         put("idle-start.json", at(0.0, 0));
         put("idle-end.json", at(10_000.0, idle_ns));
         put("hidden.json", serde_json::json!({ "visibility": "hidden" }));
+        put(
+            "idle.json",
+            serde_json::json!({ "atMs": -5_000.0, "seconds": 45 }),
+        );
         std::fs::write(
             dir.path().join("churn.jsonl"),
             r#"{"pod":"bench-a","restarts":1,"sent":980.0}"#,
