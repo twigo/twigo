@@ -39,7 +39,11 @@ const SHELL = 5;
 const encoder = new TextEncoder();
 
 function listed(rows: number, width = 104): string {
-  return `command\r\nHEADER\r\n${`${"p".repeat(width)}\r\n`.repeat(rows)}`;
+  return `HEADER\r\n${`${"p".repeat(width)}\r\n`.repeat(rows)}`;
+}
+
+function echoed(text: string): string {
+  return text.replace(/\r/g, "\r\n").replace("\x03", "^C");
 }
 
 const forward: Forward = {
@@ -120,6 +124,7 @@ function fake({
           const { id, data } = request as { id: number; data: number[] };
           const text = new TextDecoder().decode(Uint8Array.from(data));
           typed.push(text);
+          senders.get(id)?.(encoder.encode(echoed(text)).buffer);
           if (text.includes("get pods")) {
             const output = failing ?? listed(printed);
             senders.get(id)?.(encoder.encode(output).buffer);
@@ -346,7 +351,7 @@ test("a watch that never shows the pods fails with the end of what the terminal 
   vi.spyOn(performance, "now").mockImplementation(() => (now += 1000));
   const bench = fake({ failing: "zsh: command not found: kubectl\r\n" });
   await expect(bench.run()).rejects.toThrow(
-    /first rows of the watch through the proxy within 90000 ms; the terminal's last output: "zsh: command not found: kubectl/,
+    /first rows of the watch through the proxy within 90000 ms; the terminal's last output: ".*zsh: command not found: kubectl/,
   );
 });
 
@@ -411,7 +416,7 @@ test("the watch is stopped and the shell is at its prompt before the sessions ar
   ]);
 }, 20_000);
 
-test("a shell that does not come back to its prompt after Ctrl-C fails the run before the sessions are sampled", async () => {
+test("the echo of the command that proves the prompt is not its output: a shell that never runs it fails the run before the sessions are sampled", async () => {
   let now = 0;
   vi.spyOn(performance, "now").mockImplementation(() => (now += 1000));
   const bench = fake({ prompt: false });
