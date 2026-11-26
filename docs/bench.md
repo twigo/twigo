@@ -25,12 +25,15 @@ The harness measures the six budgets of [ARCHITECTURE 3.8](ARCHITECTURE.md#38-pe
    The report fails the row when the window was shown again before that sample ended, which `idle.json`'s time and the 45 s tell, and says how long before the window's return the sample ended: 8.9 to 9.9 s in the four runs of 2026-11-26 (the sample ended 35.06 to 36.06 s after the hide).
 7. The driver, with the window on screen again, opens a shell, a port-forward and a terminal, and has the terminal run `kubectl get pods -A -w` through the policy proxy.
    It writes `sessions.json` and sleeps for 30 s.
-   The harness reads the forward once through its local port (`forward-read.json`), waits 10 s and samples memory five times, 2 s apart (`sessions-memory-N.json`).
+   The harness reads the forward once through its local port (`forward-read.json`).
 8. Four windows follow, in the order proxy, direct, direct, proxy.
    For each the driver has the terminal's watch run as the window says, writes `watch-N.json`, and sleeps for 35 s; the harness waits 5 s and samples CPU time at the start and the end of 20 s (`window-N-start.json`, `window-N-end.json`), and the driver writes `watched-N.json` when the window is over.
-9. The driver calls `idle` again, which writes `idle-sessions.json` and quits the app 45 s later.
-   The harness waits 5 s, then samples CPU time at the start and the end of 30 s.
-10. The harness stops the churn and runs `twigo-bench report`.
+9. The driver stops the watch with Ctrl-C, types a command whose output only a shell at its prompt prints, waits for that output and for the terminal to go quiet, and writes `stopped.json`.
+   The harness waits 10 s and samples memory five times, 2 s apart (`sessions-memory-N.json`), waits 5 s and samples CPU time at the start and the end of 20 s with the window on screen (`sessions-visible-start.json`, `sessions-visible-end.json`).
+   The driver sleeps for 55 s and fails the run if the terminal printed more than 1,024 bytes meanwhile, a prompt redrawn at most; the harness fails the run if the window hid before the visible sample ended.
+10. The driver calls `idle` again, which writes `idle-sessions.json` and quits the app 45 s later.
+    The harness waits 5 s, then samples CPU time at the start and the end of 30 s.
+11. The harness stops the churn and runs `twigo-bench report`.
 
 When the driver fails, the webview writes `failure.json` and then calls `idle` all the same, so the harness checks for `failure.json` after every wait, prints it and stops.
 Once the idle sample is taken, the judged rows are measured, so a failure from then on, in opening a shell, a forward or a terminal, in a watch window or in the harness's own step there, does not stop the run: the harness keeps it in `failure.json`, stops the app and reports.
@@ -93,10 +96,10 @@ Limits:
 | Webview memory                         | Resident size summed over the `com.apple.WebKit.*` processes the app is responsible for but the GPU process; their physical footprint and the GPU process's each have a row of their own, never judged                                                                                                        |
 | Visible CPU                            | CPU time of the app and its WebKit processes over 20 s with the window on screen, sorted by Restarts descending, while the driver sleeps; shown, never judged ([why](#the-visible-window))                                                                                                                    |
 | Idle CPU                               | CPU time of the app and its WebKit processes over 30 s with the window hidden, as a share of one core; hidden, the list acknowledges no batch, so Rust coalesces the churn and sends nothing                                                                                                                  |
-| Core RSS, sessions open                | The same as Core RSS, with [the three sessions](#the-sessions) open and the terminal watching the pods through the policy proxy; shown, never judged, with its difference from the row of the list alone                                                                                                      |
+| Core RSS, sessions open                | The same as Core RSS, with [the three sessions](#the-sessions) open, the terminal's watch stopped and its shell at the prompt; shown, never judged, with its difference from the row of the list alone                                                                                                        |
 | Webview memory, sessions open          | The same as Webview memory, with the sessions open; shown, never judged, with its difference from the row of the list alone                                                                                                                                                                                   |
-| Visible CPU, sessions open             | CPU time of the app and its WebKit processes over 20 s with the window on screen, the sessions open and the terminal's watch through the proxy, the mean of the two proxy windows; shown, never judged                                                                                                        |
-| Idle CPU, sessions open                | CPU time of the app and its WebKit processes over 30 s with the window hidden and the sessions open; shown, never judged                                                                                                                                                                                      |
+| Visible CPU, sessions open             | CPU time of the app and its WebKit processes over 20 s with the window on screen, the sessions open, the terminal's watch stopped and its shell at the prompt; shown, never judged                                                                                                                            |
+| Idle CPU, sessions open                | CPU time of the app and its WebKit processes over 30 s with the window hidden, the sessions open, the terminal's watch stopped and its shell at the prompt; shown, never judged                                                                                                                               |
 | Terminal watch through the proxy       | CPU time of the app process alone over 20 s while the terminal's `kubectl get pods -A -w` runs through the policy proxy, the mean of the two proxy windows, as a share of one core                                                                                                                            |
 | The same watch straight to the cluster | The same, with the cluster's own kubeconfig named on the command line, in the same terminal, the mean of the two direct windows; the difference between the two rows is the proxy's, since the terminal's output is the same                                                                                  |
 | Gate, share of the core's CPU          | An estimate: the requests the API server counted in the steady phase that were not patches, and the polls it does not count, times the dearest request's cost in `gate_cost` with the caches evicted, over the core's CPU time in that phase; shown, never judged ([how](#what-the-gate-takes))               |
@@ -130,7 +133,8 @@ How each is opened, as a person opens it, through the app's own commands and its
   The driver types into it with `shell_input`, the command the terminal sends for the keys a person types, and the harness has checked for `kubectl` on `PATH` and gives the driver its path.
   The terminal runs `kubectl get pods -A -w`, and the first list of every pod has to come through, else the run fails with the end of what the terminal printed.
 
-The pod list goes back on screen in the editor area once the sessions are open, so the window shows the list and the terminal, and the visible rows are measured with both.
+The pod list goes back on screen in the editor area once the sessions are open, so the window shows the list and the terminal, and the visible row is measured with both.
+That the list keeps the order the earlier phases left, sorted by Restarts descending, once it is opened again was not looked at.
 
 The policy proxy's cost is the core's CPU over a window in which the terminal's watch goes through the proxy against a window in which the same watch, typed in the same terminal, names the cluster's own kubeconfig (`--kubeconfig`) and goes straight to the cluster.
 The terminal's output, which the core reads from the pty and frames, is the same in both, so the difference is what the proxy adds.
@@ -140,7 +144,15 @@ A `sample` of the app at 1 ms over 20 s of the first proxy window of one run (20
 The harness read 7.9 % of a core for that window, against 10.8 % in the runs without a sample, so the share is of what the sample saw, not of those runs.
 A person's `--kubeconfig` goes around the proxy, which guards against accidents, not against a determined process ([ARCHITECTURE 6.4](ARCHITECTURE.md#64-read-only-enforcement-twigo-policy)); here it is the comparison.
 
-Hidden, the terminal's watch goes on, and the idle row with sessions measures that state.
+The memory and CPU rows with the sessions open are sampled after the four windows, once the driver has stopped the watch with Ctrl-C, typed a command whose output only a shell at its prompt prints (`printf 'at-prompt-%s\n' 42`: the terminal echoes `at-prompt-%s`, so `at-prompt-42` is the shell's), and seen the terminal go quiet for 1 s.
+So they measure the sessions idle, not a terminal printing a 5,000-pod watch, and the driver checks over the 55 s the harness samples in that the terminal printed no more than 1,024 bytes.
+The terminal's scrollback of 5,000 lines (`SCROLLBACK` in `packages/kube/src/xterm/terminal.ts`) is full of what the last window printed at that point, which the memory rows count.
+The hidden idle sample is not checked for output itself: the shell at its prompt prints nothing, and the check before it covers 55 s.
+
+A hidden window still takes a terminal's output, which is a finding, not a row.
+The four runs of 2026-11-26 (`bench/harness.sh` on kind 1.37 with kwok and 5,000 pods, an Apple M4 Max, macOS 27.2.1, the Mac's screen locked) sampled the idle row with the watch still printing about 11 KB a second: the app read 7.15 to 7.61 % of a core and WebContent 5.94 to 6.28 %, 13.16 to 13.97 % with the other processes, against 0.78 to 1.07 % and 0.02 to 0.14 % hidden with the list alone.
+With the window on screen the same watch took 10.1 to 11.2 % of the app, 14.8 to 16.7 % of WebContent and 5.0 to 6.7 % of the GPU process in 15 of the 16 windows (the first of run 3 had `sample` beside it), through the proxy or straight to the cluster.
+Why the page and the core keep taking the output while hidden was not looked into ([TODO](../TODO.md)).
 
 Limits:
 

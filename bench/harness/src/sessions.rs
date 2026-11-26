@@ -112,6 +112,7 @@ pub struct Sessions {
     pub opened: Opened,
     pub forward_read: ForwardRead,
     pub memory: Vec<Sample>,
+    pub visible: (Sample, Sample),
     pub windows: Vec<Window>,
     pub idle: (Sample, Sample),
     pub hidden: Option<Hidden>,
@@ -193,6 +194,10 @@ impl Sessions {
             opened: read(dir, "sessions.json")?,
             forward_read: read(dir, "forward-read.json")?,
             memory,
+            visible: (
+                read(dir, "sessions-visible-start.json")?,
+                read(dir, "sessions-visible-end.json")?,
+            ),
             windows,
             idle: (
                 read(dir, "idle-sessions-start.json")?,
@@ -388,12 +393,13 @@ fn session_rows(sessions: &Sessions, baseline: &Baseline) -> Vec<Row> {
         opened,
         forward_read,
         memory,
+        visible,
         windows,
         idle,
         hidden,
     } = sessions;
     let open = format!(
-        "a shell in pod {} (asked in a dialog: {:?}), a port-forward of {}:{} on localhost:{} (read once: HTTP {}, {} bytes), and a {} terminal ({}) watching pods; taken after the window was hidden and shown again",
+        "a shell in pod {} (asked in a dialog: {:?}), a port-forward of {}:{} on localhost:{} (read once: HTTP {}, {} bytes), and a {} terminal ({}); taken after the window was hidden and shown again and after the four watch windows, once the terminal's watch was stopped with Ctrl-C and its shell was at the prompt",
         opened.shell.pod,
         opened.shell.question,
         opened.forward.target,
@@ -427,13 +433,6 @@ fn session_rows(sessions: &Sessions, baseline: &Baseline) -> Vec<Row> {
         ),
     ));
 
-    let totals = |via: Via| -> Vec<f64> {
-        windows
-            .iter()
-            .filter(|w| w.via == via)
-            .map(|w| cpu_percent(&w.start, &w.end))
-            .collect()
-    };
     let cores = |via: Via| -> Vec<f64> {
         windows
             .iter()
@@ -449,14 +448,14 @@ fn session_rows(sessions: &Sessions, baseline: &Baseline) -> Vec<Row> {
             .collect();
         percents(&per_second)
     };
-    let visible = totals(Via::Proxy);
+    let (start, end) = visible;
     rows.push(shown(
         VISIBLE,
-        mean(&visible).map(|v| format!("{v:.2} %")),
+        Some(format!("{:.2} %", cpu_percent(start, end))),
         format!(
-            "CPU time of the app and its WebKit processes over 20 s, as a share of one core, with the window on screen and the terminal watching through the proxy; {} windows: {} %; sorted by Restarts descending, 100 changes/s; it swings between runs, so nothing judges it (docs/bench.md)",
-            visible.len(),
-            percents(&visible),
+            "CPU time of the app and its {} WebKit processes over {:.0} s, as a share of one core, with the window on screen, the terminal's watch stopped and its shell at the prompt, 100 changes/s; it swings between runs, so nothing judges it (docs/bench.md)",
+            end.webkit.len(),
+            (end.at_ms - start.at_ms) / 1000.0,
         ),
     ));
     let (start, end) = idle;
@@ -464,7 +463,7 @@ fn session_rows(sessions: &Sessions, baseline: &Baseline) -> Vec<Row> {
         IDLE,
         Some(format!("{:.2} %", cpu_percent(start, end))),
         format!(
-            "CPU time of the app and its {} WebKit processes over {:.0} s, as a share of one core, of which the app process {:.2} %; document {}; the terminal's watch goes on",
+            "CPU time of the app and its {} WebKit processes over {:.0} s, as a share of one core, of which the app process {:.2} %; document {}; the terminal's watch stopped and its shell at the prompt",
             end.webkit.len(),
             (end.at_ms - start.at_ms) / 1000.0,
             core_percent(start, end),
@@ -632,6 +631,7 @@ apiserver_request_duration_seconds_count{verb="GET"} 99999
                 bytes: 2,
             },
             memory: vec![sample(0.0, 0, 0)],
+            visible: (sample(0.0, 0, 0), sample(20_000.0, 0, 5_000_000_000)),
             windows: vec![
                 window(Via::Proxy, core_ms_in_a_proxy_window),
                 window(Via::Direct, core_ms_in_a_direct_one),
@@ -705,11 +705,11 @@ mod tests {
     }
 
     #[test]
-    fn visible_cpu_counts_the_webkit_processes_of_the_proxy_windows_only() {
+    fn visible_cpu_is_the_sample_after_the_watch_stopped_and_not_a_watch_window() {
         let rows = rows_of(300, 900);
         assert_eq!(
             value(&rows, "Visible CPU, sessions open, window on screen"),
-            "11.50 %"
+            "25.00 %"
         );
     }
 
@@ -811,6 +811,8 @@ mod tests {
         for n in 1..=2 {
             put(&format!("sessions-memory-{n}.json"), at(0.0));
         }
+        put("sessions-visible-start.json", at(0.0));
+        put("sessions-visible-end.json", at(20_000.0));
         for n in 1..=windows {
             let via = if n % 2 == 1 { "proxy" } else { "direct" };
             put(

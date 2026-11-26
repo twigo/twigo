@@ -5,12 +5,12 @@
 # runs the churn generator at 100 changes/s against a kwok cluster, launches the app with
 # TWIGO_BENCH and the cluster's kubeconfig as TWIGO_KUBECONFIG, samples its memory with the pod
 # list open and its CPU with the window on screen and hidden; then, with a shell in a pod, a
-# port-forward and a terminal open, which the app opens through its own commands, samples them
-# again, with the terminal watching the pods through the policy proxy and straight to the
-# cluster. It prints the report. Without a kubeconfig it creates the cluster (bench/cluster.sh up
-# bench, bench/pods.sh 5000) and deletes it at the end; a given one must hold the 5,000 pods
-# already. The terminal runs the kubectl of PATH. report.json and the files it is built from
-# land in $TWIGO_BENCH_DIR/harness.
+# port-forward and a terminal open, which the app opens through its own commands, samples the
+# core's CPU while the terminal watches the pods through the policy proxy and straight to the
+# cluster, and the sessions again once that watch is stopped. It prints the report. Without a
+# kubeconfig it creates the cluster (bench/cluster.sh up bench, bench/pods.sh 5000) and deletes
+# it at the end; a given one must hold the 5,000 pods already. The terminal runs the kubectl of
+# PATH. report.json and the files it is built from land in $TWIGO_BENCH_DIR/harness.
 set -euo pipefail
 
 PODS=5000
@@ -271,12 +271,6 @@ sessions_phase() {
   [ "$status" = 200 ] || { fail "the forward answers HTTP $status, not 200" || return 1; }
   jq -n --argjson status "$status" --argjson bytes "$(wc -c <"$out/forward-read.body")" \
     '{status: $status, bytes: $bytes}' >"$out/forward-read.json" || return 1
-  sleep "$SETTLE"
-  for n in $(seq 1 "$MEMORY_SAMPLES"); do
-    [ "$n" -eq 1 ] || sleep "$MEMORY_EVERY"
-    no_failure || return 1
-    take "sessions-memory-$n.json" || return 1
-  done
   for n in $(seq 1 "$WINDOWS"); do
     wait_for "watch-$n.json" 120 || return 1
     sleep "$VISIBLE_SETTLE"
@@ -287,6 +281,22 @@ sessions_phase() {
       fail "watch window $n ended before its sample did" || return 1
     fi
   done
+  # The sessions' rows are sampled once the driver has stopped the watch and the shell is back at
+  # its prompt: nothing runs in them.
+  wait_for stopped.json 60 || return 1
+  sleep "$SETTLE"
+  for n in $(seq 1 "$MEMORY_SAMPLES"); do
+    [ "$n" -eq 1 ] || sleep "$MEMORY_EVERY"
+    no_failure || return 1
+    take "sessions-memory-$n.json" || return 1
+  done
+  sleep "$VISIBLE_SETTLE"
+  take sessions-visible-start.json || return 1
+  sleep "$VISIBLE_SAMPLE"
+  take sessions-visible-end.json || return 1
+  if [ -e "$out/idle-sessions.json" ]; then
+    fail "the window hid before the sessions' visible sample ended" || return 1
+  fi
   wait_for idle-sessions.json 180 || return 1
   sleep "$IDLE_SETTLE"
   take idle-sessions-start.json || return 1

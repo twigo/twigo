@@ -8,15 +8,22 @@ import type {
   TerminalSession,
 } from "@twigo/protocol";
 import { Probe } from "./probe";
-import { driveSessions, type Target } from "./sessions";
+import { driveSessions, SESSIONS_MS, type Target } from "./sessions";
+
+const asleep = vi.hoisted(() => ({
+  on: undefined as ((ms: number) => void) | undefined,
+}));
 
 vi.mock("./driver", () => ({
-  sleep: (ms: number) =>
-    new Promise((resolve) => setTimeout(resolve, Math.min(ms, 1))),
+  sleep: (ms: number) => {
+    asleep.on?.(ms);
+    return new Promise((resolve) => setTimeout(resolve, Math.min(ms, 1)));
+  },
 }));
 
 afterEach(() => {
   vi.restoreAllMocks();
+  asleep.on = undefined;
 });
 
 const TARGET: Target = {
@@ -60,6 +67,7 @@ interface Options {
   asks?: boolean;
   friction?: { kind: "confirm" } | { kind: "typed"; text: string };
   failing?: string;
+  prompt?: boolean;
   target?: Target;
 }
 
@@ -69,6 +77,7 @@ function fake({
   asks = true,
   friction = { kind: "confirm" },
   failing,
+  prompt = true,
   target = TARGET,
 }: Options = {}) {
   const log: string[] = [];
@@ -106,6 +115,8 @@ function fake({
           if (text.includes("get pods")) {
             const output = failing ?? "x".repeat(ROWS * 60);
             senders.get(id)?.(encoder.encode(output).buffer);
+          } else if (text.includes("printf") && prompt) {
+            senders.get(id)?.(encoder.encode("at-prompt-42\r\n$ ").buffer);
           }
           return Promise.resolve(null);
         }
@@ -211,6 +222,7 @@ function fake({
     log,
     typed,
     written,
+    say: (text: string) => senders.get(TERMINAL)?.(encoder.encode(text).buffer),
     confirmed: () => confirmed,
     run: () =>
       driveSessions(workbench as never, probe, {
@@ -288,7 +300,13 @@ test("the terminal watches through the proxy and straight to the cluster in the 
   const kubectl = "'/usr/local/bin/kubectl'";
   const proxy = `${kubectl} get pods -A -w\r`;
   const direct = `${kubectl} --kubeconfig '/tmp/it'\\''s/kubeconfig' get pods -A -w\r`;
-  expect(bench.typed).toEqual([proxy, "\x03", direct, "\x03", proxy]);
+  expect(bench.typed.slice(0, 5)).toEqual([
+    proxy,
+    "\x03",
+    direct,
+    "\x03",
+    proxy,
+  ]);
   const windows = bench.written
     .filter(([name]) => name.startsWith("watch"))
     .map(([name, value]) => [name, (value as { via: string }).via]);
@@ -312,3 +330,52 @@ test("a watch that never shows the pods fails with the end of what the terminal 
     /first rows of the watch through the proxy within 90000 ms; the terminal's last output: "zsh: command not found: kubectl/,
   );
 });
+
+test("the watch is stopped and the shell is at its prompt before the sessions are sampled, after the four windows", async () => {
+  const bench = fake();
+  await bench.run();
+  expect(bench.written.map(([name]) => name)).toEqual([
+    "sessions",
+    "watch-1",
+    "watched-1",
+    "watch-2",
+    "watched-2",
+    "watch-3",
+    "watched-3",
+    "watch-4",
+    "watched-4",
+    "stopped",
+  ]);
+  expect(bench.typed.slice(-2)).toEqual([
+    "\x03",
+    "printf 'at-prompt-%s\\n' 42\r",
+  ]);
+}, 20_000);
+
+test("a shell that does not come back to its prompt after Ctrl-C fails the run before the sessions are sampled", async () => {
+  let now = 0;
+  vi.spyOn(performance, "now").mockImplementation(() => (now += 1000));
+  const bench = fake({ prompt: false });
+  await expect(bench.run()).rejects.toThrow(
+    /shell back at its prompt after Ctrl-C within 10000 ms/,
+  );
+  expect(bench.written.map(([name]) => name)).not.toContain("stopped");
+});
+
+test("a terminal that prints more than a prompt while the sessions are sampled fails the run", async () => {
+  const bench = fake();
+  asleep.on = (ms) => {
+    if (ms === SESSIONS_MS) bench.say("x".repeat(2000));
+  };
+  await expect(bench.run()).rejects.toThrow(
+    "the terminal printed 2000 bytes after its watch stopped",
+  );
+}, 20_000);
+
+test("a prompt that is redrawn while the sessions are sampled is not output", async () => {
+  const bench = fake();
+  asleep.on = (ms) => {
+    if (ms === SESSIONS_MS) bench.say("$ ");
+  };
+  await bench.run();
+}, 20_000);

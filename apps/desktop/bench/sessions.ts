@@ -29,10 +29,17 @@ export interface Opened {
   terminal: { kind: string; shell: string };
 }
 
-/** Longer than the harness's settling and its five memory samples, as `bench/harness.sh` checks. */
-export const MEMORY_MS = 30_000;
+/** How long into its watch the first window starts, as the continued windows after it do. */
+const LEAD_MS = 30_000;
 /** Longer than the harness's settling and sampling of one window. */
 export const WINDOW_MS = 35_000;
+/**
+ * Longer than what the harness does once the watch has stopped: its settling, its five memory
+ * samples and its sample of the window on screen, as `bench/harness.sh` checks.
+ */
+export const SESSIONS_MS = 55_000;
+/** What a redrawn prompt may add, against the 11 KB a second the watch prints. */
+const PROMPT_BYTES = 1024;
 
 const PODS = { group: "", version: "v1", resource: "pods" };
 const POLL_MS = 50;
@@ -42,6 +49,9 @@ const OPEN_MS = 30_000;
 const ROW_BYTES = 60;
 const FIRST_ROWS_MS = 90_000;
 const QUIET_MS = 1000;
+/** Its output differs from what the terminal echoes of it, so only a shell that runs it prints this. */
+const AT_PROMPT = "printf 'at-prompt-%s\\n' 42";
+const AT_PROMPT_OUTPUT = "at-prompt-42";
 /** The type the bench's context is marked as: it asks before a shell and its terminal goes through the policy proxy. */
 const MARK = "staging";
 
@@ -215,6 +225,38 @@ async function forwardOf(
   return settled;
 }
 
+/** Presses Ctrl-C in the terminal, as a person stops the watch, and waits for its output to end. */
+async function interrupt(probe: Probe, terminal: ShellProbe): Promise<void> {
+  await type(probe, terminal, "\x03");
+  await quiet(terminal, "terminal that is quiet after Ctrl-C");
+}
+
+async function quiet(terminal: ShellProbe, what: string): Promise<void> {
+  await poll(
+    () => (performance.now() - terminal.lastAt >= QUIET_MS ? true : undefined),
+    what,
+    ASK_MS,
+  );
+}
+
+/**
+ * Stops the watch with Ctrl-C and resolves once the shell has run a command of
+ * its own and printed its prompt again, with the terminal's output at an end.
+ */
+async function stopped(probe: Probe, terminal: ShellProbe): Promise<void> {
+  await interrupt(probe, terminal);
+  await type(probe, terminal, `${AT_PROMPT}\r`);
+  await poll(
+    () => (terminal.tail.includes(AT_PROMPT_OUTPUT) ? true : undefined),
+    "shell back at its prompt after Ctrl-C",
+    ASK_MS,
+  ).catch((error: unknown) => {
+    const last = JSON.stringify(terminal.tail.slice(-500));
+    throw new Error(`${String(error)}; the terminal's last output: ${last}`);
+  });
+  await quiet(terminal, "terminal that is quiet at its prompt");
+}
+
 /**
  * Runs `kubectl get pods -A -w` in the terminal once the one before it has
  * ended, through the proxy that the terminal's kubeconfig names or straight
@@ -236,15 +278,7 @@ export async function watching(
   },
 ): Promise<void> {
   if (was === via) return;
-  if (was !== undefined) {
-    await type(probe, terminal, "\x03");
-    await poll(
-      () =>
-        performance.now() - terminal.lastAt >= QUIET_MS ? true : undefined,
-      "terminal that is quiet after Ctrl-C",
-      ASK_MS,
-    );
-  }
+  if (was !== undefined) await interrupt(probe, terminal);
   const kubectl = quote(target.kubectl);
   const command =
     via === "proxy"
@@ -290,7 +324,7 @@ async function openSessions(
     rows: number;
     target: Target;
   },
-): Promise<{ opened: Opened; terminal: ShellProbe }> {
+): Promise<{ opened: Opened; shell: ShellProbe; terminal: ShellProbe }> {
   await mark(workbench, context);
   const { session: shell, question } = await shellIn(workbench, probe, {
     space,
@@ -331,6 +365,7 @@ async function openSessions(
       },
       terminal: { kind: created.kind.kind, shell: created.shell },
     },
+    shell,
     terminal,
   };
 }
@@ -372,8 +407,12 @@ async function windows(
 
 /**
  * The phases after the pod list's: the three sessions open, `sessions.json`
- * says so for the harness, which reads the forward once and samples memory,
- * then the terminal's watch runs in each of `WATCHES`' windows.
+ * says so for the harness, which reads the forward once, and the terminal's
+ * watch runs in each of `WATCHES`' windows. Then the watch is stopped with
+ * Ctrl-C and `stopped.json` says the shell is at its prompt, which is when the
+ * harness samples what the sessions cost with nothing running in them: memory,
+ * and CPU with the window on screen. The sessions stay open for `SESSIONS_MS`,
+ * and the terminal may have printed no more than a prompt by then.
  */
 export async function driveSessions(
   workbench: Parameters<typeof openSessions>[0],
@@ -385,8 +424,24 @@ export async function driveSessions(
     write: (name: string, value: unknown) => Promise<void>;
   },
 ): Promise<void> {
-  const { opened, terminal } = await openSessions(workbench, probe, opening);
+  const { opened, shell, terminal } = await openSessions(
+    workbench,
+    probe,
+    opening,
+  );
   await write("sessions", opened);
-  await sleep(MEMORY_MS);
+  await sleep(LEAD_MS);
   await windows(probe, terminal, { ...opening, write });
+  await stopped(probe, terminal);
+  const { bytes } = terminal;
+  await write("stopped", { bytes, atMs: Date.now() });
+  await sleep(SESSIONS_MS);
+  const printed = terminal.bytes - bytes;
+  if (printed > PROMPT_BYTES) {
+    throw new Error(
+      `the terminal printed ${String(printed)} bytes after its watch stopped, while the sessions were sampled`,
+    );
+  }
+  running("the shell", shell);
+  running("the terminal", terminal);
 }

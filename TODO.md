@@ -92,6 +92,8 @@ Findings that belong to no step yet.
   - Webview memory read 346 to 360 MB in the three runs of `4f1450c5` and 344 to 348 MB in the three of `b6823641`, over its 300 MB budget in all six, against 244 to 249 MB in the four runs of 2026-11-07 (`docs/bench.md`); the two trees do not differ by it, and its cause was not looked for.
     In the same runs the sort's p95 read 36 to 47 ms on `4f1450c5` and 38 to 49 ms on `b6823641`, against its 50 ms and the 32 to 38 ms of `docs/bench.md`, and core RSS 161 to 167 MB against 150 MB.
     `bench/harness.sh` on fresh kind 1.37 clusters with 5,000 pods, the trees in turn (base, branch, branch, base, base, branch), an Apple M4 Max, 2026-11-18.
+  - A hidden page still takes a terminal's output: with the window hidden and `kubectl get pods -A -w` printing about 11 KB a second in the terminal, the app read 7.15 to 7.61 % of a core and WebContent 5.94 to 6.28 %, against 0.78 to 1.07 % and 0.02 to 0.14 % hidden with the list alone (`bench/harness.sh`, kind 1.37 with 5,000 pods, an Apple M4 Max, 2026-11-26, four runs with the screen locked, [bench](docs/bench.md#the-sessions)).
+    Why the page keeps parsing the output and the core keeps reading it while hidden was not looked into; the bench's sessions rows are sampled with the watch stopped.
 - The grid's row actions (`packages/ui/src/grid/DataGrid.tsx`):
   - Shift+Tab no longer stops on the menu button of a row without the cursor, which mounts once the focus is on that row.
   - WebView2 may fire `focusout` when the window deactivates, which would unmount a focused menu button of a row without the cursor; not verified, matters once Windows ships (D2).
