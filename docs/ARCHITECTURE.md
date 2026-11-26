@@ -1246,7 +1246,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   - Namespace and Context read in support, an age in content for its first ten minutes and in support after, and a zero count, an empty value and a quantity's unit (the `m` of `120m`) quiet;
   - figures line up in tabular numerals: a column of ratios, restarts, ages, CPU or memory, or one the server declares a number, and in any other column each cell whose text is figures or IPv4 addresses, since rows stream.
 - Rows are 24 px with no line under them, under a 28 px header that keeps its line, as a group's header does.
-  A row draws again only when what it shows changes: its data, its flash, its mark, the cursor, the columns or the template.
+  A row draws again only when what it shows changes: its data, its tone, its flash, its mark and whether any row is marked, the cursor, the first column's hold, its index, the columns, the template or the cell renderer.
   A scroll that keeps it in the window moves it as it is, and the owner's new handlers reach only the actions of a row that shows them.
 - A failing or pending row is a band: a 3 px edge in its tone at its left and the tone over the row, 9 % for an error and 7 % for a warning, quiet reading as support on it.
   The pointer's hover lies over the band; under the cursor and on a marked row the selection's fill takes the band's place, since laid over the band it takes text in the tone below 4.5:1 in both themes, and support in the light one.

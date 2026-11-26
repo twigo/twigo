@@ -1243,3 +1243,87 @@ test("a row draws again when its data, its cursor, its mark or its flash changes
 });
 
 const FLASH: RowFlash = new Map([["Name", 1]]);
+
+test("a row calls the owner's current handlers, not those of the render that drew it", () => {
+  const handlers = () => ({
+    onSelect: vi.fn(),
+    onActivate: vi.fn(),
+    onMark: vi.fn(),
+    onOpen: vi.fn(),
+  });
+  const before = handlers();
+  const now = handlers();
+  const { rerender, controller } = grid({
+    ...before,
+    columns: NAME_ONLY,
+    cell: (row) => row.name,
+  });
+  rerender(now);
+
+  fireEvent.click(screen.getByText("api-1"));
+  expect(now.onSelect).toHaveBeenLastCalledWith("a1", { name: "api-1" });
+  expect(now.onActivate).toHaveBeenLastCalledWith("a1", { name: "api-1" });
+  now.onActivate.mockClear();
+  act(() => {
+    controller()?.activate();
+  });
+  expect(now.onActivate).toHaveBeenLastCalledWith("a1", { name: "api-1" });
+  fireEvent.click(
+    nth(screen.getAllByRole("checkbox", { name: "Mark row" }), 1),
+  );
+  expect(now.onMark).toHaveBeenLastCalledWith(["a2"], true);
+  doubleClick(screen.getByText("api-2"));
+  expect(now.onOpen).toHaveBeenCalledExactlyOnceWith("a2", { name: "api-2" });
+
+  for (const handler of Object.values(before)) {
+    expect(handler).not.toHaveBeenCalled();
+  }
+});
+
+test("a row's rest calls the owner's current onRest, not the one of the render that drew it", async () => {
+  const before = vi.fn(() => vi.fn());
+  const now = vi.fn(() => vi.fn());
+  const { rerender } = grid({
+    columns: WITH_AGE,
+    cell: nameOnly,
+    inline: () => [
+      { id: "copy", label: "Copy Name", icon: Copy, run: vi.fn() },
+    ],
+    onRest: before,
+  });
+  rerender({ onRest: now });
+  fireEvent.pointerEnter(rowNamed("gateway-1"));
+  await rest();
+  expect(now).toHaveBeenCalledExactlyOnceWith({ name: "gateway-1" });
+  expect(before).not.toHaveBeenCalled();
+});
+
+test("a row draws again when the cell renderer, its tone or the grid's template changes, though its data does not", () => {
+  const read = (row: Pod) => row.name;
+  const cell = vi.fn(read);
+  const renewed = vi.fn(read);
+  const { rerender } = grid({
+    ...list(PODS),
+    columns: [{ id: "Name", title: "Name", width: 200 }],
+    cell,
+  });
+  const shown = screen
+    .getAllByRole("row")
+    .slice(1)
+    .map((row) => row.textContent);
+  expect(shown.length).toBeGreaterThan(20);
+  let now: Props = {};
+  const changes = (more: Props) => {
+    renewed.mockClear();
+    now = { ...now, ...more };
+    rerender(now);
+    return drawn(renewed);
+  };
+
+  expect(changes({ cell: renewed }), "a new cell renderer").toEqual(shown);
+  expect(
+    changes(list(PODS.map((item) => ({ ...item, tone: "warn" as const })))),
+    "a new tone",
+  ).toEqual(shown);
+  expect(changes({ widths: { Name: 300 } }), "a new template").toEqual(shown);
+});
