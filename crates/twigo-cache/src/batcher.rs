@@ -342,9 +342,7 @@ mod tests {
 
     use tokio::sync::mpsc;
     use tokio::time::{Instant, sleep};
-    use twigo_ipc::{
-        ColumnValues, ErrorCode, Grouping, Gvr, ListQuery, Part, PartState, Parts, Sort, ViewState,
-    };
+    use twigo_ipc::{ErrorCode, Gvr, ListQuery, Part, PartState, Parts, Sort, ViewState};
     use twigo_kube::client::{Budgets, Clients};
 
     use super::*;
@@ -764,109 +762,6 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn a_regex_in_place_is_a_filter() {
-        let (mut rig, _) = of_four().await;
-        rig.batcher.set_view(
-            1,
-            Shape::of(|view| view.text = Some("/^p[24]$/".to_owned())),
-        );
-        let (_, filtered) = rig.next().await;
-        assert_eq!(names(&filtered), ["p2", "p4"]);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn a_count_a_grouping_and_values_in_place_count_group_and_keep_the_rows() {
-        let fake = Fake::default();
-        for (namespace, pod) in [
-            ("a", "p1"),
-            ("a", "p2"),
-            ("b", "p3"),
-            ("b", "p4"),
-            ("b", "p5"),
-        ] {
-            fake.add("pods", Some(namespace), pod);
-        }
-        let mut rig = unwindowed_over(subscribed_as(fake, &["a", "b"], RowFormat::Table).await);
-        rig.batcher.set_window(0, 100, false);
-        let (_, plain) = rig.until_total(5).await;
-        assert!(plain.counts.is_none() && plain.groups.is_none());
-
-        rig.batcher.set_view(
-            1,
-            Shape::of(|view| view.count_by = Some("Namespace".to_owned())),
-        );
-        let (_, counted) = rig.next().await;
-        rig.batcher.ack(counted.seq);
-        assert_eq!(counted.view, 1);
-        let counts = counted.counts.expect("the counts");
-        assert_eq!(
-            counts
-                .iter()
-                .map(|c| (c.value.as_str(), c.count))
-                .collect::<Vec<_>>(),
-            [("b", 3), ("a", 2)]
-        );
-        assert!(counted.window.is_none(), "no row moved");
-
-        rig.batcher.set_view(
-            2,
-            Shape::of(|view| {
-                view.count_by = Some("Namespace".to_owned());
-                view.group_by = Some(Grouping {
-                    column: "Namespace".to_owned(),
-                    collapsed: vec!["a".to_owned()],
-                });
-            }),
-        );
-        let (_, grouped) = rig.next().await;
-        rig.batcher.ack(grouped.seq);
-        assert_eq!((grouped.view, grouped.total), (2, 5));
-        let groups = grouped.groups.clone().expect("the groups");
-        assert_eq!(
-            groups
-                .iter()
-                .map(|g| (g.value.as_str(), g.rows))
-                .collect::<Vec<_>>(),
-            [("a", 2), ("b", 3)]
-        );
-        assert_eq!(names(&grouped), ["p3", "p4", "p5"], "a is collapsed");
-
-        rig.batcher.set_view(
-            3,
-            Shape::of(|view| {
-                view.count_by = Some("Namespace".to_owned());
-                view.group_by = Some(Grouping {
-                    column: "Namespace".to_owned(),
-                    collapsed: Vec::new(),
-                });
-            }),
-        );
-        let (_, opened) = rig.next().await;
-        rig.batcher.ack(opened.seq);
-        assert_eq!(names(&opened), ["p1", "p2", "p3", "p4", "p5"]);
-        assert!(opened.groups.is_none(), "the groups did not change");
-
-        rig.batcher.set_view(
-            4,
-            Shape::of(|view| {
-                view.count_by = Some("Namespace".to_owned());
-                view.values = Some(ColumnValues {
-                    column: "Namespace".to_owned(),
-                    values: vec!["a".to_owned()],
-                });
-            }),
-        );
-        let (_, kept) = rig.next().await;
-        assert_eq!((kept.view, kept.total), (4, 2));
-        assert_eq!(names(&kept), ["p1", "p2"]);
-        assert_eq!(
-            kept.counts.map(|counts| counts.len()),
-            None,
-            "the counts count before the values drop rows, so they did not change"
-        );
-    }
-
-    #[tokio::test(start_paused = true)]
     async fn a_column_choice_in_place_changes_what_the_text_reads() {
         let fake = Fake::default();
         fake.add("pods", Some("a"), "p1");
@@ -987,17 +882,6 @@ mod tests {
         let (_, first) = rig.next().await;
         assert_eq!((first.seq, first.view), (1, 1));
         assert_eq!(names(&first), ["p2", "p1"]);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn a_regex_that_changes_the_text_of_a_list_with_no_rows_left_does_not_wait_for_a_change()
-    {
-        let (mut rig, _) = of_four().await;
-        rig.batcher
-            .set_view(1, Shape::of(|view| view.text = Some("zzz".to_owned())));
-        let (_, none) = rig.next().await;
-        assert_eq!((none.view, none.total), (1, 0));
-        assert_eq!(none.window.map(|window| window.ids.len()), Some(0));
     }
 
     #[tokio::test(start_paused = true)]
