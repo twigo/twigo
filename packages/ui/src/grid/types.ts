@@ -18,6 +18,9 @@ export interface GridColumn {
   readonly coverable?: boolean;
 }
 
+/** When each cell of a row last changed, by column id. */
+export type RowFlash = ReadonlyMap<string, number>;
+
 export interface GridSort {
   readonly column: string;
   readonly descending: boolean;

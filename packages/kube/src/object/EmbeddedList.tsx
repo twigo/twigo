@@ -270,10 +270,7 @@ function Embedded({
           }}
           loading={loading}
           register={register}
-          flash={(id, column) => {
-            const index = byName.get(column)?.index;
-            return index === undefined ? undefined : flash?.since(id, index);
-          }}
+          flash={(id) => flash?.of(id)}
         />
       </Frame>
     </div>

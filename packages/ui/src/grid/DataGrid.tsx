@@ -25,7 +25,7 @@ import { EmptyState } from "../components/empty-state";
 import { Skeleton } from "../components/skeleton";
 import { fitWidth } from "./fit";
 import { HeaderCell, MarkBox } from "./header";
-import type { GridColumn, GridItem, GridSort } from "./types";
+import type { GridColumn, GridItem, GridSort, RowFlash } from "./types";
 
 export const ROW_HEIGHT = 24;
 const HEADER_HEIGHT = 28;
@@ -137,8 +137,11 @@ export interface DataGridProps<R, G> {
   readonly waiting?: string | undefined;
   /** What shows when there are no items. */
   readonly empty?: ReactNode;
-  /** When a cell last changed, to flash it; undefined when it did not. */
-  readonly flash?: (id: string, column: string) => number | undefined;
+  /**
+   * When the cells of a row last changed, to flash them; undefined for a row
+   * with none.
+   */
+  readonly flash?: (id: string) => RowFlash | undefined;
   /** Registers the focusable grid for the list commands while it is mounted. */
   readonly register?: (
     element: HTMLElement,
@@ -533,6 +536,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
         )
       : undefined;
     const markCell = anyMarked ? MARK_CELL : MARK_CELL_REVEALING;
+    const flashes = flash?.(target.id);
     const edge = held !== undefined && tone ? EDGE : undefined;
     const ends = tint ?? (tone ? BAND_ENDS : undefined);
     const select = () => {
@@ -649,7 +653,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
           </div>
         )}
         {columns.map((column, order) => {
-          const since = flash?.(target.id, column.id);
+          const since = flashes?.get(column.id);
           const first = order === 0;
           return (
             <div

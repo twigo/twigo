@@ -609,10 +609,7 @@ function Grid({
           </EmptyState>
         )
       }
-      flash={(id, column) => {
-        const index = byName.get(column)?.index;
-        return index === undefined ? undefined : flash?.since(id, index);
-      }}
+      flash={(id) => flash?.of(id)}
       register={registerGrid}
     />
   );

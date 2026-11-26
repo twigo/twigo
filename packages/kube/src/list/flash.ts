@@ -7,10 +7,12 @@ const FLASH_MS = 1000;
 
 /**
  * Remembers when each cell last changed, so a flash survives the batches that
- * follow it within its second (ARCHITECTURE 4.4).
+ * follow it within its second (ARCHITECTURE 4.4). A row's flashes are one
+ * map, kept as it is until one of them starts or ends, so that a grid draws
+ * again the rows whose map changed and no other.
  */
 export class FlashTracker {
-  readonly #changed = new Map<string, number>();
+  readonly #changed = new Map<RowId, ReadonlyMap<string, number>>();
   #seq = 0;
   #columns: readonly Column[] | undefined;
   #still: ReadonlySet<number> = new Set();
@@ -24,22 +26,24 @@ export class FlashTracker {
   record(snapshot: ListSnapshot, now: number): void {
     if (snapshot.seq === this.#seq) return;
     this.#seq = snapshot.seq;
-    for (const [key, at] of this.#changed) {
-      if (now - at >= FLASH_MS) this.#changed.delete(key);
+    for (const [id, columns] of this.#changed) {
+      const alive = [...columns].filter(([, at]) => now - at < FLASH_MS);
+      if (alive.length === columns.size) continue;
+      if (alive.length === 0) this.#changed.delete(id);
+      else this.#changed.set(id, new Map(alive));
     }
     const flashing = [...snapshot.changed]
-      .map(
-        ([id, cells]) =>
-          [id, cells.filter((c) => !this.#quiet(snapshot, c))] as const,
-      )
-      .filter(([, cells]) => cells.length > 0);
+      .map(([id, cells]) => [id, this.#flashing(snapshot, cells)] as const)
+      .filter(([, names]) => names.length > 0);
     if (flashing.length > FLASH_ROW_LIMIT) return;
-    for (const [id, cells] of flashing) {
-      for (const cell of cells) this.#changed.set(cellKey(id, cell), now);
+    for (const [id, names] of flashing) {
+      const next = new Map(this.#changed.get(id));
+      for (const name of names) next.set(name, now);
+      this.#changed.set(id, next);
     }
   }
 
-  #quiet({ columns }: ListSnapshot, cell: number): boolean {
+  #flashing({ columns }: ListSnapshot, cells: readonly number[]): string[] {
     if (columns !== this.#columns) {
       this.#columns = columns;
       this.#still = new Set(
@@ -48,15 +52,14 @@ export class FlashTracker {
         ),
       );
     }
-    return this.#still.has(cell);
+    return cells.flatMap((cell) => {
+      const column = columns[cell];
+      return column && !this.#still.has(cell) ? [column.name] : [];
+    });
   }
 
-  /** When the cell's flash started, until a batch after its second forgets it. */
-  since(id: RowId, cell: number): number | undefined {
-    return this.#changed.get(cellKey(id, cell));
+  /** When each of a row's flashes started, by column name; none for a row with none. */
+  of(id: RowId): ReadonlyMap<string, number> | undefined {
+    return this.#changed.get(id);
   }
-}
-
-function cellKey(id: RowId, cell: number): string {
-  return `${id}\u0000${String(cell)}`;
 }
