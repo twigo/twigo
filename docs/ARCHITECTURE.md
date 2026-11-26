@@ -551,6 +551,7 @@ Anything else in the query, the space, the resource, the namespaces, the selecto
   - A sort, a count, a group or values for a column the list lacks do nothing, and no sort sorts by Name.
 - A change of the view part is made of the rows the view holds, without a new subscription: a sort re-keys its entries and orders its index anew, a count, a group or values place the held rows again, and a collapsed group changes only which rows the window reads.
   A text is the exception: the view holds only the rows its text keeps, so a text that changes asks its source for every row again, as a relist does.
+  Until that Reset comes the view holds no row and no index, only the samples its rows had, so a change of rows that comes first has nothing to join and is dropped, the Reset carrying every row.
   The change goes out at once as a window's does, or with the ack of the batch in flight; changes that come while a batch waits are made together and the batch names the last.
   A batch is sent for a change that moves nothing, so the webview always hears its number.
   Tauri runs each async command as a task of its own on a multi-thread runtime ([`respond_async_serialized_inner`](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.7/crates/tauri/src/ipc/mod.rs#L371-L375)), and a regex compiles before a change reaches its list, so two changes can arrive out of order: the list drops a change numbered no higher than the newest it holds or has taken, and its batches never name a number lower than the last.

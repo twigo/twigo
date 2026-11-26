@@ -536,6 +536,9 @@ pub struct QueryView {
     metrics: Option<Metrics>,
     /// Rows that entered the index without a sample since `sample_entered` last ran.
     entered: Vec<RowKey>,
+    /// After a change of text the view holds no row and no index, only the samples its rows had,
+    /// until the source's `Delta::Reset` of every row the text keeps.
+    awaiting: Option<HashMap<RowKey, Arc<Sample>>>,
 }
 
 impl QueryView {
@@ -554,6 +557,7 @@ impl QueryView {
             view: 0,
             metrics: None,
             entered: Vec::new(),
+            awaiting: None,
         }
     }
 
@@ -564,20 +568,16 @@ impl QueryView {
                 if *columns != *self.layout.server {
                     self.layout = Layout::new(&self.spec, columns, self.metrics.is_some());
                 }
-                let held: HashMap<RowKey, Arc<Sample>> = self
-                    .rows
-                    .drain()
-                    .filter_map(|(key, tracked)| Some((key, tracked.sample?)))
-                    .collect();
-                self.clear();
-                if let Some(metrics) = &mut self.metrics {
-                    metrics.names.clear();
-                }
+                let held = match self.awaiting.take() {
+                    Some(held) => held,
+                    None => self.forget_rows(),
+                };
                 for row in rows {
                     let sample = held.get(&RowKey::of(&row.meta)).cloned();
                     self.insert(row, sample);
                 }
             }
+            Delta::Changed { .. } if self.awaiting.is_some() => {}
             Delta::Changed { upserted, removed } => {
                 for key in &removed {
                     self.remove(key);
@@ -620,6 +620,20 @@ impl QueryView {
         self.index.clear();
         self.counts.clear();
         self.groups.clear();
+    }
+
+    /// Drops every row and its place, and gives back the samples the rows had.
+    fn forget_rows(&mut self) -> HashMap<RowKey, Arc<Sample>> {
+        let samples = self
+            .rows
+            .drain()
+            .filter_map(|(key, tracked)| Some((key, tracked.sample?)))
+            .collect();
+        self.clear();
+        if let Some(metrics) = &mut self.metrics {
+            metrics.names.clear();
+        }
+        samples
     }
 
     fn layout(&self) -> Layout {
@@ -669,8 +683,9 @@ impl QueryView {
 
     /// Changes the shape of the query in place, and numbers it `view`, which the batches
     /// reflect from the next on. Returns whether the rows must come again from their source:
-    /// the view holds only the rows its text keeps, so the next `apply` must be a `Delta::Reset`
-    /// of every row the labels keep. Any other change is made of the rows it holds.
+    /// the view holds only the rows its text keeps, so it drops its rows and waits for a
+    /// `Delta::Reset` of every row the labels keep, which a `Delta::Changed` meanwhile has no
+    /// index to join. Any other change is made of the rows it holds.
     #[must_use]
     pub fn reshape(&mut self, view: u32, shape: Shape) -> bool {
         self.view = view;
@@ -681,6 +696,8 @@ impl QueryView {
         let layout = self.layout();
         let held = std::mem::replace(&mut self.layout, layout);
         if again {
+            let samples = self.forget_rows();
+            self.awaiting.get_or_insert_default().extend(samples);
             return true;
         }
         if !held.keeps_rows_of(&self.layout) {
