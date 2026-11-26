@@ -414,8 +414,12 @@ fn list_set_window(
 }
 
 #[tauri::command]
-fn list_set_view(webview: Webview, app: State<'_, App>, request: SetView) -> Result<(), IpcError> {
-    app.core.list_set_view(webview.label(), request)
+async fn list_set_view(
+    webview: Webview,
+    app: State<'_, App>,
+    request: SetView,
+) -> Result<(), IpcError> {
+    contained(async { app.core.list_set_view(webview.label(), request) }).await
 }
 
 #[tauri::command]
