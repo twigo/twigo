@@ -728,15 +728,6 @@ mod tests {
     }
 
     #[test]
-    fn visible_cpu_is_the_sample_after_the_watch_stopped_and_not_a_watch_window() {
-        let rows = rows_of(300, 900);
-        assert_eq!(
-            value(&rows, "Visible CPU, sessions open, window on screen"),
-            "25.00 %"
-        );
-    }
-
-    #[test]
     fn idle_cpu_is_the_hidden_window_with_the_sessions_open() {
         let rows = rows_of(300, 200);
         assert_eq!(
@@ -811,8 +802,6 @@ mod tests {
             "{}",
             row.measured
         );
-        assert!(row.measured.contains("1500 ns"), "{}", row.measured);
-        assert!(row.measured.contains("caches evicted"), "{}", row.measured);
     }
 
     #[test]

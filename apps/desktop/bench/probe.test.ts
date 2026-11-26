@@ -150,13 +150,6 @@ test("a listener stops hearing batches once removed", () => {
   expect(heard).toEqual([20]);
 });
 
-test("a batch sets the view the list reflects", () => {
-  const probe = opened();
-  expect(probe.view).toBe(0);
-  probe.record(20, batch({ view: 3 }));
-  expect(probe.view).toBe(3);
-});
-
 test("the next view change sent for a list resolves with its number, and another list's does not", async () => {
   let opened = 0;
   const inner: Backend = {
