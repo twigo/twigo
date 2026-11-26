@@ -13,9 +13,10 @@ The harness measures the six budgets of [ARCHITECTURE 3.8](ARCHITECTURE.md#38-pe
 ## A run
 
 1. Before the build, the harness makes the namespace `bench-sessions` with the pod `shell` on kind's node ([the sessions](#the-sessions)), deleting one that an earlier run left behind first.
+   A failure there, or a pod that is not Ready within 120 s, does not stop the run: the harness keeps it for the sessions' part.
    Then `cargo build --release -p twigo-bench`, `cargo run --release -p twigo-policy --example gate_cost`, which writes `gate-cost.json` while nothing else runs, and `pnpm tauri build --no-bundle --features bench --config src-tauri/tauri.bench.conf.json`: a release build, since a debug core's CPU and memory say nothing about the budgets.
 2. `twigo-bench churn` starts against the cluster at 100 changes/s and runs until the app is done.
-   The harness waits for its first logged change, and stops with the churn's error whenever it exits early.
+   The harness waits for its first logged change, and stops with the churn's error whenever it exits before the idle sample is taken; later it is a failure of the sessions' part ([what a failure does](#what-a-failure-does)).
 3. `twigo-bench launch target/release/twigo` starts the app with `TWIGO_BENCH=$TWIGO_BENCH_DIR/harness`, `TWIGO_BENCH_SESSIONS` naming what the driver opens in step 7, an empty `ZDOTDIR`, and the cluster's kubeconfig as `TWIGO_KUBECONFIG`, so the catalog lists that one context.
 4. The webview's driver opens the context's space and its pod list across every namespace, waits for the first rows, scrolls for 5 s, sorts eight times and then watches the Restarts cells on screen change for 60 s.
    When it starts watching it writes `steady.json`; the harness samples the app and reads the API server's `/metrics` (`steady-start.json`, `apiserver-start.txt`), 10 s later it samples memory five times, 2 s apart, and the report takes the median of each value.
@@ -31,14 +32,26 @@ The harness measures the six budgets of [ARCHITECTURE 3.8](ARCHITECTURE.md#38-pe
    For each the driver has the terminal's watch run as the window says, writes `watch-N.json`, and sleeps for 35 s; the harness waits 5 s and samples CPU time at the start and the end of 20 s (`window-N-start.json`, `window-N-end.json`), and the driver writes `watched-N.json` when the window is over, with the bytes the terminal had received at each tick of 250 ms, from which the report reads what it received between the harness's two samples, not over the driver's 35 s.
 9. The driver stops the watch with Ctrl-C, types a command whose output only a shell at its prompt prints, waits for that output and for the terminal to go quiet, and writes `stopped.json`.
    The harness waits 10 s and samples memory five times, 2 s apart (`sessions-memory-N.json`), waits 5 s and samples CPU time at the start and the end of 20 s with the window on screen (`sessions-visible-start.json`, `sessions-visible-end.json`).
-   The driver sleeps for 55 s and fails the run if the terminal printed more than 1,024 bytes meanwhile, a prompt redrawn at most; the harness fails the run if the window hid before the visible sample ended.
+   The driver sleeps for 55 s and fails the sessions' part if the terminal printed more than 1,024 bytes meanwhile, a prompt redrawn at most; the harness fails it if the window hid before the sessions' visible sample ended.
 10. The driver calls `idle` again, which writes `idle-sessions.json` and quits the app 45 s later.
     The harness waits 5 s, then samples CPU time at the start and the end of 30 s.
 11. The harness stops the churn and runs `twigo-bench report`.
 
-When the driver fails, the webview writes `failure.json` and then calls `idle` all the same, so the harness checks for `failure.json` after every wait, prints it and stops.
-Once the idle sample is taken, the judged rows are measured, so a failure from then on, in opening a shell, a forward or a terminal, in a watch window or in the harness's own step there, does not stop the run: the harness keeps it in `failure.json`, stops the app and reports.
-The sessions' rows then read `not measured` with what failed, the gate's row is built on its own files, and the harness exits as the judged rows say, so a run whose sessions failed exits 0 when they pass; the table and stderr say what failed.
+### What a failure does
+
+The judged rows are all measured once the idle sample is taken, so where a failure happens decides whether the run goes on.
+
+- **Until the idle sample is taken, or in a phase the report judges, a failure stops the run.**
+  The harness prints what failed and exits 1, with no report.
+  The driver writes `failure.json` when the pod list's first paint, scroll, sorts or changes fail, or the hide for the judged idle sample, and then calls `idle` all the same, so the harness checks for the file after every wait, whenever it comes.
+  A page that never turns hidden for that sample is one of them: the driver reports it 90 s after the hide, 55 s after the harness's sample ended, and the run stops then rather than judge the row on a sample nothing showed was hidden.
+  The churn exiting, the app quitting, a wait that times out and the window hiding before the visible sample ended stop the run the same way before that sample is taken.
+- **After it, a failure of the sessions' part leaves the sessions' rows unmeasured and the run goes on.**
+  These are the driver's steps (opening a shell, a forward or a terminal, a watch window, the check that the terminal printed no more than a prompt) and the harness's own there: a forward that does not answer, a window that ended before its sample did, the window hiding before the sessions' visible sample ended, the app quitting, a wait that times out, and the pod `shell` that was not made ready at the start.
+  The driver writes its failure to `sessions-failure.json`, the harness its own to the same file, and the harness stops the app and reports.
+  The sessions' rows read `not measured` with what failed, the gate's row is built on its own files, and the harness exits as the judged rows say, so a run whose sessions failed exits 0 when they pass; the table and stderr say what failed.
+- **The churn exiting after it** is a failure of the sessions' part too, whose rows say so, and it also fails the run: the harness prints the report of the judged rows, which are on disk, and exits 1.
+- **A judged row over its target** exits 1 after the report.
 
 ## The bench mode
 
@@ -123,16 +136,16 @@ How each is opened, as a person opens it, through the app's own commands and its
 - **The shell.**
   `k8s.shell.open` on the pod `shell` of the namespace `bench-sessions`, which the harness makes on kind's node from the image the node holds, `docker.io/kindest/local-path-helper` with `imagePullPolicy: Never`, so nothing is pulled; the live tests run their pods the same way (`crates/twigo-sessions/tests/logs_live.rs`).
   It sleeps by reading a coprocess that never writes, so the shell in it is idle.
-  The command plans `shell`, whose friction in `guarded` is a dialog, and the driver answers it through the dialog's own callback, `operations.asking.confirm`, with the context's name typed where the friction asks for it; a shell that opens with no dialog fails the run, since its context is then not guarded.
+  The command plans `shell`, whose friction in `guarded` is a dialog, and the driver answers it through the dialog's own callback, `operations.asking.confirm`, with the context's name typed where the friction asks for it; a shell that opens with no dialog fails the sessions' part, since its context is then not guarded.
 - **The port-forward.**
   `k8s.forward.open` on a CoreDNS pod of `kube-system`, its pick of ports answered with 8080, the port `health` listens on (`liveness-probe` in the pod's spec) through `quickAccess.accept`.
-  The forward takes local port 8080, which must be free on the Mac, else the run fails and says so.
-  The harness reads `/health` once through it, which fails the run unless it answers 200, so the forward is known to work.
+  The forward takes local port 8080, which must be free on the Mac, else the forward does not start, which fails the sessions' part and says so.
+  The harness reads `/health` once through it, which fails the sessions' part unless it answers 200, so the forward is known to work.
 - **The terminal.**
-  `k8s.terminal.new`, and the run fails unless `terminal_create` answers the proxy's kind.
+  `k8s.terminal.new`, and the sessions' part fails unless `terminal_create` answers the proxy's kind.
   Its shell is the login shell, which reads no startup file of the person's: the harness gives the app an empty `ZDOTDIR`, which the terminal hands its zsh, so what it prints and runs is the same on every Mac.
   The driver types into it with `shell_input`, the command the terminal sends for the keys a person types, and the harness has checked for `kubectl` on `PATH` and gives the driver its path.
-  The terminal runs `kubectl get pods -A -w`, and the first list of every pod has to come through whole, counted by its lines (a row for each of the list's pods, the command's echo and the table's header), else the run fails with the end of what the terminal printed.
+  The terminal runs `kubectl get pods -A -w`, and the first list of every pod has to come through whole, counted by its lines (a row for each of the list's pods, the command's echo and the table's header), else the sessions' part fails with the end of what the terminal printed.
   Counted by bytes, at 60 a row, the wait ended at 302 KB of a list of 525 KB, and the marker of the fourth window came at 481 KB in run 0 and 459 KB in run 3 of 2026-11-26, 44 and 66 KB before the list's end.
 
 The pod list goes back on screen in the editor area once the sessions are open, so the window shows the list and the terminal, and the visible row is measured with both.
@@ -172,7 +185,7 @@ The row is an estimate, not a bound: neither factor is exact.
   The cold figure is the mean, since the share is a sum over requests.
   Whether the buffer evicts the system-level cache as well as the core's own was not checked.
   Two runs of 2026-11-26 (Apple M4 Max, macOS 27.2.1, release build of this branch, load average 5 to 12) read 228 to 468 ns hot and 1,226 to 2,357 ns cold, 3.6 to 6.2 times; four earlier runs of that day read 220 to 496 ns hot.
-  The row prices every request at the higher figure, the cold one, of the dearest class but the patch.
+  The row prices every request at the higher of the two figures of the dearest class but the patch, the cold one in the two runs above, and prints both figures of that class.
 - **The requests** are counted by the API server's `apiserver_request_total`, which has no label for who sent them, and counts none to an aggregated API, so none of the metrics API's, which the app polls every 15 s: its output held no series of the group `metrics.k8s.io` in three runs of 2026-11-26.
   Of the 6,324 to 6,331 requests it counted over 61 s of the steady phase in them, 6,060 to 6,064 were patches of `pods/status`, the churn's, and 264 to 268 were not (leases, probes, discovery).
   The app sends no patch in the phase, so the row takes the requests that were not patches, whoever sent them, and the polls of 61 s, 5.
