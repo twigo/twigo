@@ -459,7 +459,7 @@ async fn a_service_account_without_a_cluster_wide_list_keeps_an_upstream_per_nam
         }],
     };
     until(&mut partly, |partly| {
-        let shown = partly.drain_shown();
+        let shown = partly.drain_shown(false);
         shown.status == ViewState::Ready && shown.parts == named
     })
     .await;
@@ -552,7 +552,7 @@ async fn a_service_account_that_may_list_namespaces_reads_all_of_those_it_may_li
     let before = namespace_api.list(&every).await.unwrap().items.len();
     let mut all = hub.rows(live.query(&[])).await.unwrap();
     until(&mut all, |all| {
-        let shown = all.drain_shown();
+        let shown = all.drain_shown(false);
         shown.status == ViewState::Ready && shown.parts.count == 2 && shown.parts.unready.is_empty()
     })
     .await;
@@ -565,7 +565,7 @@ async fn a_service_account_that_may_list_namespaces_reads_all_of_those_it_may_li
     );
     assert_eq!(all.items().len(), 2, "their pods");
     // The other tests of this binary make and delete namespaces meanwhile.
-    let left_out = usize::try_from(all.drain_shown().parts.omitted).unwrap() + 2;
+    let left_out = usize::try_from(all.drain_shown(false).parts.omitted).unwrap() + 2;
     assert!(
         (before.min(after)..=before.max(after)).contains(&left_out),
         "the namespaces of the cluster less the two read: {left_out}, counted {before} then {after}"

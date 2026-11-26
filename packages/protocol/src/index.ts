@@ -182,7 +182,13 @@ export {
   type ReleaseAsk,
   type ReleaseSnapshot,
 } from "./release";
-export { INITIAL_SNAPSHOT, ListView, type ListSnapshot } from "./list";
+export {
+  INITIAL_SNAPSHOT,
+  ListView,
+  viewOf,
+  type ListSnapshot,
+  type ViewQuery,
+} from "./list";
 export {
   leastReady,
   readiness,

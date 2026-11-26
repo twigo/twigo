@@ -8,8 +8,10 @@ import {
 import {
   INITIAL_SNAPSHOT,
   ListView,
+  viewOf,
   type Backend,
   type ListQuery,
+  type ViewQuery,
 } from "@twigo/protocol";
 import { FlashTracker } from "./flash";
 
@@ -27,20 +29,37 @@ function sameList(a: ListQuery, b: ListQuery): boolean {
   );
 }
 
+const NO_VIEW: ViewQuery = {
+  text: null,
+  columns: null,
+  sort: null,
+  countBy: null,
+  groupBy: null,
+  values: null,
+};
+
 const idle = () => INITIAL_SNAPSHOT;
 const never = () => () => undefined;
 
 /**
- * Subscribes while mounted, once there is a query. A new query means a new
- * subscription; until its first batch the previous one stays on screen and
- * stays open, so a sort does not blank the table and the scopes the old
- * subscription read keep their reader and their samples, and the new one
- * starts with the metrics state the old one said. The window, and whether
- * the list reads its metric columns, always go to the newest subscription,
- * and the second never opens another.
+ * Subscribes while mounted, once there is a query. The view part of the
+ * query, its text, sort, counts, groups and values, changes on the
+ * subscription the list has: the rows on screen stay until the first batch
+ * that names the change, and the query returned is the one they answer.
+ * Anything else in the query, such as its namespaces, is a new subscription;
+ * until its first batch the previous one stays on screen and stays open, so
+ * the scopes the old subscription read keep their reader and their samples,
+ * and the new one starts with the metrics state the old one said. The
+ * window, and whether the list reads its metric columns, always go to the
+ * newest subscription, and the second never opens another.
  */
 export function useListView(backend: Backend, query: ListQuery | undefined) {
-  const key = query && JSON.stringify(query);
+  const key = query && JSON.stringify({ ...query, ...NO_VIEW });
+  const shape = query && JSON.stringify(viewOf(query));
+  const asked = useRef(query);
+  useEffect(() => {
+    asked.current = query;
+  });
   const [live, setLive] = useState<Live>();
   const shownOnce = useRef(false);
   const window = useRef<readonly [number, number]>([0, 40]);
@@ -57,11 +76,12 @@ export function useListView(backend: Backend, query: ListQuery | undefined) {
   }, []);
 
   useEffect(() => {
-    if (key === undefined) {
+    const wanted = asked.current;
+    if (key === undefined || !wanted) {
       leave();
       return;
     }
-    const query = JSON.parse(key) as ListQuery;
+    const query: ListQuery = wanted;
     const before = current.current;
     const view = new ListView(
       backend,
@@ -100,6 +120,12 @@ export function useListView(backend: Backend, query: ListQuery | undefined) {
     };
   }, [backend, key, leave]);
 
+  useEffect(() => {
+    if (shape !== undefined) {
+      newest.current?.setView(JSON.parse(shape) as ViewQuery);
+    }
+  }, [shape]);
+
   useEffect(() => leave, [leave]);
 
   const setWindow = useCallback((start: number, end: number) => {
@@ -120,7 +146,7 @@ export function useListView(backend: Backend, query: ListQuery | undefined) {
   return {
     snapshot,
     flash: live?.flash,
-    query: live?.query,
+    query: live?.view.queryOf(snapshot.view),
     setWindow,
     setMetrics,
   };

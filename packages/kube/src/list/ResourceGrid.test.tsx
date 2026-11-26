@@ -6,18 +6,20 @@ import {
   screen,
   within,
 } from "@testing-library/react";
+import { useCallback } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { Backend, ListBatch, ListQuery } from "@twigo/protocol";
+import type { ListBatch, RequestOf, Row } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import {
   hoverIcons,
   mountKube,
   openList,
+  scriptedBackend,
   settle,
   withScreenSize,
 } from "../../test/workbench";
 
-const gridRenders = vi.hoisted(() => ({ count: 0 }));
+const gridRenders = vi.hoisted(() => ({ count: 0, rows: [] as string[] }));
 
 vi.mock("@twigo/ui", async (original) => {
   const ui = await original<typeof import("@twigo/ui")>();
@@ -25,7 +27,15 @@ vi.mock("@twigo/ui", async (original) => {
     ...ui,
     DataGrid: (props: Parameters<typeof ui.DataGrid>[0]) => {
       gridRenders.count++;
-      return <ui.DataGrid {...props} />;
+      const { cell } = props;
+      const counted = useCallback<typeof cell>(
+        (row, column) => {
+          if (column.id === "Name") gridRenders.rows.push((row as Row).id);
+          return cell(row, column);
+        },
+        [cell],
+      );
+      return <ui.DataGrid {...props} cell={counted} />;
     },
   };
 });
@@ -40,6 +50,7 @@ afterEach(() => {
   cleanup();
   vi.clearAllTimers();
   vi.useRealTimers();
+  gridRenders.rows = [];
 });
 
 const header = (name: string) => screen.getByRole("columnheader", { name });
@@ -290,54 +301,31 @@ test("under StrictMode the list subscribes once and shows rows", async () => {
   expect(screen.getAllByRole("gridcell").length).toBeGreaterThan(10);
 });
 
-test("a new query's subscription opens before the old one closes, and unmounting leaves none open", async () => {
+test("a sort changes the view on the subscription the list has and closes nothing, and unmounting leaves none open", async () => {
   const backend = createMockBackend("ready");
   const subscribe = vi.spyOn(backend, "subscribe");
   const invoke = vi.spyOn(backend, "invoke");
   await openList(backend);
-  const closed = () =>
-    invoke.mock.calls.flatMap(([command], at) =>
-      command === "list_unsubscribe" ? [at] : [],
-    );
-  const before = closed().length;
-  fireEvent.click(within(header("Ready")).getByRole("button"));
-  await settle();
-  const sorted = subscribe.mock.calls.findIndex(
-    ([command, query]) =>
-      command === "list_subscribe" && (query as ListQuery).sort !== null,
-  );
-  const closes = closed().slice(before);
-  expect(sorted).toBeGreaterThan(-1);
-  expect(closes).toHaveLength(1);
-  expect(subscribe.mock.invocationCallOrder[sorted]).toBeLessThan(
-    invoke.mock.invocationCallOrder[closes[0] ?? 0] ?? 0,
-  );
-  cleanup();
-  await settle(1);
   const count = (calls: readonly (readonly unknown[])[], name: string) =>
     calls.filter(([command]) => command === name).length;
+  const subscribed = count(subscribe.mock.calls, "list_subscribe");
+  const closed = count(invoke.mock.calls, "list_unsubscribe");
+  fireEvent.click(within(header("Ready")).getByRole("button"));
+  await settle();
+  expect(count(subscribe.mock.calls, "list_subscribe")).toBe(subscribed);
+  expect(count(invoke.mock.calls, "list_unsubscribe")).toBe(closed);
+  const views = invoke.mock.calls.flatMap(([command, request]) =>
+    command === "list_set_view" ? [request as RequestOf<"list_set_view">] : [],
+  );
+  expect(views).toHaveLength(1);
+  expect(views[0]).toMatchObject({ view: 1, sort: { column: "Ready" } });
+  expect(header("Ready").getAttribute("aria-sort")).not.toBe("none");
+  cleanup();
+  await settle(1);
   expect(count(invoke.mock.calls, "list_unsubscribe")).toBe(
     count(subscribe.mock.calls, "list_subscribe"),
   );
 });
-
-function scriptedBackend() {
-  const mock = createMockBackend("ready");
-  let send: ((batch: ListBatch) => void) | undefined;
-  const backend: Backend = {
-    invoke: (command, request) =>
-      command.startsWith("list_")
-        ? Promise.resolve(null as never)
-        : mock.invoke(command, request),
-    subscribe(command, request, onMessage) {
-      if (command !== "list_subscribe")
-        return mock.subscribe(command, request, onMessage);
-      send = onMessage;
-      return Promise.resolve(1 as never);
-    },
-  };
-  return { backend, send: (batch: ListBatch) => send?.(batch) };
-}
 
 const IDS = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"];
 
@@ -348,6 +336,7 @@ function batch(
 ): ListBatch {
   return {
     seq,
+    view: 0,
     total: IDS.length,
     columns: first
       ? [
@@ -407,6 +396,41 @@ test("a changed cell flashes through the next batch, and a storm flashes nothing
       restarts(id)?.className.includes("animate-flash"),
     ),
   ).toEqual([]);
+});
+
+test("a batch draws the rows whose cells it changed, and the one whose flash ended, and no other", async () => {
+  const script = scriptedBackend();
+  await openList(script.backend);
+  const send = async (b: ListBatch) => {
+    gridRenders.rows = [];
+    act(() => {
+      script.send(b);
+    });
+    await settle(1);
+    return [...new Set(gridRenders.rows)];
+  };
+
+  expect(
+    await send(batch(1, Object.fromEntries(IDS.map((id) => [id, "0"])), true)),
+  ).toEqual(IDS);
+  expect(await send(batch(2, { a: "1", c: "1" }))).toEqual(["a", "c"]);
+  expect(await send(batch(3, {}))).toEqual([]);
+  await act(() => vi.advanceTimersByTimeAsync(1100));
+  expect(await send(batch(4, {}))).toEqual(["a", "c"]);
+  expect(await send(batch(5, {}))).toEqual([]);
+});
+
+test("a scroll that keeps rows in the window draws none of them again", async () => {
+  await openList();
+  const before = new Set(gridRenders.rows);
+  expect(before.size).toBeGreaterThan(20);
+  gridRenders.rows = [];
+  grid().scrollTop = 3 * 24;
+  fireEvent.scroll(grid());
+  await settle(3);
+  const after = new Set(gridRenders.rows);
+  expect(after.size).toBeGreaterThan(0);
+  expect([...after].filter((id) => before.has(id))).toEqual([]);
 });
 
 test("seconds passing render the ages and not the grid", async () => {
@@ -1215,6 +1239,7 @@ test("a hovered row's verbs read that row's own state, not the selected row's", 
   act(() => {
     script.send({
       seq: 1,
+      view: 0,
       total: 3,
       columns: [
         { name: "Name", kind: "string", priority: 0 },

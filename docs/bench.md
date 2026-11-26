@@ -3,36 +3,66 @@
 M0 step 7, 2026-11-01; on the Rust list path since M1 step 7, 2026-11-02.
 The harness measures the six budgets of [ARCHITECTURE 3.8](ARCHITECTURE.md#38-performance-budgets-and-the-benchmark) at 5k pods in the real Tauri app, the cluster's pods coming through the watch hub, the query view and the batcher.
 
-- Run: `export TWIGO_BENCH_DIR=$(mktemp -d)`, then `bench/harness.sh` on macOS, with the screen unlocked.
+- Run: `export TWIGO_BENCH_DIR=$(mktemp -d)`, then `bench/harness.sh` on macOS, with the screen unlocked and `kubectl` on `PATH`.
   The app asks for no focus and its window stays behind others, so the desktop stays in use; WebKit counts the window active at the start all the same, so the bench keeps the page from napping once another app is activated ([the window](#the-window)).
   Without an argument it creates a kind 1.37 cluster with kwok and 5,000 pods (`bench/cluster.sh up bench`, `bench/pods.sh`) and deletes it at the end; given a kubeconfig, it uses that cluster, which must hold the `bench/bench` Deployment at 5,000 pods.
 - Output: the report table on stdout; `report.json` and every file it is built from in `$TWIGO_BENCH_DIR/harness`.
-- Code: `bench/harness.sh`; `bench/harness`, the `twigo-bench` tool with `churn`, `launch`, `sample` and `report`; `apps/desktop/bench`, the webview's entry and driver; `apps/desktop/src-tauri/src/bench.rs`, the app's bench commands.
+  The table's first line names the machine, macOS, the build, the commit and the version of the `kubectl` the terminal runs (`kubectl version --client`), which the proxy rows depend on.
+- Code: `bench/harness.sh`; `bench/harness`, the `twigo-bench` tool with `churn`, `launch`, `sample` and `report`; `crates/twigo-policy/examples/gate_cost.rs`; `apps/desktop/bench`, the webview's entry and driver; `apps/desktop/src-tauri/src/bench.rs`, the app's bench commands.
 
 ## A run
 
-1. `cargo build --release -p twigo-bench`, then `pnpm tauri build --no-bundle --features bench --config src-tauri/tauri.bench.conf.json`: a release build, since a debug core's CPU and memory say nothing about the budgets.
+1. Before the build, the harness makes the namespace `bench-sessions` with the pod `shell` on kind's node ([the sessions](#the-sessions)), deleting one that an earlier run left behind first.
+   A failure there, or a pod that is not Ready within 120 s, does not stop the run: the harness keeps it for the sessions' part.
+   Then `cargo build --release -p twigo-bench`, `cargo run --release -p twigo-policy --example gate_cost`, which writes `gate-cost.json` while nothing else runs, and `pnpm tauri build --no-bundle --features bench --config src-tauri/tauri.bench.conf.json`: a release build, since a debug core's CPU and memory say nothing about the budgets.
 2. `twigo-bench churn` starts against the cluster at 100 changes/s and runs until the app is done.
-   The harness waits for its first logged change, and stops with the churn's error whenever it exits early.
-3. `twigo-bench launch target/release/twigo` starts the app with `TWIGO_BENCH=$TWIGO_BENCH_DIR/harness` and the cluster's kubeconfig as `TWIGO_KUBECONFIG`, so the catalog lists that one context.
+   The harness waits for its first logged change ([what a failure does](#what-a-failure-does)).
+3. `twigo-bench launch target/release/twigo` starts the app with `TWIGO_BENCH=$TWIGO_BENCH_DIR/harness`, `TWIGO_BENCH_SESSIONS` naming what the driver opens in step 7, an empty `ZDOTDIR`, and the cluster's kubeconfig as `TWIGO_KUBECONFIG`, so the catalog lists that one context.
 4. The webview's driver opens the context's space and its pod list across every namespace, waits for the first rows, scrolls for 5 s, sorts eight times and then watches the Restarts cells on screen change for 60 s.
-   When it starts watching it writes `steady.json`; 10 s later the harness samples memory five times, 2 s apart, and the report takes the median of each value.
+   When it starts watching it writes `steady.json`; the harness samples the app and reads the API server's `/metrics` (`steady-start.json`, `apiserver-start.txt`), 10 s later it samples memory five times, 2 s apart, and the report takes the median of each value.
 5. The driver writes `visible.json` and sleeps for 30 s, the list still sorted by Restarts descending.
-   The harness waits 5 s, then samples CPU time at the start and the end of 20 s.
-6. The driver writes `webview.json` and calls `idle`: the app hides its window, writes `idle.json` and quits 45 s later.
+   The harness takes the same two files at the steady phase's end (`steady-end.json`, `apiserver-end.txt`), waits 5 s, then samples CPU time at the start and the end of 20 s.
+6. The driver writes `webview.json` and calls `idle`: the app hides its window, writes `idle.json` and shows the window again 45 s later.
    The harness waits 5 s, then samples CPU time at the start and the end of 30 s.
-7. The harness stops the churn and runs `twigo-bench report`.
+   The report fails the row when the window was shown again before that sample ended, which `idle.json`'s time and the 45 s tell, and says how long before the window's return the sample ended: 8.9 to 9.9 s in the four runs of 2026-11-26 (the sample ended 35.06 to 36.06 s after the hide).
+7. The driver, with the window on screen again, opens a shell, a port-forward and a terminal, and has the terminal run `kubectl get pods -A -w` through the policy proxy.
+   It writes `sessions.json` and sleeps for 30 s.
+   The harness reads the forward once through its local port (`forward-read.json`).
+8. Four windows follow, in the order proxy, direct, direct, proxy, so that a drift of the cluster or of the page over them cancels between the two kinds.
+   For each the driver has the terminal's watch run as the window says, writes `watch-N.json`, and keeps it for 35 s by the clock; the harness waits 5 s and samples CPU time at the start and the end of 20 s (`window-N-start.json`, `window-N-end.json`), and the driver writes `watched-N.json` when the window is over, with the bytes the terminal had received at each tick of 250 ms, from which the report reads what it received between the harness's two samples, not over the driver's 35 s.
+   The page's timers may fire late: in two runs on 2026-11-26 the ticks came 1,000 ms apart in four of the six windows that ended, from about 3 s or 18 to 19 s into the window on, which a window counted in ticks stretched to 83 to 132 s; why WebKit delays them there was not looked into.
+9. The driver stops the watch with Ctrl-C, types a command whose output only a shell at its prompt prints (`printf 'at-prompt-%s\n' 42`: the terminal echoes `at-prompt-%s`, so `at-prompt-42` is the shell's), waits for that output and for the terminal to go quiet for 1 s, and writes `stopped.json`.
+   The harness waits 10 s and samples memory five times, 2 s apart (`sessions-memory-N.json`), waits 5 s and samples CPU time at the start and the end of 20 s with the window on screen (`sessions-visible-start.json`, `sessions-visible-end.json`).
+   The driver sleeps for 55 s and fails the sessions' part if the terminal printed more than 1,024 bytes meanwhile, a prompt redrawn at most; the harness fails it if the window hid before the sessions' visible sample ended.
+10. The driver calls `idle` again, which writes `idle-sessions.json` and quits the app 45 s later.
+    The harness waits 5 s, then samples CPU time at the start and the end of 30 s.
+11. The harness stops the churn and runs `twigo-bench report`.
 
-When the driver fails, the webview writes `failure.json` and then calls `idle` all the same, so the harness checks for `failure.json` after every wait and before the report, prints it and stops.
+### What a failure does
+
+The judged rows are all measured once the idle sample is taken, so where a failure happens decides whether the run goes on.
+
+- **Until the idle sample is taken, or in a phase the report judges, a failure stops the run.**
+  The harness prints what failed and exits 1, with no report.
+  The driver writes `failure.json` when the pod list's first paint, scroll, sorts or changes fail, or the hide for the judged idle sample, and then calls `idle` all the same, so the harness checks for the file after every wait, whenever it comes.
+  A page that never turns hidden for that sample is one of them: the driver reports it 90 s after the hide, 55 s after the harness's sample ended.
+  The harness waits for `hidden.json`, which the page writes as the document turns hidden, before it starts on the sessions, so the run stops then rather than judge the row on a sample nothing showed was hidden, whatever the sessions' part does meanwhile.
+  The churn exiting, the app quitting, a wait that times out and the window hiding before the visible sample ended stop the run the same way before that sample has ended.
+- **After it, a failure of the sessions' part leaves the sessions' rows unmeasured and the run goes on.**
+  These are the driver's steps (the window coming back after the judged idle sample, opening a shell, a forward or a terminal, a watch window, the check that the terminal printed no more than a prompt) and the harness's own there: a forward that does not answer, a window that ended before its sample did, the window hiding before the sessions' visible sample ended, the app quitting, a wait that times out, and the pod `shell` that was not made ready at the start.
+  The driver writes its failure to `sessions-failure.json`, the harness its own to the same file, and the harness stops the app and reports.
+  The sessions' rows read `not measured` with what failed, the gate's row is built on its own files, and the harness exits as the judged rows say, so a run whose sessions failed exits 0 when they pass; the table and stderr say what failed.
+- **The churn exiting after it** is a failure of the sessions' part too, whose rows say so, and it also fails the run: the harness prints the report of the judged rows, which are on disk, and exits 1.
+- **A judged row over its target** exits 1 after the report.
 
 ## The bench mode
 
 Nothing of it ships.
 
 - **Rust.**
-  The `bench` feature of `apps/desktop/src-tauri` adds an inlined plugin, `twigo-bench`, with two commands: `write` stores one JSON file in `$TWIGO_BENCH`, and `idle` hides the window and quits after 45 s.
+  The `bench` feature of `apps/desktop/src-tauri` adds an inlined plugin, `twigo-bench`, with three commands: `write` stores one JSON file in `$TWIGO_BENCH`, `setup` hands the driver the JSON of `TWIGO_BENCH_SESSIONS`, and `idle` hides the window, writes the marker it is named by, and after 45 s quits or shows the window again.
   tauri-build writes an inlined plugin's permissions into `OUT_DIR`, not into the source tree, and the plugin adds its capability at runtime, so a build without the feature has neither the commands nor their grants: on 2026-11-01 `strings` found no `twigo-bench` in the default debug binary and 3 in the bench release binary.
-  A bench build refuses to start without `TWIGO_BENCH`.
+  A bench build refuses to start without `TWIGO_BENCH`, and its driver stops at once without `TWIGO_BENCH_SESSIONS`.
 - **The webview.**
   `vite build --mode bench` builds `apps/desktop/bench`, an entry of its own, into `apps/desktop/dist-bench`; the shipping build never sees it.
   It boots the workbench as `src/main.tsx` does, on `tauriBackend`, through a probe that stamps every list batch with `performance.now()` on arrival, before the view applies it.
@@ -41,7 +71,7 @@ Nothing of it ships.
   `src-tauri/tauri.bench.conf.json` points the build at that entry and gives the app the identifier `io.twigo.ide.bench`, so a run neither hands over to the user's Twigo through the single-instance lock nor reads or writes its window state; the harness deletes the bench app's window state before each run.
   It also places [the window](#the-window).
 - **The commands stay out of `twigo-ipc`.**
-  The IPC types are the app's protocol; the bench's two commands are not part of it, so the bench entry calls them through `invoke` directly.
+  The IPC types are the app's protocol; the bench's three commands are not part of it, so the bench entry calls them through `invoke` directly.
 
 ## The window
 
@@ -72,19 +102,98 @@ Limits:
 
 "Painted" means the end of the frame in which the DOM first shows the value: the driver checks the DOM in a `requestAnimationFrame` callback and, once it holds, posts a `MessageChannel` message, whose handler runs after that frame is rendered.
 
-| Metric                               | How                                                                                                                                                                                                                                                                                                           |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| First paint after the space connects | From opening the pod list in the space the driver opened to its first rows painted: the list waits for the space's discovery, which starts as the space opens, before the list, then Rust lists every pod                                                                                                     |
-| Change → painted cell, p95           | The churn's log (pod, restart count, patch sent in Unix ms) joined by pod and count with the driver's paints of the Restarts cells on screen (pod, count, painted in Unix ms, `performance.timeOrigin` plus the frame's end); a count painted that the log lacks, as one a failed patch set, is counted apart |
-| Scroll                               | Mean fps from `requestAnimationFrame` over 5 s of scrolling at 4,000 px/s; passes at 57 fps, 95 % of 60, since frames jitter                                                                                                                                                                                  |
-| Sort                                 | Header click → the new order's first 10 rows painted, eight clicks over Age, Namespace, Name and Restarts, each ascending then descending, so that every click changes those rows on kwok's pods, and the last leaves pods the churn changes on screen; p95                                                   |
-| Core RSS                             | Resident size of the app process under churn, with the list open                                                                                                                                                                                                                                              |
-| Webview memory                       | Resident size summed over the `com.apple.WebKit.*` processes the app is responsible for but the GPU process; their physical footprint and the GPU process's each have a row of their own, never judged                                                                                                        |
-| Visible CPU                          | CPU time of the app and its WebKit processes over 20 s with the window on screen, sorted by Restarts descending, while the driver sleeps; shown, never judged ([why](#the-visible-window))                                                                                                                    |
-| Idle CPU                             | CPU time of the app and its WebKit processes over 30 s with the window hidden, as a share of one core; hidden, the list acknowledges no batch, so Rust coalesces the churn and sends nothing                                                                                                                  |
+| Metric                                 | How                                                                                                                                                                                                                                                                                                           |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| First paint after the space connects   | From opening the pod list in the space the driver opened to its first rows painted: the list waits for the space's discovery, which starts as the space opens, before the list, then Rust lists every pod                                                                                                     |
+| Change → painted cell, p95             | The churn's log (pod, restart count, patch sent in Unix ms) joined by pod and count with the driver's paints of the Restarts cells on screen (pod, count, painted in Unix ms, `performance.timeOrigin` plus the frame's end); a count painted that the log lacks, as one a failed patch set, is counted apart |
+| Scroll                                 | Mean fps from `requestAnimationFrame` over 5 s of scrolling at 4,000 px/s; passes at 57 fps, 95 % of 60, since frames jitter                                                                                                                                                                                  |
+| Sort                                   | Header click → the new order's first 10 rows painted, once a batch naming the click's view has them, eight clicks over Age, Namespace, Name and Restarts, each ascending then descending, so that every click changes those rows on kwok's pods, and the last leaves pods the churn changes on screen; p95    |
+| Core footprint                         | Physical footprint of the app process under churn, with the list open; its resident size has a row of its own, never judged ([why](#why-the-targets-moved))                                                                                                                                                   |
+| Webview memory                         | Resident size summed over the `com.apple.WebKit.*` processes the app is responsible for but the GPU process; their physical footprint and the GPU process's each have a row of their own, never judged                                                                                                        |
+| Visible CPU                            | CPU time of the app and its WebKit processes over 20 s with the window on screen, sorted by Restarts descending, while the driver sleeps; shown, never judged ([why](#the-visible-window))                                                                                                                    |
+| Idle CPU                               | CPU time of the app and its WebKit processes over 30 s with the window hidden, as a share of one core; hidden, the list acknowledges no batch, so Rust coalesces the churn and sends nothing                                                                                                                  |
+| Core footprint, sessions open          | The same as Core footprint, with [the three sessions](#the-sessions) open, the terminal's watch stopped and its shell at the prompt; shown, never judged, with its difference from the row of the list alone                                                                                                  |
+| Webview memory, sessions open          | The same as Webview memory, with the sessions open; shown, never judged, with its difference from the row of the list alone                                                                                                                                                                                   |
+| Visible CPU, sessions open             | CPU time of the app and its WebKit processes over 20 s with the window on screen, the sessions open, the terminal's watch stopped and its shell at the prompt; shown, never judged                                                                                                                            |
+| Idle CPU, sessions open                | CPU time of the app and its WebKit processes over 30 s with the window hidden, the sessions open, the terminal's watch stopped and its shell at the prompt; shown, never judged                                                                                                                               |
+| Terminal watch through the proxy       | CPU time of the app process alone over 20 s while the terminal's `kubectl get pods -A -w` runs through the policy proxy, the mean of the two proxy windows, as a share of one core                                                                                                                            |
+| The same watch straight to the cluster | The same, with the cluster's own kubeconfig named on the command line, in the same terminal, the mean of the two direct windows                                                                                                                                                                               |
+| Gate, share of the core's CPU          | An estimate ([how](#what-the-gate-takes)); shown, never judged                                                                                                                                                                                                                                                |
 
 `twigo-bench report`, and so the harness, exits 1 when a judged row misses its target.
 The pods of `bench/pods.sh` all run, so a Status sort would leave the first rows in the order of their ids either way, and the driver stops when a click leaves them as they were: the sort sequence is Status-free.
+
+## The sessions
+
+The rows after Idle CPU measure the app with M2's three sessions open, under the same churn: a shell in a pod, a port-forward and a terminal ([ARCHITECTURE 4.6](ARCHITECTURE.md#46-logs-terminal-and-editors)).
+They are shown and never judged, since 3.8 has no budget for them, and a budget comes only once the code it should fail on has run against it.
+The sessions open after every phase above, so those rows keep their meaning.
+
+How each is opened, as a person opens it, through the app's own commands and its friction ([ARCHITECTURE 6.4](ARCHITECTURE.md#64-read-only-enforcement-twigo-policy)); nothing goes around the gate, and nothing changes what the policy asks.
+
+- **The context's type.**
+  The bench's context is one nobody marked, which is `guarded` until someone says what it is, and which asks what it is before its first shell.
+  The driver sets it as the chip's choices do, with `workbench.action.setContextEnvironment` and Staging, which runs at once for a context nobody marked.
+  Staging keeps the mode `guarded`, so the shell asks in a dialog and the terminal goes through the policy proxy; Development would give the terminal the person's own credentials, and Production refuses a shell.
+- **The shell.**
+  `k8s.shell.open` on the pod `shell` of the namespace `bench-sessions`, which the harness makes on kind's node from the image the node holds, `docker.io/kindest/local-path-helper` with `imagePullPolicy: Never`, so nothing is pulled; the live tests run their pods the same way (`crates/twigo-sessions/tests/logs_live.rs`).
+  It sleeps by reading a coprocess that never writes, so the shell in it is idle.
+  The command plans `shell`, whose friction in `guarded` is a dialog, and the driver answers it through the dialog's own callback, `operations.asking.confirm`, with the context's name typed where the friction asks for it; a shell that opens with no dialog fails the sessions' part, since its context is then not guarded.
+- **The port-forward.**
+  `k8s.forward.open` on a CoreDNS pod of `kube-system`, its pick of ports answered with 8080, the port `health` listens on (`liveness-probe` in the pod's spec) through `quickAccess.accept`.
+  The forward takes local port 8080, which must be free on the Mac, else the forward does not start, which fails the sessions' part and says so.
+  The harness reads `/health` once through it, which fails the sessions' part unless it answers 200, so the forward is known to work.
+- **The terminal.**
+  `k8s.terminal.new`, and the sessions' part fails unless `terminal_create` answers the proxy's kind.
+  Its shell is the login shell, which reads no startup file of the person's: the harness gives the app an empty `ZDOTDIR`, which the terminal hands its zsh, so what it prints and runs is the same on every Mac.
+  The driver types into it with `shell_input`, the command the terminal sends for the keys a person types, and the harness has checked for `kubectl` on `PATH` and gives the driver its path.
+  The terminal runs `kubectl get pods -A -w`, and the first list of every pod has to come through whole, counted by its lines (a row for each of the list's pods, the command's echo and the table's header), else the sessions' part fails with the end of what the terminal printed.
+  Counted by bytes, at 60 a row, the wait ended at 302 KB of a list of 525 KB, and the marker of the fourth window came at 481 KB in run 0 and 459 KB in run 3 of 2026-11-26, 44 and 66 KB before the list's end.
+
+The pod list goes back on screen in the editor area once the sessions are open, so the window shows the list and the terminal, and the visible row is measured with both.
+That the list keeps the order the earlier phases left, sorted by Restarts descending, once it is opened again was not looked at.
+
+The policy proxy's cost is the core's CPU over a window in which the terminal's watch goes through the proxy against a window in which the same watch, typed in the same terminal, names the cluster's own kubeconfig (`--kubeconfig`) and goes straight to the cluster.
+The terminal's output, which the core reads from the pty and frames, is the same in both, so the difference is what the proxy adds.
+The row counts the app process alone, not its WebKit processes, whose work is the terminal's output.
+A `sample` of the app at 1 ms over 20 s of the first proxy window of one run (2026-11-26) took 2,142 active samples, of which 30 had `twigo_core::proxy` frames, 1.4 %, and 94 and 91 hyper's and rustls's, which the app's own connection to the API server shares.
+The harness read 7.9 % of a core for that window, against 10.8 % in the runs without a sample, so the share is of what the sample saw, not of those runs.
+A person's `--kubeconfig` goes around the proxy, which guards against accidents, not against a determined process ([ARCHITECTURE 6.4](ARCHITECTURE.md#64-read-only-enforcement-twigo-policy)); here it is the comparison.
+
+The memory and CPU rows with the sessions open measure the sessions idle, not a terminal printing a 5,000-pod watch.
+The terminal's scrollback of 5,000 lines (`SCROLLBACK` in `packages/kube/src/xterm/terminal.ts`) is full of what the last window printed at that point, which the memory rows count.
+The hidden idle sample is not checked for output itself: the shell at its prompt prints nothing, and the check before it covers 55 s.
+
+A hidden window still takes a terminal's output, which is a finding, not a row.
+The four runs of 2026-11-26 (`bench/harness.sh` on kind 1.37 with kwok and 5,000 pods, an Apple M4 Max, macOS 27.2.1, the Mac's screen locked) sampled the idle row with the watch still printing about 11 KB a second: the app read 7.15 to 7.61 % of a core and WebContent 5.94 to 6.28 %, 13.16 to 13.97 % with the other processes, against 0.78 to 1.07 % and 0.02 to 0.14 % hidden with the list alone.
+With the window on screen the same watch took 10.1 to 11.2 % of the app, 14.8 to 16.7 % of WebContent and 5.0 to 6.7 % of the GPU process in 15 of the 16 windows (the first of run 3 had `sample` beside it), through the proxy or straight to the cluster.
+
+Limits:
+
+- The sessions open after the window was hidden and shown once for the row of the list alone, so the memory rows with sessions differ from those of the list alone by that cycle as well as by the sessions.
+- The window is shown again with `orderFront:` and never made key, as tao shows an unfocused window at launch ([window.rs](https://github.com/tauri-apps/tao/blob/tao-v0.37.2/src/platform_impl/macos/window.rs#L605-L612)); that it stays behind the windows of the app in use was not looked at.
+
+### What the gate takes
+
+The gate checks a request as it leaves and again above the socket; the events of a watch and the batches of a list pass none.
+So its share of the core's CPU in the steady phase is the requests the app sends there times what the gate costs one, over the core's CPU time in the phase.
+The row is an estimate, not a bound: neither factor is exact.
+
+- **The cost of a request** is `cargo run --release -p twigo-policy --example gate_cost`: the UI's gate on a guarded context, both its layers, over a service that answers at once, against that service alone, for six kinds of request the app sends (a list, a watch, the metrics list, discovery, an access review, a patch).
+  Each is timed twice: 1,000,000 calls in a loop, with the code and the policy's data in the cache, and 1,000 calls one at a time, gated and bare in turn, with a 64 MiB buffer written before each call, which a request that comes seconds apart in the app meets.
+  The cold figure is the mean, since the share is a sum over requests.
+  Whether the buffer evicts the system-level cache as well as the core's own was not checked.
+  Two runs of 2026-11-26 (Apple M4 Max, macOS 27.2.1, release build of this branch, load average 5 to 12) read 228 to 468 ns hot and 1,226 to 2,357 ns cold, 3.6 to 6.2 times; four earlier runs of that day read 220 to 496 ns hot.
+  The row prices every request at the higher of the two figures of the dearest class but the patch, the cold one in the two runs above, and prints both figures of that class.
+- **The requests** are counted by the API server's `apiserver_request_total`, which has no label for who sent them, and counts none to an aggregated API, so none of the metrics API's, which the app polls every 15 s: its output held no series of the group `metrics.k8s.io` in three runs of 2026-11-26.
+  Of the 6,324 to 6,331 requests it counted over 61 s of the steady phase in them, 6,060 to 6,064 were patches of `pods/status`, the churn's, and 264 to 268 were not (leases, probes, discovery).
+  The app sends no patch in the phase, so the row takes the requests that were not patches, whoever sent them, and the polls of 61 s, 5.
+  Those 264 to 268 are mostly other clients' (run 1's held 132 lease updates, 60 `/readyz` and 13 `openapi/v3`), so they overcount the app's requests.
+  Run 1's 264 requests and 5 polls at the cold 1,786 ns of the first run above, over its 2,530 ms of the core's CPU, come to 1.9e-2 %, where the hot loop's 474 ns gave 5.0e-3 %.
+  A watch the app starts in the phase and leaves open at its end may not be in the count either, if the server adds a watch once it ends; how it records one was not checked against its source.
+- **A `sample` counted by frames** shows what ran, and the release build keeps symbols for it: `nm target/release/twigo` lists 1,106 `twigo_policy` symbols (2026-11-26, a build of this branch).
+  It cannot show a share this small.
+  `sample` at 1 ms over 20 s of the visible phase's sleep in one run of 2026-11-26 took 598 active samples of the app, 3.0 % of a core, and none had a `twigo_policy` frame; at the estimate of 1.9e-2 % of the core's CPU, one active sample in about 5,300 would.
 
 ## Which WebKit processes are the app's
 
@@ -133,33 +242,50 @@ Measured on 2026-11-01 on an Apple M4 Max (16 cores, 48 GB), macOS 27.0, Docker 
 
 ## Results at 5k pods
 
-`bench/harness.sh` without an argument, four times on 2026-11-07, at 18:08, 18:12, 18:16 and 18:20 UTC, on commit 48bffdd with nothing uncommitted, each on a kind 1.37 cluster with kwok that it created and deleted, with the screen unlocked.
-The first three exited 0; the fourth exited 1, with core RSS at 153 MB ([run to run](#run-to-run)).
+`bench/harness.sh` without an argument, three times in turn on 2026-11-26, at 18:53, 19:03 and 19:13 UTC, on commit e18c118b with nothing uncommitted, each on a kind 1.37 cluster with kwok that it created and deleted, with the screen unlocked; all three exited 0.
 The first run's report:
 
-2026-11-07T18:08Z, Apple M4 Max, 48 GB, macOS 27.2, release build, 48bffdd
-Churn on kwok: 100.0 changes/s over 5000 pods for 148 s, 0 errors, patch p95 3.6 ms
+2026-11-26T18:56Z, Apple M4 Max, 48 GB, macOS 27.2.1, release build, e18c118b, kubectl v1.34.1
+Churn on kwok: 100.0 changes/s over 5000 pods for 425 s, 0 errors, patch p95 3.7 ms
 
-| Metric                                       | Value       | Target   | Status            | What it measured                                                                                                                                                                                                                             |
-| -------------------------------------------- | ----------- | -------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| First paint after the space connects         | 292 ms      | < 1 s    | pass              | the pod list opened in the bench's space → its first rows painted: what remains of the space's discovery, which starts as the space opens, and the list of 5030 pods                                                                         |
-| Change → painted cell, p95                   | 66.4 ms     | < 150 ms | pass              | the churn's patch sent → the new Restarts count painted, for rows on screen over 60 s, joined by pod and count through Unix ms; p50 41.6 ms, max 74.1 ms, n = 146; 0 paints not in the churn's log; 66 offscreen, 0 superseded, 0 timed out  |
-| Scroll and sort: scroll                      | 60.0 fps    | 60 fps   | pass              | requestAnimationFrame over 5 s of programmatic scroll at 4000 px/s; frame p95 17.0 ms, display frame 17.0 ms; rows awaiting data in 0 of 300 frames                                                                                          |
-| Scroll and sort: sort                        | p95 34.0 ms | < 50 ms  | pass              | header click → resorted rows painted, Age↑ Age↓ Namespace↑ Namespace↓ Name↑ Name↓ Restarts↑ Restarts↓; p50 31.0 ms, max 34.0 ms, n = 8                                                                                                       |
-| Core RSS with the pod list open              | 146 MB      | < 150 MB | pass              | resident size of twigo (pid 11818) under churn with the list open, its row store, query view and batcher included, the median of 5 samples                                                                                                   |
-| Webview memory with the pod list open        | 245 MB      | < 300 MB | pass              | resident size of the WebKit processes the app is responsible for but the GPU process (Networking 12 MB, WebContent 234 MB), under churn, the median of 5 samples; 1 other WebKit processes left out                                          |
-| Physical footprint                           | 262 MB      | -        | shown, not judged | the same processes' physical footprint (Networking 6 MB, WebContent 256 MB), the median of 5 samples; it leaves out pages WebKit reused and counts graphics that resident size does not, so it swings between runs (docs/bench.md)           |
-| GPU process                                  | 263 MB      | -        | shown, not judged | physical footprint of the app's WebKit GPU process, the median of 5 samples; any page that repaints holds about 260 MB there, WebKit's pool of IOSurfaces, so it stays out of the budget (docs/bench.md)                                     |
-| Visible CPU, 100 changes/s, window on screen | 10.86 %     | -        | shown, not judged | CPU time of the app and its 3 WebKit processes over 20 s, as a share of one core; sorted by Restarts descending, the rows the churn changes on screen, while the driver sleeps; it swings between runs, so nothing judges it (docs/bench.md) |
-| Idle CPU, 100 changes/s, window hidden       | 1.01 %      | < 2 %    | pass              | CPU time of the app and its 3 WebKit processes over 30 s, as a share of one core; document hidden; hidden, the webview acknowledges no batch, so Rust coalesces the churn and sends nothing                                                  |
+| Metric                                            | Value        | Target   | Status            | What it measured                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------- | ------------ | -------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| First paint after the space connects              | 261 ms       | < 1 s    | pass              | the pod list opened in the bench's space → its first rows painted: what remains of the space's discovery, which starts as the space opens, and the list of 5032 pods                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Change → painted cell, p95                        | 65.6 ms      | < 150 ms | pass              | the churn's patch sent → the new Restarts count painted, for rows on screen over 60 s, joined by pod and count through Unix ms; p50 43.5 ms, max 68.4 ms, n = 77; 0 paints not in the churn's log; 63 offscreen, 0 superseded, 0 timed out                                                                                                                                                                                                                                                                                                                             |
+| Scroll and sort: scroll                           | 60.0 fps     | 60 fps   | pass              | requestAnimationFrame over 5 s of programmatic scroll at 4000 px/s; frame p95 17.0 ms, display frame 17.0 ms; rows awaiting data in 0 of 300 frames                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Scroll and sort: sort                             | p95 30.0 ms  | < 50 ms  | pass              | header click → resorted rows painted, Age↑ Age↓ Namespace↑ Namespace↓ Name↑ Name↓ Restarts↑ Restarts↓; p50 27.0 ms, max 30.0 ms, n = 8                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Core footprint with the pod list open             | 60 MB        | < 70 MB  | pass              | physical footprint of twigo (pid 63924) under churn with the list open, its row store, query view and batcher included, the median of 5 samples                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Resident size                                     | 154 MB       | -        | shown, not judged | the same process's resident size, the median of 5 samples; it adds clean pages of the binary, the frameworks and mapped files, which macOS takes back when it wants, so it swings between runs (docs/bench.md)                                                                                                                                                                                                                                                                                                                                                         |
+| Webview memory with the pod list open             | 266 MB       | < 300 MB | pass              | resident size of the WebKit processes the app is responsible for but the GPU process (Networking 15 MB, WebContent 251 MB), under churn, the median of 5 samples; 3 other WebKit processes left out                                                                                                                                                                                                                                                                                                                                                                    |
+| Physical footprint                                | 251 MB       | -        | shown, not judged | the same processes' physical footprint (Networking 6 MB, WebContent 245 MB), the median of 5 samples; it leaves out pages WebKit reused and counts graphics that resident size does not, so it swings between runs (docs/bench.md)                                                                                                                                                                                                                                                                                                                                     |
+| GPU process                                       | 264 MB       | -        | shown, not judged | physical footprint of the app's WebKit GPU process, the median of 5 samples; any page that repaints holds about 260 MB there, WebKit's pool of IOSurfaces, so it stays out of the budget (docs/bench.md)                                                                                                                                                                                                                                                                                                                                                               |
+| Visible CPU, 100 changes/s, window on screen      | 8.38 %       | -        | shown, not judged | CPU time of the app and its 3 WebKit processes over 20 s, as a share of one core; sorted by Restarts descending, the rows the churn changes on screen, while the driver sleeps; it swings between runs, so nothing judges it (docs/bench.md)                                                                                                                                                                                                                                                                                                                           |
+| Idle CPU, 100 changes/s, window hidden            | 1.00 %       | < 2 %    | pass              | CPU time of the app and its 3 WebKit processes over 30 s, as a share of one core; document hidden; hidden, the webview acknowledges no batch, so Rust coalesces the churn and sends nothing; the sample ended 9.2 s before the window was shown again                                                                                                                                                                                                                                                                                                                  |
+| Core footprint, sessions open                     | 59 MB        | -        | shown, not judged | physical footprint of twigo under churn with the pod list and a shell in pod shell (asked in a dialog: "Open a shell in container shell of pod shell in bench-sessions on kind-twigo-bench?"), a port-forward of coredns-559f6c778d-8vtzh:8080 on localhost:8080 (read once: HTTP 200, 2 bytes), and a zsh terminal (proxy); taken after the window was hidden and shown again and after the four watch windows, once the terminal's watch was stopped with Ctrl-C and its shell was at the prompt; the median of 5 samples; -1 MB against the row with the list alone |
+| Webview memory, sessions open                     | 278 MB       | -        | shown, not judged | resident size of the WebKit processes but the GPU process, the same samples; +12 MB against the row with the list alone                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Visible CPU, sessions open, window on screen      | 3.86 %       | -        | shown, not judged | CPU time of the app and its 3 WebKit processes over 20 s, as a share of one core, with the window on screen, the terminal's watch stopped and its shell at the prompt, 100 changes/s; it swings between runs, so nothing judges it (docs/bench.md)                                                                                                                                                                                                                                                                                                                     |
+| Idle CPU, sessions open, window hidden            | 0.90 %       | -        | shown, not judged | CPU time of the app and its 3 WebKit processes over 30 s, as a share of one core, of which the app process 0.67 %; document hidden; the terminal's watch stopped and its shell at the prompt                                                                                                                                                                                                                                                                                                                                                                           |
+| Terminal watch through the policy proxy: core CPU | 9.96 %       | -        | shown, not judged | CPU time of the app process over 20 s, as a share of one core, while the terminal runs `kubectl get pods -A -w` through the policy proxy, window on screen; 2 windows: 13.55, 6.38 %; the terminal received 11.40, 11.39 KB/s over the sample                                                                                                                                                                                                                                                                                                                          |
+| The same watch straight to the cluster            | 9.37 %       | -        | shown, not judged | the same, with the cluster's own kubeconfig named on the command line, in the same terminal; 2 windows: 12.60, 6.15 %; the terminal received 11.40, 11.34 KB/s over the sample                                                                                                                                                                                                                                                                                                                                                                                         |
+| The policy proxy's share                          | +0.59 %      | -        | shown, not judged | the two rows above subtracted: what the proxy adds to the core, the terminal's output being the same; windows in the order proxy, direct, direct, proxy, so that a drift of the cluster or the page cancels; run to run it swings, so nothing judges it (docs/bench.md)                                                                                                                                                                                                                                                                                                |
+| Gate, share of the core's CPU, steady phase       | about 0.01 % | -        | shown, not judged | an estimate, not a bound: the 241 requests that were not patches which the API server counted in 61 s, whoever sent them, and the 5 polls of the metrics API that it does not count, each at 2013 ns, the higher of the two figures of the dearest class in gate_cost (2013 ns with the caches evicted before the call, 299 ns in a hot loop; both layers, a guarded context, the UI), over the core's 4025 ms of CPU; the churn's patches are the only ones, and the app sends none (docs/bench.md)                                                                   |
 
-The other three: first paint 293, 242 and 295 ms, change → painted cell p95 65.3, 63.7 and 65.5 ms, scroll 60.0 fps, sort p95 38, 32 and 33 ms, core RSS 147, 144 and 153 MB, webview memory 249, 244 and 246 MB, footprint 251, 194 and 196 MB, GPU process 263, 264 and 264 MB, visible CPU 12.11, 12.39 and 12.07 %, idle CPU 1.37, 1.45 and 1.45 %.
+The other two: first paint 261 and 258 ms, change → painted cell p95 65.9 and 65.0 ms, scroll 60.0 and 59.8 fps, sort p95 22 and 29 ms, core footprint 58 and 60 MB with resident size 153 and 149 MB, webview memory 259 and 227 MB with footprint 250 and 195 MB, GPU process 264 and 265 MB, visible CPU 4.65 and 5.32 %, idle CPU 0.89 and 1.27 %; with the sessions open, core footprint 62 and 55 MB, webview memory 259 MB in both, visible CPU 2.97 and 6.10 %, idle CPU 0.68 and 1.05 %, the proxy's share +1.71 and −0.66 %, and the gate's about 0.03 and 0.02 %.
+
+The same app at 2ca95ffa, three runs at 08:49, 08:59 and 09:09 UTC that day, judged the core by resident size, and two of them exited 1 on it, at 153 and 151 MB, with footprints of 59 MB ([why the targets moved](#why-the-targets-moved)).
+
+### At M1's close
+
+`bench/harness.sh` without an argument, four times on 2026-11-07, at 18:08, 18:12, 18:16 and 18:20 UTC, on commit 48bffdd with nothing uncommitted, each on a fresh cluster: the first three exited 0 and the fourth exited 1, with core RSS at 153 MB.
+They read first paint 292, 293, 242 and 295 ms, change → painted cell p95 66.4, 65.3, 63.7 and 65.5 ms, scroll 60.0 fps, sort p95 34, 38, 32 and 33 ms, core RSS 146, 147, 144 and 153 MB, webview memory 245, 249, 244 and 246 MB, footprint 262, 251, 194 and 196 MB, GPU process 263, 263, 264 and 264 MB, visible CPU 10.86, 12.11, 12.39 and 12.07 %, idle CPU 1.01, 1.37, 1.45 and 1.45 %.
 
 On b5aa3f8, with kube 4.2 and the window on top of the desktop, three runs at 13:32, 13:35 and 13:39 UTC exited 0: first paint 292, 244 and 242 ms, change → painted cell p95 63.9, 62.4 and 62.1 ms, scroll 60.0, 60.1 and 60.0 fps, sort p95 33, 33 and 34 ms, core RSS 141, 144 and 142 MB, webview memory 246, 273 and 253 MB, footprint 220, 250 and 180 MB, GPU process 262, 263 and 262 MB, idle CPU 1.30, 1.69 and 1.31 %.
 
 ### Run to run
 
-Ten runs on b5aa3f8's day before the visible window's work: those three, and seven on the code before the batcher's and the decoder's last fixes, at e795d43, four of those with a driver patch that does nothing unless a build variable asks.
+At M2's close, thirteen runs on 2026-11-26 of the code since the sort's, the grid's and the metrics poll's fixes, on fresh clusters and on a kept one: first paint 255 to 262 ms and twice 416 ms, sort p95 22 to 31 ms, core footprint 51 to 60 MB with resident size 142 to 154 MB, webview memory 224 to 270 MB, idle CPU 0.89 to 1.58 %, and in the seven runs that measured it the proxy's share −2.04 to +2.45 %.
+
+At M1's close, ten runs on b5aa3f8's day before the visible window's work: those three, and seven on the code before the batcher's and the decoder's last fixes, at e795d43, four of those with a driver patch that does nothing unless a build variable asks.
 
 - **Idle CPU:** 0.97 to 1.71 %.
   In the six runs whose split was kept, the app took 0.96 to 1.36 %, WebContent 0.10 to 0.42 % and the GPU process 0.05 to 0.16 %.
@@ -173,18 +299,29 @@ Ten runs on b5aa3f8's day before the visible window's work: those three, and sev
 ### What moved them
 
 Each from runs of that day, before and after on the same machine.
+M2's close, the last five rows, compares `4d348ea1` with the step's fixes: five harness runs of it on 2026-11-25 and three of e18c118b on 2026-11-26, on fresh clusters; and on 2026-11-26 three runs each of `--example metrics_memory` on one cluster with 5,000 pods, and two scroll profiles each on the mock.
 
-| Change                                               | Row                                | Before       | After        |
-| ---------------------------------------------------- | ---------------------------------- | ------------ | ------------ |
-| The clock of ages stops while hidden                 | Idle CPU                           | 4.41, 4.44 % | 1.33, 1.32 % |
-| The same                                             | WebContent, idle                   | 2.00, 2.14 % | 0.12, 0.13 % |
-| `natural` compares without allocating                | The first apply of a sort, in Rust | 12.5–17.2 ms | 7.4–11.0 ms  |
-| A row mounts its actions only when they can be used  | Sort p95                           | 45–54 ms     | 32–35 ms     |
-| The same                                             | WebContent's resident size         | 376–707 MiB  | 221–343 MiB  |
-| The same, on the mock in Chromium, over the scroll   | JS allocated                       | 2,616 MB     | 368 MB       |
-| A table's watch event reads in one pass, on a P-core | A line's decoding                  | 9.3 µs       | 2.75 µs      |
+| Change                                               | Row                                | Before        | After         |
+| ---------------------------------------------------- | ---------------------------------- | ------------- | ------------- |
+| The clock of ages stops while hidden                 | Idle CPU                           | 4.41, 4.44 %  | 1.33, 1.32 %  |
+| The same                                             | WebContent, idle                   | 2.00, 2.14 %  | 0.12, 0.13 %  |
+| `natural` compares without allocating                | The first apply of a sort, in Rust | 12.5–17.2 ms  | 7.4–11.0 ms   |
+| A row mounts its actions only when they can be used  | Sort p95                           | 45–54 ms      | 32–35 ms      |
+| The same                                             | WebContent's resident size         | 376–707 MiB   | 221–343 MiB   |
+| The same, on the mock in Chromium, over the scroll   | JS allocated                       | 2,616 MB      | 368 MB        |
+| A table's watch event reads in one pass, on a P-core | A line's decoding                  | 9.3 µs        | 2.75 µs       |
+| A sort changes the view it has, its rows built once  | Sort p95                           | 44–52 ms      | 22–30 ms      |
+| A grid row renders when its data or state changes    | Webview memory                     | 307–351 MB    | 227–266 MB    |
+| The same, on the mock in Chromium                    | JS allocated per scroll frame      | 2.12–2.14 MB  | 1.16 MB       |
+| A metrics poll parses without a list of every item   | A poll's allocations               | 7.23–7.38 MiB | 4.02–4.18 MiB |
+| The three together                                   | Core footprint                     | 66–77 MB      | 58–60 MB      |
 
 The batcher and the kubeconfig debouncer stopped waking without work: 6 and 7 active samples each in 79 and 86 before, 0 and 1 in 75 after, in 6 s of `sample` at 1 ms; the idle row is too noisy to show it.
+
+A bisect over M2's merges, two harness runs of each on one kept cluster on the night of 2026-11-25, found where the misses came from.
+The metrics step (#45) added about 12 ms to every sort and 15 MB to the core's resident size: each new view built its rows twice, in `apply` and again when `set_api` found the Metrics API served.
+The Helm step (#76) added about 55 MB to the webview, as the grid rendered every row of its window on every scroll frame and the step gave each cell more to do.
+No CI job runs the harness ([what is left](#what-is-left)), so the budgets missed through every merge from the one to the other before a run by hand saw them.
 
 ### Why the targets moved
 
@@ -196,6 +333,15 @@ Serhii decided on 2026-11-07, once the waste above was gone:
   Each change is one watch event of 2,373 bytes at the median, 1,680 of them `managedFields`, and a Table comes as JSON or YAML only ([rest.go at v1.37.0](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/rest.go#L144-L150)).
   Going lower takes closing watches while hidden, a product decision, or reading the socket in bursts, which no HTTP/2 client we found ships.
 - **Webview memory, from footprint to resident size**, for the reasons [below](#on-the-rust-path).
+
+And on 2026-11-26, at M2's close, once the sort's double build, the grid's renders per scroll frame and the metrics poll's allocations were gone:
+
+- **Core memory, from resident size under 150 MB to footprint under 70 MB.**
+  Resident size reads 89 to 99 MB above the footprint in every run, clean pages of the binary, the frameworks and mapped files (`vmmap -summary`), which macOS takes back when it wants: in one run it fell from 140 to 115 MiB within two seconds while the footprint did not move.
+  So one code read 142 to 153 MB in ten runs, on 2026-11-26, against the 150 MB the budget allowed; two commits of the same app code, on one cluster six hours apart, read 142 to 144 and 148 to 151 MB.
+  Its footprint read 51 to 59 MB in those ten runs and 66 to 77 MB in seven runs of `4d348ea1`, before the fixes, on 2026-11-25 (`bench/harness.sh`, kind 1.37 clusters with kwok and 5,000 pods, fresh and kept).
+  70 MB leaves about 11 MB above the highest of the ten and fails two of the seven: a regression the size of the metrics step's, 10 to 15 MB, shows on the code of the ten only in part.
+  The webview keeps resident size for the opposite reason: its allocator leaves pages it reused off the footprint ([below](#on-the-rust-path)).
 
 The app's share is not a regression of M1's later steps: 50d1f8f, before them, took 1.25 % in two runs that day, against 0.68 to 0.75 % on 2026-11-02 on macOS 27.0, on PR #21's code.
 macOS 27.2 and the state of the machine were not told apart.
@@ -352,6 +498,7 @@ Measured on 2026-11-07 with WebKit 22625.2.8.11.9, on the commits before a row's
 
 - **20k and 50k pods.**
   The columns of 3.8 need `bench/pods.sh` at those counts; no run has judged them.
+- **The replays of other clients' failures** that [ARCHITECTURE 3.8](ARCHITECTURE.md#38-performance-budgets-and-the-benchmark) lists: none is built.
 - **CI, with the release work.**
   The harness needs a logged-in, unlocked GUI session; whether GitHub's macOS runners give one is not verified.
   Linux needs the sampler's WebKitGTK branch and a display, as `bench/ipc/linux.sh` gets from Xvfb in Docker, whose numbers say nothing about a Linux desktop.

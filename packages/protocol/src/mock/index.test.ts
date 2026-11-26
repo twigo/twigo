@@ -8,6 +8,7 @@ import type {
   ObjectBatch,
   ObjectParts,
   Overview,
+  Row,
   Section,
 } from "../generated";
 import {
@@ -441,6 +442,191 @@ test("a window change flushes at once, without waiting for the next tick", async
   await vi.advanceTimersByTimeAsync(1);
   expect(sub.batches.map((b) => b.seq)).toEqual([1, 2]);
   expect(sub.batches[1]?.window?.start).toBe(100);
+});
+
+type Shape = Pick<
+  ListQuery,
+  "text" | "columns" | "sort" | "countBy" | "groupBy" | "values"
+>;
+
+const PLAIN: Shape = {
+  text: null,
+  columns: null,
+  sort: null,
+  countBy: null,
+  groupBy: null,
+  values: null,
+};
+
+async function viewed(
+  sub: Awaited<ReturnType<typeof open>>,
+  view: number,
+  shape: Shape,
+) {
+  const done = sub.backend.invoke("list_set_view", {
+    id: sub.id,
+    view,
+    ...shape,
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  return done;
+}
+
+function held(batches: readonly ListBatch[]) {
+  const rows = new Map<string, Row>();
+  let ids: readonly string[] = [];
+  let counts: ListBatch["counts"] = null;
+  let groups: ListBatch["groups"] = null;
+  for (const batch of batches) {
+    ids = batch.window?.ids ?? ids;
+    for (const row of batch.upserts) rows.set(row.id, row);
+    counts = batch.counts ?? counts;
+    groups = batch.groups ?? groups;
+  }
+  const shown = ids.map((id) => rows.get(id)?.cells);
+  return { total: last(batches)?.total, ids, shown, counts, groups };
+}
+
+async function windowed(scenario: MockScenario, q: ListQuery = query()) {
+  const sub = await open(scenario, q);
+  await sub.window(0, 20);
+  for (let round = 0; round < 3; round++) {
+    await vi.advanceTimersByTimeAsync(100);
+    await sub.ack();
+  }
+  return sub;
+}
+
+test("a view changed in place has the rows a list opened with it has, and its first batch names the view", async () => {
+  const shapes: [string, Partial<Shape>][] = [
+    ["a sort", { sort: { column: "Name", descending: true } }],
+    ["a text", { text: "CrashLoopBackOff" }],
+    ["a text over Namespace", { text: "kube-system" }],
+    ["a count", { countBy: "Status" }],
+    [
+      "a grouping with a collapsed group",
+      {
+        groupBy: { column: "Status", collapsed: ["Running"] },
+        countBy: "Status",
+      },
+    ],
+    [
+      "values",
+      { countBy: "Status", values: { column: "Status", values: ["Error"] } },
+    ],
+    [
+      "a text over a column the choices hide",
+      { text: "kube-system", columns: { Namespace: false } },
+    ],
+  ];
+  for (const [what, change] of shapes) {
+    const shape = { ...PLAIN, ...change };
+    const expected = held((await windowed("ready", query(shape))).batches);
+    const sub = await windowed("ready");
+    const before = sub.batches.length;
+    await viewed(sub, 1, shape);
+    await vi.advanceTimersByTimeAsync(1);
+    const answer = sub.batches[before];
+    expect(answer?.view, what).toBe(1);
+    expect(sub.batches.length, `${what}: one batch`).toBe(before + 1);
+    expect(answer?.columns, `${what}: the columns stay`).toBeNull();
+    expect(held(sub.batches), what).toEqual(expected);
+    expect(expected.total === 0, `${what}: ${String(expected.total)}`).toBe(
+      change.columns !== undefined,
+    );
+  }
+});
+
+test("a view change flushes at once, and one that changes nothing still answers with its number", async () => {
+  const sub = await windowed("ready");
+  const before = last(sub.batches);
+  expect(before?.view).toBe(0);
+  await viewed(sub, 1, PLAIN);
+  await vi.advanceTimersByTimeAsync(1);
+  const answer = last(sub.batches);
+  expect(answer?.seq).toBe((before?.seq ?? 0) + 1);
+  expect(answer?.view).toBe(1);
+  expect(answer?.window).toBeNull();
+  expect(answer?.upserts).toEqual([]);
+});
+
+test("view changes that come while a batch waits go out with the ack, as one that names the last", async () => {
+  const sub = await open("ready");
+  await sub.window(0, 5);
+  await vi.advanceTimersByTimeAsync(100);
+  const waiting = last(sub.batches)?.seq;
+  await viewed(sub, 1, { ...PLAIN, text: "payments" });
+  await viewed(sub, 2, {
+    ...PLAIN,
+    sort: { column: "Name", descending: true },
+  });
+  await vi.advanceTimersByTimeAsync(500);
+  expect(last(sub.batches)?.seq, "it waits for the ack").toBe(waiting);
+  await sub.ack();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(last(sub.batches)?.seq).toBe((waiting ?? 0) + 1);
+  expect(last(sub.batches)?.view).toBe(2);
+  expect(last(sub.batches)?.total, "the first change was never sent").toBe(
+    POD_COUNT["prod-eu"],
+  );
+});
+
+test("a text that does not parse is refused and the view stays as it was", async () => {
+  const sub = await windowed("ready");
+  const seq = last(sub.batches)?.seq;
+  const refused = expect(
+    sub.backend.invoke("list_set_view", {
+      id: sub.id,
+      view: 1,
+      ...PLAIN,
+      text: "/(/",
+    }),
+  ).rejects.toMatchObject({ code: "filter.invalid-regex" });
+  await vi.advanceTimersByTimeAsync(0);
+  await refused;
+  await vi.advanceTimersByTimeAsync(200);
+  expect(last(sub.batches)?.seq, "no batch for it").toBe(seq);
+  await viewed(sub, 2, { ...PLAIN, text: "/^web/" });
+  await vi.advanceTimersByTimeAsync(1);
+  expect(last(sub.batches)?.view).toBe(2);
+});
+
+test("a list of Helm releases changes its view in place as any list", async () => {
+  const backend = createMockBackend("ready");
+  const batches: ListBatch[] = [];
+  const pending = backend.subscribe(
+    "helm_list_subscribe",
+    { space: "prod-eu", namespaces: [], ...PLAIN },
+    (b) => batches.push(b),
+  );
+  await vi.advanceTimersByTimeAsync(0);
+  const id = await pending;
+  const windowed = backend.invoke("list_set_window", {
+    id,
+    start: 0,
+    end: 50,
+    metrics: false,
+  });
+  await vi.advanceTimersByTimeAsync(50);
+  await windowed;
+  const total = last(batches)?.total ?? 0;
+  expect(total).toBeGreaterThan(1);
+  const acked = backend.invoke("list_ack", {
+    id,
+    seq: last(batches)?.seq ?? 0,
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  await acked;
+  const changed = backend.invoke("list_set_view", {
+    id,
+    view: 1,
+    ...PLAIN,
+    text: "alpha",
+  });
+  await vi.advanceTimersByTimeAsync(1);
+  await changed;
+  expect(last(batches)?.view).toBe(1);
+  expect(last(batches)?.total).toBeLessThan(total);
 });
 
 test("with a rate, a live list changes that many pods a second and no more", async () => {

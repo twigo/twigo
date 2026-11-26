@@ -3,11 +3,13 @@ import { cn } from "../lib/cn";
 import type { Tone } from "../lib/tone";
 import { StatusDot } from "./status-dot";
 
-const TEXT: Readonly<Record<Tone, string>> = {
-  error: "text-error",
-  warn: "text-warn-foreground",
-  ok: "",
-  idle: "",
+const WORD = "inline-flex min-w-0 items-center gap-1.5";
+
+const ROOT: Readonly<Record<Tone, string>> = {
+  error: `${WORD} text-error`,
+  warn: `${WORD} text-warn-foreground`,
+  ok: WORD,
+  idle: WORD,
 };
 
 /**
@@ -30,13 +32,7 @@ export function StatusLabel({
   children: ReactNode;
 }) {
   return (
-    <span
-      className={cn(
-        "inline-flex min-w-0 items-center gap-1.5",
-        TEXT[tone],
-        className,
-      )}
-    >
+    <span className={className ? cn(ROOT[tone], className) : ROOT[tone]}>
       <StatusDot tone={tone} pulse={pulse} hollow={hollow} />
       <span className="truncate">{children}</span>
     </span>

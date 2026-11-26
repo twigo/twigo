@@ -1275,8 +1275,9 @@ impl<T: Item> Subscription<T> {
     /// show, and the state and parts that say which these are. It looks at
     /// each part once, so what it returns agrees: a part's rows show once
     /// it has listed and while it is not refused, whatever the others are,
-    /// and a part that starts or stops showing resets the drain.
-    pub fn drain_shown(&self) -> Shown<T> {
+    /// and a part that starts or stops showing resets the drain. With `all`,
+    /// every row of the parts that show comes, as after a relist.
+    pub fn drain_shown(&self, all: bool) -> Shown<T> {
         let mut parts = self.inner.parts();
         let looks: Vec<(ViewState, bool)> = parts
             .iter()
@@ -1286,7 +1287,7 @@ impl<T: Item> Subscription<T> {
                 (state, shown)
             })
             .collect();
-        let mut flipped = false;
+        let mut flipped = all;
         for (part, (_, shown)) in parts.iter_mut().zip(&looks) {
             flipped |= part.showing != *shown;
             part.showing = *shown;

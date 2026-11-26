@@ -4,8 +4,8 @@ Twigo is an open-source desktop IDE for Kubernetes: native, fast and keyboard-fi
 It aims to show the person who runs many clusters what is wrong, why, and what changed, from the keyboard, with every change guarded (D13).
 This document fixes the architecture; the M0 spikes in `docs/spikes/` correct it wherever they measured otherwise.
 
-- Status: M0 in progress, steps 1 to 5 done, steps 6 and 7 in review, 2026-11-01
-- Stack: Tauri 2 (2.12.x), Rust with kube-rs (5.0.x, k8s-openapi 0.29), React 19 + TypeScript, Tailwind 4, shadcn/ui, pnpm monorepo
+- Status: M2 in progress, its last step, the budgets at 5k pods (3.8), under way, 2026-11-26
+- Stack: Tauri 2 (2.12.x), Rust with kube-rs (5.1.x, k8s-openapi 0.29), React 19 + TypeScript, Tailwind 4, shadcn/ui, pnpm monorepo
 - Reference code: the retired NATS IDE at `6ee327f`, whose history survives only in a local checkout; section 1 maps what carries over
 
 ## 0. Context
@@ -50,7 +50,8 @@ Decisions taken with the owner on 2026-11-14, after the [strategic review](revie
 3. **Safe by default.**
    The read-only lock, dry-run diffs and approvals are enforced in Rust at one point.
    The UI, extensions and the MCP server always go through it.
-   Child processes get a policy proxy, which guards against accidents but is not a security boundary (6.4).
+   A terminal goes through a policy proxy where its context is not read-write when it starts, or the admin's policy file says so, and runs with the person's own kubeconfig on a read-write context.
+   The proxy guards against accidents but is not a security boundary (6.4).
 4. **An open core that names no vendor.**
    The core never mentions Segla or any cloud.
    Providers attach only through the extension API.
@@ -64,20 +65,20 @@ Decisions taken with the owner on 2026-11-14, after the [strategic review](revie
 
 The sources are in the appendix.
 
-| Their problem                                                                                                                                           | Seen in                                            | Twigo's answer                                                                                                                                                |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Login wall, paid tiers for basics (hotbar, MCP, extensions), closed source                                                                              | Lens since 2023                                    | Apache-2.0, no account, every core feature free (0.2)                                                                                                         |
-| Full list of every kind with no `limit`; one watch per namespace; a full app instance per open cluster (iframes)                                        | Freelens / OpenLens                                | Shared, ref-counted Table watches per GVR and scope (per namespace, widened above 4 namespaces); one webview; per-cluster budgets (3.2)                       |
-| Unbatched global events per watch event; full snapshot per change; merge on the UI thread                                                               | Kubeli, srelens, Aptakube                          | Rust coalesces, sorts and windows; one Channel per view; acks for flow control (3.5)                                                                          |
-| Hangs with "All namespaces" on 30k pods; eager metrics on huge lists                                                                                    | Aptakube #499                                      | Rust owns sort, filter and window; metrics only for the rows in view, polled by a poller of its own (3.4, 3.6)                                                |
-| Freezes on big ConfigMaps                                                                                                                               | Aptakube #575                                      | Large values rendered lazily (3.6)                                                                                                                            |
-| Exec plugins not found from a Dock launch; kubelogin re-run every 30 s, opening browser tabs; device codes lost; plugins run for every context at start | Lens #7956, Headlamp #7879, Freelens < 2.0         | Login-shell environment, a credential runner of our own: timeout, single-flight, no retry loops, visible prompts; connect only on space activation (6.1, 6.2) |
-| Empty views after a fixed cache-sync timeout                                                                                                            | k9s PR #4023                                       | Typed view states: `syncing / ready / relisting / forbidden / unauthorized / error` (3.7)                                                                     |
-| Port-forwards tied to one pod; no failover behind a Service; random pod names restored                                                                  | k9s, Aptakube #384, #519                           | Forward targets are Services or workloads, their pods read through EndpointSlices, and a new pod is taken when the current one leaves (4.6)                   |
-| Extension API removed, rewritten or put behind a paywall; extensions break with each host React/MobX bump                                               | Lens 2024.9 and 2026.10, Freelens 2.0              | Versioned WIT kept side by side (Zed), no host libraries shared as implicit API, a fixture extension in CI (5.3)                                              |
-| In-process plugins with no boundary; malware in plugin stores                                                                                           | Headlamp, Backstage, Obsidian, VS Code (GlassWorm) | WASM sandbox, capabilities declared and granted, signed packages, nothing executes in the workbench DOM (5.3, 5.6)                                            |
-| A local proxy that breaks SOCKS, bastion and corporate proxies                                                                                          | Freelens #766, Lens #6063                          | No proxy in the UI path. The core talks to the API server directly through the kubeconfig proxy settings (6.3)                                                |
-| Projects that died with their only sponsor                                                                                                              | Octant, Monokle, Kubernetic, Seabird               | Vendor-neutral core; Segla is an extension, not a dependency (0.2)                                                                                            |
+| Their problem                                                                                                                                           | Seen in                                            | Twigo's answer                                                                                                                                                                                                          |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Login wall, paid tiers for basics (hotbar, MCP, extensions), closed source                                                                              | Lens since 2023                                    | Apache-2.0, no account, every core feature free (0.2)                                                                                                                                                                   |
+| Full list of every kind with no `limit`; one watch per namespace; a full app instance per open cluster (iframes)                                        | Freelens / OpenLens                                | Shared, ref-counted Table watches per GVR and scope (per namespace, widened above 4 namespaces); one webview; per-cluster budgets (3.2)                                                                                 |
+| Unbatched global events per watch event; full snapshot per change; merge on the UI thread                                                               | Kubeli, srelens, Aptakube                          | Rust coalesces, sorts and windows; one Channel per view; acks for flow control (3.5)                                                                                                                                    |
+| Hangs with "All namespaces" on 30k pods; eager metrics on huge lists                                                                                    | Aptakube #499                                      | Rust owns sort, filter and window; metrics only for the namespaces of the rows in view, or of the whole list while it is sorted by CPU or Memory, and the cluster's for nodes, polled by a poller of its own (3.4, 3.6) |
+| Freezes on big ConfigMaps                                                                                                                               | Aptakube #575                                      | Large values rendered lazily (3.6)                                                                                                                                                                                      |
+| Exec plugins not found from a Dock launch; kubelogin re-run every 30 s, opening browser tabs; device codes lost; plugins run for every context at start | Lens #7956, Headlamp #7879, Freelens < 2.0         | Login-shell environment, a credential runner of our own: timeout, single-flight, no retry loops, visible prompts; connect only on space activation (6.1, 6.2)                                                           |
+| Empty views after a fixed cache-sync timeout                                                                                                            | k9s PR #4023                                       | Typed view states: `syncing / ready / relisting / forbidden / unauthorized / error` (3.7)                                                                                                                               |
+| Port-forwards tied to one pod; no failover behind a Service; random pod names restored                                                                  | k9s, Aptakube #384, #519                           | Forward targets are pods, Services or workloads, a Service's pods read through its EndpointSlices and a workload's from the Ready pods it controls, and a new pod is taken when the current one leaves (4.6)            |
+| Extension API removed, rewritten or put behind a paywall; extensions break with each host React/MobX bump                                               | Lens 2024.9 and 2026.10, Freelens 2.0              | Versioned WIT kept side by side (Zed), no host libraries shared as implicit API, a fixture extension in CI (5.3)                                                                                                        |
+| In-process plugins with no boundary; malware in plugin stores                                                                                           | Headlamp, Backstage, Obsidian, VS Code (GlassWorm) | WASM sandbox, capabilities declared and granted, signed packages, nothing executes in the workbench DOM (5.3, 5.6)                                                                                                      |
+| A local proxy that breaks SOCKS, bastion and corporate proxies                                                                                          | Freelens #766, Lens #6063                          | No proxy in the UI path. The core talks to the API server directly through the kubeconfig proxy settings (6.3)                                                                                                          |
+| Projects that died with their only sponsor                                                                                                              | Octant, Monokle, Kubernetic, Seabird               | Vendor-neutral core; Segla is an extension, not a dependency (0.2)                                                                                                                                                      |
 
 Worth taking:
 
@@ -102,8 +103,8 @@ Everything NATS-specific goes.
 | Monorepo tooling: `pnpm-workspace.yaml`, `tsconfig.base.json`, `eslint.config.js` (incl. the boundary rule), Prettier, husky + commitlint, `cliff.toml`, Dependabot, `.github/workflows/ci.yml` and `pr-title.yml`, issue/PR templates, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT | root                                    | The boundary rule changes its target: the workbench must not import `packages/kube`.                                                                                                                                                                                                            |
 | `.github/workflows/release.yml`, `RELEASING.md`, `apps/twigo/scripts/set-version.mjs`                                                                                                                                                                                           | root, `apps/desktop/scripts`            | The tauri-action matrix (macOS arm64 and x64, Linux on ubuntu-22.04), notarization secrets, updater signing, a draft release with `latest.json`. **Use the bundle identifier `io.twigo.ide` and a new updater key (D10)**, so the two apps share no app-data directory or single-instance lock. |
 | Tauri plugin set (`src-tauri/src/lib.rs`): single-instance (registered first) and window-state now; updater, process, opener and dialog with the features that call them                                                                                                        | `apps/desktop/src-tauri`                | Window chrome stays: `titleBarStyle: Overlay`, `trafficLightPosition`, and the strict CSP.                                                                                                                                                                                                      |
-| `libs/ui` (shadcn components, `theme.css` tokens, sparkline, `cn`)                                                                                                                                                                                                              | `packages/ui`                           | It is the base of the design system (4.9). `code-viewer` (CodeMirror) is replaced by Monaco.                                                                                                                                                                                                    |
-| `apps/twigo/src/index.css`: typography (Inter `cv01`/`ss03`, weights 510/590, 13 px base, tabular numbers) and the dockview tab skin (selected-tab chip, no underline)                                                                                                          | `packages/ui`, `packages/workbench`     | The rest of the design language (4.9).                                                                                                                                                                                                                                                          |
+| `libs/ui` (shadcn components, `theme.css` tokens, `cn`)                                                                                                                                                                                                                         | `packages/ui`                           | It is the base of the design system (4.9). The sparkline was not carried over. `code-viewer` (CodeMirror) is replaced by Monaco.                                                                                                                                                                |
+| `apps/twigo/src/index.css`: typography (Inter `cv01`/`ss03`, weights 510/590, 13 px base, tabular numbers) and the dockview tab skin (selected-tab chip, no underline)                                                                                                          | `packages/ui`, `packages/workbench`     | Replaced, not carried over: the platform's UI font, with `ss06` for identifiers on macOS, weights 400 and 600, 13 px body text and the bundled JetBrains Mono, and a connected active tab (4.9).                                                                                                |
 | `ErrorBoundary`, `PanelBoundary`, `store/zoom.ts`, `store/commandHistory.ts`, `lib/updater.ts` + `store/updateCheck.ts`, `shell/menu.ts` (native menu built from commands), `lib/appVersion.ts`                                                                                 | `packages/workbench`                    | `menu.ts` changes: it is built from the menu registry (5.1), not a hand-written list. `store/zoom.ts` became `src/zoom.ts`, which keeps the factor in the app's state while `apps/desktop` applies it (4.1).                                                                                    |
 | Typed IPC errors: Rust `Error::kind` + TS `IpcError` (`lib/api.ts`, `nats/error.rs`)                                                                                                                                                                                            | `crates/twigo-ipc`, `packages/protocol` | Error codes and kinds are generated from Rust instead of written by hand ([decision](decisions/error-codes.md)).                                                                                                                                                                                |
 | Bounded coalescing with a `dropped` counter (`nats/subscription.rs`)                                                                                                                                                                                                            | `twigo-sessions` (logs)                 | The same rule holds: never lose data silently, show the gap.                                                                                                                                                                                                                                    |
@@ -124,7 +125,7 @@ Everything NATS-specific goes.
 | `components/views/VirtualTree.tsx`, `components/editor/MessageTable.tsx` (TanStack Virtual)              | Explorer tree, resource table                                                     | The table becomes window-driven: Rust sends only the visible window (3.4).                                                                                                                                                                                  |
 | `store/connScoped.ts` (teardown registry)                                                                | Space and context teardown registry                                               | Same pattern, keyed by context.                                                                                                                                                                                                                             |
 | Connection manager UX (`ConnectionPicker`, `ConnectionSwitcher`, import and write-back of NATS contexts) | Cluster catalog (5.5)                                                             | Same promise: **read what the CLI already has**, here the kubeconfig. Twigo never writes the kubeconfig except through explicit commands.                                                                                                                   |
-| `emit.rs` (global events)                                                                                | Channels per subscription + a few typed global events                             | Tauri documents its events as "not designed for low latency or high throughput".                                                                                                                                                                            |
+| `emit.rs` (global events)                                                                                | Channels per subscription and per follower                                        | Tauri documents its events as "not designed for low latency or high throughput", so Twigo uses none.                                                                                                                                                        |
 | `components/workbench/Toaster.tsx` + `store/toasts.ts`                                                   | `Toast` and `notify` in `packages/ui`; the shell mounts `<Toaster>`               | sonner positions, stacks and times the toasts, so the hand-written store goes; the look and the lifetimes stay, and a repeat with the same key replaces its toast                                                                                           |
 
 ### Drop
@@ -152,13 +153,15 @@ Everything NATS-specific goes.
 │ twigo-log       diagnostics log (twigo.log) · panic hook · the audit log's file       │
 │ twigo-panic     supervisor of the app-wide duties · what ends an item · the seam      │
 │                                                                                       │
-│ twigo-core      spaces · settings · catalog · command bus · policy proxy · approval   │
-│                 broker · state                                                        │
+│ twigo-core      spaces · catalog · command bus and its actions · policy proxy ·       │
+│                 approval broker · port-forward manager · state                        │
 │  ├─ twigo-kube      kubeconfig source · client factory · credential runner            │
-│  │                  discovery + OpenAPI cache · operations (apply, scale, drain…)     │
+│  │                  discovery + OpenAPI cache · the apply configuration of an edit    │
 │  │                  └─ policy layer (tower) ◄── twigo-policy: modes · approval · audit│
 │  ├─ twigo-cache     watch hub: upstream watches → row stores → query views → batcher  │
-│  ├─ twigo-sessions  logs · exec/attach · port-forward manager · local pty             │
+│  ├─ twigo-sessions  logs · exec/attach · a port-forward's data path · local pty       │
+│  ├─ twigo-describe  Overview documents of objects · pure                              │
+│  ├─ twigo-helm      Helm releases read from their Secrets · pure                      │
 │  ├─ twigo-ext-host  wasmtime, one store per extension · capability gate · registry    │
 │  ├─ twigo-mcp       MCP server (rmcp) on a per-user local socket                      │
 │  └─ twigo-env       login-shell environment for every child process                   │
@@ -203,7 +206,7 @@ The hook of `twigo-log` records every panic first (4.10).
   An answer that comes once Twigo has begun to end does nothing, so an exit never turns into a restart.
 - **A joined task's panic** goes on as it was (`twigo_panic::joined`, and `twigo_panic::blocking` for a closure on the blocking pool), so the hook records it once.
 - **The rest** is left to tokio, and the hook's record is all its panic leaves: among it the forward's pump, whose row then stops changing, the discovery follower, the metrics poll, a credential plugin's run, whose status stays `running`, the sign-in and fingerprint followers, the terminals' kubeconfig watcher threads, the per-window followers and the proxy's connections.
-- `TWIGO_PANIC=<name>` makes the duty or the item of that name panic each time it runs, and the kubeconfig watch at each change of its files, in a build with the app's `inject` feature, which turns on `twigo-panic`'s and which a release build never has: the names are the duties above, `supervisor`, `forward restore`, `list`, `helm releases`, `helm release`, `helm decode`, `object`, `logs`, `log stream`, `pod shell`, `terminal`, `forward`, `forward recheck`, `hub upstream`, `store lock`, `plan run`, `command`, `policy proxy`, `proxy relock`, and the threads `state writer` and `kubeconfig watch`.
+- `TWIGO_PANIC=<name>` makes the duty or the item of that name panic each time it runs, and the kubeconfig watch at each change of its files, in a build with the app's `inject` feature, which turns on `twigo-panic`'s and which a release build never has: the names are `catalog sources`, `seen contexts`, `terminal offers`, `unlock expiry`, `forward modes` and, where the app gives a network watch, `network` for the duties, then `supervisor`, `forward restore`, `list`, `helm releases`, `helm release`, `helm decode`, `object`, `logs`, `log stream`, `pod shell`, `terminal`, `forward`, `forward recheck`, `hub upstream`, `store lock`, `plan run`, `command`, `policy proxy`, `proxy relock`, and the threads `state writer` and `kubeconfig watch`.
 
 A wasmtime trap ends the extension call, not the app.
 Each webview is already a separate OS process managed by the system.
@@ -211,8 +214,9 @@ The only extra processes Twigo needs are the ones it must run anyway: exec plugi
 
 **Multiple windows.**
 One core process serves every window.
-List subscriptions are keyed by `(window, view)`, so a window reaches only its own, and closing or reloading it drops them: a page that starts to load has none of the lists of the page it replaces.
-The followers of the catalog, the credentials, the resources, the shell and the keyboard are kept one per window, replaced when its next page subscribes and dropped with the window.
+Every subscription of a window, its lists, open objects and releases, logs sessions, shells and terminals, plans, asks and offers, is keyed by the window, so a window reaches only its own, and closing or reloading it ends them: its asks are denied, and a page that starts to load has none of the page it replaces.
+Port-forwards outlive windows: a window that goes stops following them, and they run on.
+The followers of the catalog, the credentials, the resources, the shell, the keyboard, Twigo's own problems, the asks, the forwards and the terminals' offers are kept one per window, replaced when its next page subscribes and dropped with the window.
 A send ends a follower only when it fails, which Tauri 2.12.7 does only once the event loop is gone: a reloaded page and a closed window both take it ([`Channel`](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.7/crates/tauri/src/ipc/channel.rs#L428-L438), [`send_user_message`](https://github.com/tauri-apps/tauri/blob/tauri-runtime-wry-v2.12.5/crates/tauri-runtime-wry/src/lib.rs#L259-L276)).
 Detached editor windows (VS Code's auxiliary windows) come after the MVP.
 
@@ -222,11 +226,11 @@ Detached editor windows (VS Code's auxiliary windows) come after the MVP.
 twigo/
 ├─ apps/desktop/              Tauri app: thin glue; src-tauri only wires crates into commands/channels
 ├─ crates/
-│  ├─ twigo-core/             app services: spaces, settings layers, catalog, command bus and its actions, policy proxy and approval broker
-│  ├─ twigo-kube/             contexts, client factory, credential runner, discovery/OpenAPI cache
+│  ├─ twigo-core/             app services: spaces, catalog, state store, command bus and its actions, policy proxy and approval broker, open objects and Helm releases, the port-forward manager, the terminals' kubeconfigs and their offers, the problem report; settings layers later (4.8)
+│  ├─ twigo-kube/             contexts, client factory, credential runner, discovery/OpenAPI cache, the apply configuration of an edit (6.5)
 │  ├─ twigo-cache/            watch hub (upstreams, row stores, query views, batching), the discovery it follows, the metrics poller
 │  ├─ twigo-describe/         describers by GroupKind: an object and its related facts → the Overview document (4.3)
-│  ├─ twigo-sessions/         logs, exec/attach, port-forward manager, pty terminal
+│  ├─ twigo-sessions/         logs, exec/attach, a port-forward's data path, pty terminal
 │  ├─ twigo-policy/           read-only modes, authorize(), what an approval covers, audit log, redaction
 │  ├─ twigo-quantity/         Kubernetes resource quantities: the describers and the metrics poller read them alike
 │  ├─ twigo-env/              login-shell environment resolution
@@ -235,9 +239,9 @@ twigo/
 │  ├─ twigo-ipc/              protocol types (serde) + TS codegen (ts-rs); channel framing
 │  ├─ twigo-keyboard/         active keyboard layout and its changes, from TIS, xkbcommon and ToUnicodeEx
 │  ├─ twigo-netmon/           wake from sleep and network changes, from IOKit, SystemConfiguration, logind and rtnetlink
-│  ├─ twigo-ext-host/         wasmtime host, manifests, capability enforcement, registry client
-│  ├─ twigo-ext-api/          WIT package `twigo:extension` (versioned dirs) + Rust guest SDK
-│  ├─ twigo-mcp/              MCP server + `twigo mcp` stdio shim
+│  ├─ twigo-ext-host/         empty until the extension runtime (7.2): wasmtime host, manifests, capability enforcement, registry client
+│  ├─ twigo-ext-api/          empty until the extension runtime (7.2): WIT package `twigo:extension` (versioned dirs) + Rust guest SDK
+│  ├─ twigo-mcp/              empty until M3 (7.4): MCP server + `twigo mcp` stdio shim
 │  └─ twigo-helm/             Helm releases read from their Secrets: decoded, described, their secret-grade parts masked; CLI bridge later
 ├─ packages/
 │  ├─ ui/                     design system (from legacy libs/ui)
@@ -245,7 +249,7 @@ twigo/
 │  ├─ kube/                   explorer, resource tables, resource editors, YAML/diff, logs, terminal views
 │  ├─ protocol/               generated TS types + typed invoke/channel client + mock backend
 │  └─ utils/
-├─ extensions/                first-party extensions built on the public API (fixture + dogfood)
+├─ extensions/                later (7.2): first-party extensions built on the public API (fixture + dogfood)
 ├─ bench/                     kind/kwok cluster scripts, perf harness (harness.sh)
 │  ├─ harness/                twigo-bench: churn generator, process sampler, report
 │  └─ ipc/                    IPC bench: the isolation pattern's cost, the tier-2 frame probe
@@ -263,8 +267,8 @@ Why these crates:
   `twigo-kube` builds its gate into every client, so the crate holds no Kubernetes client of its own.
   What an approval covers is its too, while the policy proxy's server and the approval broker live in `twigo-core`, since they need the context's clients and the windows.
 - `twigo-log` holds what logging needs once, so no crate sets up a subscriber of its own: the rotating file that both the diagnostics log and the audit log write through, the subscriber with its run-time filter, the panic hook, the facts of a run and the list of the problems of Twigo's own files (4.10), which is why it depends on `twigo-ipc` for `IpcError`.
-  Every other crate logs through `tracing`, and depends on `twigo-log` for no more than a repeated failure's count and the problems it reports.
-- `twigo-panic` holds what containing a panic needs once, so the crates that spawn an item or join a task do not each write it: it depends on no other crate of Twigo, and `twigo-kube`, `twigo-cache`, `twigo-sessions` and `twigo-core` use it.
+  Every other crate logs through `tracing` and takes from `twigo-log` no more than a repeated failure's count and the problems it reports, except `twigo-policy`, whose audit log writes through the rotating file, and `twigo-core`, whose problem report reads the facts of a run and the places of panics.
+- `twigo-panic` holds what containing a panic needs once, so the crates that spawn an item or join a task do not each write it: it depends on no other crate of Twigo, and `twigo-kube`, `twigo-cache`, `twigo-sessions`, `twigo-core` and the app use it.
 - `twigo-keyboard` keeps the OS's keyboard APIs out of `apps/desktop`.
   It needs no Tauri, and its tests read named layouts without a window.
 - `twigo-netmon` keeps the OS's power and network notifications out of the transport, which only learns that the machine woke or the network changed.
@@ -274,15 +278,15 @@ It translates Tauri commands and channels into calls on `twigo-core`.
 
 ### 2.3 Frontend packages
 
-| Package              | Owns                                                                                                                                                                                                                                                                                                                                                             | May import                    |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
-| `packages/ui`        | Tokens, and primitives (shadcn/Radix) for every recurring pattern: actions and their menus, tones and status dots, counts, keys, fields, segmented controls, view switches (`TabBar`), the data grid, the tree, the line list and styled text, the histogram, property lists, sections, callouts and banners, toasts (`notify`), empty, loading and error states | —                             |
-| `packages/workbench` | Layout parts and the panel's own dockview, contribution registries, command, menu, keybinding and context-key services, the list service and its `list.*` commands, quick access, the toaster and notification centre (4.7), settings UI, spaces UI, editor service over the editor area and the panel                                                           | `ui`, `protocol`              |
-| `packages/kube`      | Every Kubernetes view and editor, column rules and cells, status entries; registers into the workbench registries                                                                                                                                                                                                                                                | `ui`, `workbench`, `protocol` |
-| `packages/protocol`  | Generated request and response types, a channel client with seq/ack, and a **mock backend** that runs the UI in a plain browser on fixtures (design reviews, component tests)                                                                                                                                                                                    | —                             |
-| `packages/utils`     | Pure helpers without React or IPC, such as formatters                                                                                                                                                                                                                                                                                                            | —                             |
-| `apps/desktop/src`   | Bootstraps the workbench, registers `kube`, and applies the interface zoom to the webview (`zoom.ts`)                                                                                                                                                                                                                                                            | all                           |
-| `apps/desktop/bench` | The bench mode's entry and driver, built only by `vite build --mode bench` ([bench](bench.md))                                                                                                                                                                                                                                                                   | all                           |
+| Package              | Owns                                                                                                                                                                                                                                                                                                                                                                                                                                                           | May import                    |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `packages/ui`        | Tokens, and primitives (shadcn/Radix) for every recurring pattern: actions and their menus, tones and status dots, counts, keys, fields, segmented controls, view switches (`TabBar`), the data grid, the tree, the line list and styled text, the histogram, property lists, sections, callouts and banners, toasts (`notify`), empty, loading and error states                                                                                               | —                             |
+| `packages/workbench` | Layout parts and the panel's own dockview, contribution registries, command, menu, keybinding and context-key services, the list service and its `list.*` commands, quick access, the command bus's friction, countdowns and undo, the asks of the approval broker, the toaster (4.7), Twigo's own problems and Report a Problem (4.10), spaces UI, editor service over the editor area and the panel; the notification centre (4.7) and the settings UI later | `ui`, `protocol`              |
+| `packages/kube`      | Every Kubernetes view and editor, column rules and cells, status entries; registers into the workbench registries                                                                                                                                                                                                                                                                                                                                              | `ui`, `workbench`, `protocol` |
+| `packages/protocol`  | Generated request and response types, a channel client with seq/ack, and a **mock backend** that runs the UI in a plain browser on fixtures (design reviews, component tests)                                                                                                                                                                                                                                                                                  | —                             |
+| `packages/utils`     | Pure helpers without React or IPC, such as formatters                                                                                                                                                                                                                                                                                                                                                                                                          | —                             |
+| `apps/desktop/src`   | Bootstraps the workbench, registers `kube`, and applies the interface zoom to the webview (`zoom.ts`)                                                                                                                                                                                                                                                                                                                                                          | all                           |
+| `apps/desktop/bench` | The bench mode's entry and driver, built only by `vite build --mode bench` ([bench](bench.md))                                                                                                                                                                                                                                                                                                                                                                 | all                           |
 
 Every package may import `utils`.
 The ESLint boundary rule from legacy now enforces the whole table; above all, `workbench` must not import `kube`.
@@ -295,25 +299,25 @@ Contributions are data that the workbench renders, menus become `ui` actions thr
 
 ```
 kube-apiserver
-  │ Table list/watch           single-object GET + watch      metadata watch
+  │ Table list/watch           single-object list + watch     metadata watch
   │ (as=Table, includeObject=  (editor open)                  (namespaces, CRDs, APIServices,
   │  Metadata)                                                 owner index)
   ▼
 Upstream  (context × GVR × scope × server-side selectors)   ref-counted · linger 60 s · per-cluster budget
   │ decode rows; managedFields skipped at deserialisation; typed cells
   ▼
-RowStore  uid → Row { meta-lite (name, ns, uid, rv, labels, owners, created, received), cells[] }
+RowStore  uid → Row { meta-lite (name, ns, uid, rv, labels, owners, created, received, generated), cells[] }
   │ change set
   ▼
 QueryView  (per subscription: namespaces, label filter, text filter, values, groupBy, sort, window)   incremental ordered index
   │ window diff
   ▼
 Batcher   coalesce by uid · flush ≤ 50 ms · one unacked batch · paused while hidden
-  │ Channel (JSON): { seq, total, columns?, window?:{start, ids}, upserts, status, groups? }
+  │ Channel (JSON): { seq, view, total, columns?, window?:{start, ids}, upserts, status, parts?, counts?, groups?, metrics? }
   ▼
 View store (frontend)   Map<id, Row> + version, read via useSyncExternalStore
   ▼
-Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column state only)
+Virtualized grid (packages/ui DataGrid over TanStack Virtual, fixed row height)
 ```
 
 ### 3.2 Upstreams: what is watched
@@ -327,6 +331,7 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
   - Background tabs and inactive spaces unsubscribe.
     Their upstream lingers, then stops.
   - Coming back resumes from the last `resourceVersion`, or relists on `410 Gone`.
+  - A session holds the upstreams it reads while it runs, shown or not: a logs tab its target's pods, and a port-forward its pod, Service and EndpointSlices or workload while it has a connection or checks its target, in any space and after its window closed (4.6).
 - **Scope follows the namespace selection.**
   - One upstream per selected namespace, so looking at 200 pods in one namespace never watches the cluster's 50k.
   - More than a few selected namespaces (default 4) switch to one cluster-wide upstream, if the person may list the kind cluster-wide.
@@ -363,7 +368,7 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
   A label selector goes to the server where what a list wants is a few of many objects of a kind, as the Secrets of Helm's releases are among a cluster's Secrets: the list and the watch ask for `labelSelector=owner=helm`, Helm's own query, and nothing else of the kind is fetched or watched.
   The 500 Secrets of 50 releases of 10 revisions in one namespace take, as metadata with that selector, 23,839 B on the wire (gzip) and 388,442 B in the hub, and as objects 4,487,710 B and 6,701,455 B (kind 1.37.0, 2026-11-22, a scratch example that asks for a page of 500 as the hub does, the heap counted by dhat).
 - **One HTTP/2 connection per cluster.**
-  kube-rs's default client speaks HTTP/1.1 only: hyper is built with `http1` alone, as checked in `kube-client/Cargo.toml` at 4.2.
+  kube-rs's default client speaks HTTP/1.1 only: hyper is built with `http1` alone, as checked in `kube-client/Cargo.toml` at 5.1.0.
   So each context has two shared hyper-util clients of Twigo's own: an HTTP/2 one for requests, watches and followed logs, and an HTTP/1.1 one for exec, attach and port-forward, whose WebSocket upgrade fails over HTTP/2 with 400.
   Every actor's kube clients sit over them (6.2, 6.4, [HTTP/2 spike](spikes/http2.md)).
 - **Per-cluster budgets.**
@@ -431,7 +436,7 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
     On macOS a change of routes alone, without an address, goes unseen.
     Chromium closes every HTTP/2 session on any address change, which Docker's interfaces set off on Linux; here containers, kind's bridge and VPNs for other networks leave connections alone, while a Wi-Fi switch or a VPN in front of the cluster retires them.
     A move to another network that keeps the address goes unseen until a ping fails, 45 s at most.
-  - A wake and a moved route of a live api connection are also counted apart, as a change of the network (`Connections::network`), which ends the sessions of exec and attach (4.6): their sockets are on the sessions client, whose connections a retirement does not reach, and a retirement from a new certificate or a failed probe says nothing of them.
+  - A wake and a moved route of a live api connection are also counted apart, as a change of the network (`Connections::network`), which ends the sessions of exec and attach and every open connection of a port-forward (4.6): their sockets are on the sessions client, whose connections a retirement does not reach, and a retirement from a new certificate or a failed probe says nothing of them.
     Only the api client's connections are tracked, so a context with a shell and no live api connection hears a wake but no network change: its shell ends later, when the kernel fails its socket, as `ConnectionLost` (how long that takes: not measured).
   - Retiring poisons the connection: the pool keeps a dead connection that still looks open, and every actor's client holds a clone of that pool, so rebuilding one client would not reach the others.
     The streams on it run until their upstreams re-watch.
@@ -474,11 +479,11 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
 
 ### 3.3 Three upstream kinds
 
-| Kind         | Request                                                                                                                                                                                                                | Used for                                                                                                                                                                                                             |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Table**    | `GET …?watch=true&allowWatchBookmarks=true&includeObject=Metadata` with `Accept: application/json;as=Table;v=v1;g=meta.k8s.io, application/json`, read through `Client::send`, decoded by its `Content-Encoding` (3.2) | Every list, for built-in kinds and CRDs alike. The server computes the columns, the same as `kubectl get -w`.                                                                                                        |
-| **Metadata** | List and watch with `Accept: application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1` and `…as=PartialObjectMetadata…`, managedFields skipped at deserialisation                                              | Indexes: CRDs and APIServices (discovery invalidation), and owner references for the "Related" tab. The Secrets of Helm's releases, selected by `labelSelector=owner=helm`: a release's row is made of their labels. |
-| **Object**   | List and watch with `fieldSelector=metadata.name=…`, another field selector or none, as a Table with `includeObject=Object`: whole objects with their cells                                                            | An open editor: live YAML, overview, conflict detection; an object's events; what its describer reads while it is open, such as a namespace's ReplicaSets or EndpointSlices, or a node's pods by `spec.nodeName`.    |
+| Kind         | Request                                                                                                                                                                                                                | Used for                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Table**    | `GET …?watch=true&allowWatchBookmarks=true&includeObject=Metadata` with `Accept: application/json;as=Table;v=v1;g=meta.k8s.io, application/json`, read through `Client::send`, decoded by its `Content-Encoding` (3.2) | Every list, for built-in kinds and CRDs alike. The server computes the columns, the same as `kubectl get -w`.                                                                                                                                                                                                                                                                |
+| **Metadata** | List and watch with `Accept: application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1` and `…as=PartialObjectMetadata…`, managedFields skipped at deserialisation                                              | Indexes: CRDs and APIServices (discovery invalidation), and owner references for the "Related" tab. The Secrets of Helm's releases, selected by `labelSelector=owner=helm`: a release's row is made of their labels. A delete's objects until they go, a drain's pods of its node by `spec.nodeName`, and the ReplicaSets or Jobs through which a workload's pods are found. |
+| **Object**   | List and watch with `fieldSelector=metadata.name=…`, another field selector or none, as a Table with `includeObject=Object`: whole objects with their cells                                                            | An open editor: live YAML, overview, conflict detection; an object's events; what its describer reads while it is open, such as a namespace's ReplicaSets or EndpointSlices, or a node's pods by `spec.nodeName`. The target of a logs tab or a port-forward and its pods: a pod, a Service and its namespace's EndpointSlices, or a workload and its namespace's pods.      |
 
 All three run on the hub's own list and watch rather than kube-runtime's `watcher`, which 5.0 cannot start from a `resourceVersion` once it is recreated, nor tell to re-watch on wake or after a probe: it reopens a quiet watch only after `timeoutSeconds` and 5 s, without a probe ([`next_with_idle_timeout`](https://github.com/kube-rs/kube/blob/5.0.0/kube-runtime/src/watcher.rs#L529-L548)).
 
@@ -536,6 +541,9 @@ A subscription carries a `ListQuery { space, gvr, namespaced, namespaces, labelS
 The field selector goes to the server with the list's requests, as a node's pods need; `owners` keeps the rows whose controller reference names one of its uids, an empty set none, after the labels and before the text and the counts, as a workload's pods are its ReplicaSets'.
 `namespaced` comes from discovery, which the webview holds already, so a list subscribes once its space's resources are known: Rust needs the scope for the request's path and for the Namespace column, which a cluster-scoped kind never has.
 The webview then sends `setWindow(start, end)` as the user scrolls, covering the visible rows plus about two screens of overscan.
+The view part of the query, `text`, `columns`, `sort`, `countBy`, `groupBy` and `values`, changes in place: the webview sends `setView` with the new fields and a number it counts up from 1, and each batch says in `view` the number of the last change the list had taken when it built the batch, 0 before any.
+The webview keeps the rows on screen until the first batch that names its change, as the first batch of the new order.
+Anything else in the query, the space, the resource, the namespaces, the selectors and the owners, is a new subscription.
 
 - Rust keeps an incremental ordered index per query view, indexset's two-level B-tree with a Fenwick tree over its nodes: a change finds its place in O(log n) and shifts at most a node of 1,024 entries, and one that fills or empties a node rebuilds the Fenwick tree, O(n/1,024).
   - Cells carry their column type, but many core columns are formatted strings: Pod Ready `1/2`, Restarts `3 (5m ago)`, Age.
@@ -546,6 +554,13 @@ The webview then sends `setWindow(start, end)` as the user scrolls, covering the
     Empty cells come first, then numbers, ratios and text; rows with equal keys follow their ids, ascending in either direction.
   - A CPU or Memory cell is an integer of nanocores or bytes, empty for a row without a sample, which sorts last in both directions; no text filter, count, group or value reads it (3.6).
   - A sort, a count, a group or values for a column the list lacks do nothing, and no sort sorts by Name.
+- A change of the view part is made of the rows the view holds, without a new subscription: a sort re-keys its entries and orders its index anew, a count, a group or values place the held rows again, and a collapsed group changes only which rows the window reads.
+  A text is the exception: the view holds only the rows its text keeps, so a text that changes asks its source for every row again, as a relist does.
+  Until that Reset comes the view holds no row and no index, only the samples its rows had, so a change of rows that comes first has nothing to join and is dropped, the Reset carrying every row.
+  Changes that come while a batch waits are made together and the batch names the last.
+  A batch is sent for a change that moves nothing, so the webview always hears its number.
+  Tauri runs each async command as a task of its own on a multi-thread runtime ([`respond_async_serialized_inner`](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.7/crates/tauri/src/ipc/mod.rs#L371-L375)), and a regex compiles before a change reaches its list, so two changes can arrive out of order: the list drops a change numbered no higher than the newest it holds or has taken, and its batches never name a number lower than the last.
+  A channel hands its messages to the webview in the order they were sent, since each carries the index it was sent with ([`Channel::send`](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.7/crates/tauri/src/ipc/channel.rs#L284), [`Channel`](https://github.com/tauri-apps/tauri/blob/%40tauri-apps/api-v2.12.5/packages/api/src/core.ts#L129-L176)), so a batch of an older view never reaches the list's snapshot after a newer one's, and the webview keeps no guard of its own.
 - Each reader of a row store has a feed of the keys changed since it last read, coalesced, and a key added since then and deleted again leaves it, so it holds no more keys than the reader held and the store holds, however long the reader waits.
   A flush drains it, updates the index row by row and computes what changed **inside the window**; a relist, new columns, new upstreams or a part that starts or stops showing send every row again.
 - Text filter on the columns the table shows, Name always among them: a substring in any case of ASCII letters; `!` before it keeps the rows without one; `/…/` is a case-insensitive regex, and `!/…/` its negation.
@@ -574,7 +589,7 @@ The webview then sends `setWindow(start, end)` as the user scrolls, covering the
   It sends the pod columns once a list knows them, from its first page on, and an empty list of columns before, as Rust does.
 - Multi-context spaces (7.2): the query view merges the upstreams of several contexts and adds a Context column.
   Row identity is `context/namespace/name` already, so one-context spaces, all that M1 serves, need no change then.
-- Selections and bulk actions refer to row IDs, so "select all 5,000" never ships 5,000 rows.
+- Marks are row IDs, so a mark costs the webview no row; a delete of several sends one `ResourceRef` per marked row, and no command marks every row of a list.
 
 This scales to 50k rows.
 Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread after every batch.
@@ -583,16 +598,16 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
 
 - One Tauri `Channel` per subscription.
   Channels deliver in order.
-  Payloads over 8 KB travel via the `ipc://` fetch path, not `eval`.
-  Global events are used only for rare notices: catalog, settings, policy prompts.
+  A JSON payload of 8 KiB or more, and a binary one of 1 KiB or more, travels by the `ipc://` fetch path, not `eval` ([thresholds](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.7/crates/tauri/src/ipc/channel.rs#L34-L38), [dispatch](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.7/crates/tauri/src/ipc/channel.rs#L292-L306)).
+  Tauri's global events are not used: the catalog, the asks of the approval broker and every other notice go over a Channel of a window's follower (2.1).
 - Coalescing by uid inside a flush window, in the row store's feed (3.4), which holds the keys and reads each row as it is at the flush:
   - the latest version wins;
   - a delete wins;
   - add followed by delete sends nothing;
   - add followed by modify is sent as add.
-- One task per subscription flushes on a tokio interval (`MissedTickBehavior::Skip`) that each batch restarts, so 50 ms after its last batch, or sooner when the window changes.
+- One task per subscription flushes on a tokio interval (`MissedTickBehavior::Skip`) that each batch restarts, so 50 ms after its last batch, or sooner when the window or the view changes.
   The interval waits while a batch is unacknowledged, so a hidden window wakes nothing, and an ack later than the tick flushes at once.
-  A window that changes while a batch waits for its ack goes out with the ack, not on the next tick.
+  A window or a view (3.4) that changes while a batch waits for its ack goes out with the ack, not on the next tick.
 - **Credit-based flow control.**
   - Channels have no backpressure, so the frontend acknowledges every `seq`.
   - Rust keeps at most one batch unacknowledged and keeps coalescing while it waits.
@@ -607,7 +622,7 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
 ### 3.6 Opening an object, and what is never pre-fetched
 
 - **Opening an object.**
-  `GET` the full object, then start an Object upstream for live changes.
+  An Object upstream lists the object by `metadata.name` and watches it from that list (3.3); no `GET` comes before it.
   - managedFields stay on the Rust side: they serve conflict display and are hidden in the editor.
   - Secrets keep their values in Rust.
     Only keys and sizes are sent, until the user explicitly reveals a value.
@@ -688,22 +703,28 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     The bytes of the namespaces' lists pass the cluster's at the 11th, since the ten largest hold nearly all the pods and each request adds its own.
     The time of one row differed between the runs by up to 1.2 times (the 19 namespaces: 10.3, 10.9 and 11.9 ms), and the namespaces' lists never took as long as the cluster's.
   - Sorted by CPU or Memory, a list reads every namespace of the list, not the window's: the one exception to "only the window", since rows without a sample would otherwise sort wherever the window left them and the order would move as it does.
-    A list of all namespaces sorted so asks for the cluster in one request as well (decision 69) and its namespaces as the fallback: the cluster covers the namespaces' and the pods' readers only while it answers, so when it is forbidden or unavailable they are listed themselves and say their own state.
+    A list of all namespaces sorted so asks for the cluster in one request as well and its namespaces as the fallback: the cluster covers the namespaces' and the pods' readers only while it answers, so when it is forbidden or unavailable they are listed themselves and say their own state.
     A list of chosen namespaces never asks for the cluster, nor does a list of all namespaces that the hub resolved to the namespaces the person may list (3.2): a person who may not list the pods cluster-wide is taken to be refused their metrics there too, so the request would only repeat every 15 s to be refused.
   - A list's first batch has what the poller already holds.
-    A list that joins a scope another reads, as a new query's subscription does while the old one is still open (4.4), has the scope's samples and state in its first batch, with no request.
+    A list that joins a scope another reads, as a new subscription does while the old one is still open (4.4), has the scope's samples and state in its first batch, with no request.
     A list sorted by CPU or Memory whose first window says it reads metrics holds the first batch that shows its rows until each of its scopes has answered or failed once, so that its first order is the true one, and for 2 s at most, a bound of its own beside the poll's interval.
     One cluster's list is far inside it (above), but a list of chosen namespaces, or of all namespaces when the cluster's request is refused, needs every namespace's answer, four at a time, so a slow server reaches it as well as one that does not answer: on the fake with every request taking 250 ms, an assumed latency of a remote cluster and not a measured one, 40 namespaces answered by 2.75 s, and the batch left at 2 s with a value for 28 of its 40 rows (`a_list_of_many_namespaces_whose_answers_are_slow_reaches_the_bound_and_the_order_settles`, paused time, 2026-11-13).
     When the bound passes the batch goes out as it is, the rows that have an answer with their values and the others with none, and the order settles as the answers come.
     A list not sorted by a metric never waits for the poller, nor does one sorted by a metric while its window says it does not read metrics.
-  - An answer is parsed into nanocores and bytes per container, and samples are compared by value, ignoring the order of containers and the request's time, so a reader hears only the keys whose values changed, appeared or went.
+    Every view change that leaves a list sorted by CPU or Memory holds its batch again, a sort changed to one as much as a text, a count or a group changed under one, since the change may bring back the rows of a namespace no longer polled, and the order is not the true one before the scopes of the whole list have answered.
+    The rows on screen and their changes wait with the batch, and the hold ends as soon as the scopes it waits for have answered or failed, at 2 s at most; a change whose scopes have answered already is not held at all.
+  - An answer is parsed item by item as it is read, never into a list of items first, into nanocores and bytes per container, and samples are compared by value, ignoring the order of containers and the request's time, so a reader hears only the keys whose values changed, appeared or went.
+    A pod or node that the scope's previous answer has too keeps that answer's name (`Arc<str>`), so a pod's or node's name is allocated only for a key that is new, and a sample is always built anew with the time of its own answer.
+    The parse and `land` still allocate on every poll, whether the keys are new or not: for each pod, the `Vec` serde builds for its containers (freed at once), its `Arc<Sample>`, its list of containers and a `Box<str>` for each container's name; for each namespace, its name as an `Arc<str>` and its table, sized from the previous answer's; and, in `land`, two `Box<str>` for each key it tells, for each reader that hears it.
+    A sample is not kept where its values repeat: a pod's CPU in nanocores moves at every scrape, for kwok's pods 5,028 to 5,031 of 5,031 told as changed at every poll (`metrics_memory`, three runs, kind 1.37, 2026-11-26), and for the real containers of kind's node all 10 pods of `kube-system` read another CPU and memory in two answers 16 s apart (metrics-server v0.9.1, the same day), and a kept sample would hold the time of the scrape that first read its values, which `taken_since` holds against a pod made again under the name.
     A pod's value is the sum over its containers, as kubectl sums them, joined to its row by namespace and name in Rust, and dropped with the row and with its uid.
     A row that enters the filters, as a pod does that turns CrashLoopBackOff under a text filter, takes the sample the poller already holds, since the poller tells only what changes, unless the sample was taken before the row was created: the API carries no uid, so that one is of another pod by the name.
     An open pod or node drops its sample with its uid as well.
-    The poller holds 5,095 pods in 0.87 MiB (`cargo run --release -p twigo-cache --example metrics_memory`, kind 1.37, 2026-11-13).
+    The poller holds 5,031 pods in 0.90 to 0.91 MiB (`cargo run --release -p twigo-cache --example metrics_memory`, three runs, kind 1.37, 2026-11-26).
   - Absence is no data and never zero: pending and finished pods, pods too young for two scrapes and unscraped nodes are missing from the answer, a missing key has no sample, and a real zero is `0`.
   - A scope that fails is a state of its readers, `unavailable` for a 503 whose body is plain text and no Status, a 404 or a failed connection, and `forbidden` for a 403, never an error on screen; it holds no value until it answers again, and is asked again one interval after the failure, as after an answer, with no fast retries, since metrics are not worth more requests to a server that refuses than to one that answers.
-    A `401` or a failed credential ends its run until the context's clients are rebuilt or a reader asks for the scope anew, as the hub's upstreams restart for a new subscription (3.2), since a retry by itself would run the credential plugin again.
+    A `401` or a failed credential ends its run until the context's clients are rebuilt or a reader asks for the scope anew, since a retry by itself would run the credential plugin again.
+    A reader asks anew when it comes wanting the scope, as a list's new subscription does and the hub's upstreams restart for it (3.2), and a list does when its view changes, a sort or a keystroke in its filter: a list keeps its reader through such a change, which a new subscription did not (`a_scope_a_401_stopped_is_asked_again_by_the_next_change_of_the_view`).
   - A reader is told a state from the scopes that have answered or failed once, and, for one still waiting for its first answer, from the failure its last request ended in, which the poller remembers.
     It keeps, per context, resource and scope (a namespace of pods, the nodes), that last failure, `forbidden` or `unavailable`, after the scope's readers leave, since Kubernetes refuses metrics per namespace and nodes apart from pods; a scope that answered, or was never asked, has none.
     A pod open alone asks for its own name, and its failure is kept for its namespace, since RBAC tells names apart only through `resourceNames`, which it matches against the name that the API server gives a `list` selecting `metadata.name` ([`NewRequestInfo`](https://github.com/kubernetes/kubernetes/blob/v1.37.1/staging/src/k8s.io/apiserver/pkg/endpoints/request/requestinfo.go#L245-L251), [`RuleAllows`](https://github.com/kubernetes/kubernetes/blob/v1.37.1/plugin/pkg/auth/authorizer/rbac/rbac.go#L201)): a person limited that way sees a namespace's refusal for one request on a pod they may read, where everyone else sees it on the right pod at once.
@@ -778,7 +799,7 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     A first load of `api/v1` (1,604,476 bytes) took a fresh process from 11,456–11,504 KiB resident to 19,024–19,312 KiB, and one of `apis/apps/v1` (719,385 bytes) from 11,472–11,536 KiB to 16,112–16,224 KiB.
     The allocator kept it after the document was dropped, and ten more loads of `api/v1` added 1,792 to 1,968 KiB (`cargo run --release -p twigo-kube --example openapi_memory -- v1 Pod`, three runs each, release build, macOS, kind 1.37, 2026-11-08).
 - **Never pre-fetched.**
-  Counts for every kind, full lists of CRDs (they can be tens of MB), large ConfigMap values (rendered lazily), metrics for invisible rows.
+  Counts for every kind, full lists of CRDs (they can be tens of MB), large ConfigMap values (rendered lazily), and metrics of namespaces with no row in view, but for a list sorted by CPU or Memory (above).
 
 ### 3.7 View states
 
@@ -822,14 +843,15 @@ What needs the rows of every part, as an object's page and a workload's pods do,
 
 ### 3.8 Performance budgets and the benchmark
 
-These are targets, measured on a kwok cluster, which simulates nodes and pods without kubelets, at 5k, 20k and 50k pods with churn:
+These are targets on a kwok cluster, which simulates nodes and pods without kubelets, at 5k and 50k pods with churn.
+The harness measures the 5k column; the 50k one has not been measured, and its core memory, 500 MB, was set for resident size before the 5k column's moved to footprint.
 
 | Metric                                                   | Target (5k pods)     | Target (50k pods)     |
 | -------------------------------------------------------- | -------------------- | --------------------- |
 | Pod list first paint after the space connects (LAN)      | < 1 s                | < 4 s                 |
 | Change → painted cell, p95                               | < 150 ms             | < 300 ms              |
 | Scroll and sort                                          | 60 fps, sort < 50 ms | 60 fps, sort < 200 ms |
-| Core RSS with the pod list open                          | < 150 MB             | < 500 MB              |
+| Core footprint with the pod list open                    | < 70 MB              | < 500 MB              |
 | Webview memory with the pod list open                    | < 300 MB             | < 400 MB              |
 | Idle CPU (100 changes/s background churn, window hidden) | < 2 %                | < 2 %                 |
 
@@ -843,21 +865,22 @@ It builds the app's bench mode in release, runs a churn generator at 100 changes
 - **First paint** runs from opening the list to its first rows painted; the space's discovery starts as the space opens, before the list, so only what remains of it counts.
 - **Change → painted cell** joins the churn generator's log of changes, by pod and restart count, with the webview's paints of the new count, through Unix ms on both sides, from the patch sent.
 - **Scroll** is the mean fps of `requestAnimationFrame` over 5 s of scrolling at 4,000 px/s, and **sort** the p95 from a header click to the resorted rows painted, over eight sorts.
-- **Core RSS** is the app process's resident size with the list open under churn.
+- **Core footprint** is the app process's physical footprint with the list open under churn.
+  Its resident size is shown beside it and never judged: it adds clean pages of the binary, the frameworks and mapped files, which macOS takes back when it wants, so it swings between runs ([bench](bench.md#why-the-targets-moved)).
 - **Webview memory** is the resident size of the WebKit processes the app is responsible for, the process macOS records as having asked for them, but the GPU process; the harness starts the app responsible for itself, since one started from a terminal shares the terminal's.
   Their physical footprint and the GPU process are shown apart and never judged: footprint leaves out pages WebKit reused and counts graphics that resident size does not, so it swings between runs ([bench](bench.md#on-the-rust-path)).
 - **Idle CPU** is the CPU time of the app and those WebKit processes over 30 s with the window hidden, as a share of one core.
 - **Visible CPU** is the same over 20 s with the window on screen, while the driver sleeps; it is shown and never judged, since it swings too much to tell a regression from noise ([bench](bench.md#the-visible-window)).
+- **M2's sessions**, a shell in a pod, a port-forward and a terminal, add rows that are shown and never judged: core footprint, webview memory and CPU with the window on screen and hidden, sampled once the terminal's watch has stopped; the core's CPU while the terminal's `kubectl get pods -A -w` runs through the policy proxy and straight to the cluster, the difference being the proxy's; and the gate's share of the core's CPU, an estimate ([bench](bench.md#the-sessions)).
 
-The report judges every metric but those three, and fails the run on a missed target.
+The report judges the six metrics above and fails the run on a missed target; the core's resident size, the webview's footprint, the GPU process, Visible CPU and the rows of the sessions are shown beside them and never judged.
 CI does not run the harness yet: it needs an unlocked GUI session, since WebKit paints nothing behind a locked screen, and Linux needs the sampler's WebKitGTK branch.
 
-The bench also replays the cases that broke other clients, and one that loopback cannot show:
+Of the cases that broke other clients, two are replayed by tests outside the bench: an API-server restart during a watch (`crates/twigo-cache/tests/restart_live.rs`) and 25 contexts whose exec plugins never answer, of which only the opened space's runs (`twenty_five_plugins_that_never_answer_run_only_for_the_space_opened` in `crates/twigo-core/src/tests.rs`).
+The bench is to replay the others, one of which loopback cannot show; none is built yet:
 
 - all namespaces on 30k pods;
 - a ConfigMap with 2,000 keys;
-- 25 contexts whose exec plugins time out;
-- an API-server restart during a watch;
 - packet loss on the one HTTP/2 connection, for head-of-line blocking ([HTTP/2 spike](spikes/http2.md)).
 
 ## 4. Workbench and UI model
@@ -879,15 +902,15 @@ The bench also replays the cases that broke other clients, and one that loopback
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-| Part               | Holds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Title bar          | Breadcrumb of the space and its namespace scope; in the middle a search field with its key that opens quick access, as VS Code's Command Center; drag region; native traffic lights on macOS; where it is too narrow its parts give way (below). The side bars show and hide by keys (⌘B, ⌥⌘B), the View menu and the palette, not buttons; so does the panel, by ⌘J, and by buttons too: its strip's Hide, and the status bar's count of sessions, which shows it, besides the other ways it hides (the Panel row)                                                                                                                                                                                                                                                                                                                               |
-| Space rail         | Tiles of the open spaces (D6, Lens's hotbar), each with a dot of its connection and a lock while its mode holds writes back (4.2), ⌘1..9 by position, a button that opens any context                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| Primary side bar   | View containers as the plates of a `TabBar` in its header (Explorer, Port forwards, Extensions and contributed ones), or the title of the only one; the active one's views: resource tree, saved filters                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Editor area        | Dockview grid of editor groups: tabs, preview tabs, splits, drag between groups; with no editor open, the space's home                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| Panel              | A dockview of its own for sessions opened by URI, its layout kept per space beside the editor area's: logs, shell and terminal tabs now (4.6); the cluster's Events, Output (Twigo logs per channel) and Agent activity (audit, 6.6) later. Its tabs split and move; it maximizes over the editor area, and hides with ⌘J, its strip's Hide, Toggle Terminal, a drag of its sash past half its minimum, or a person's close of its last tab (below)                                                                                                                                                                                                                                                                                                                                                                                               |
-| Secondary side bar | The ACP agent panel later; hidden while nothing lives there                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Status bar         | In the shell's colour, entries as data: on the left the active space as a full-height block of its context's colour in the bar's corner, with a lock while its mode holds writes back (6.4), a warning while the login shell's environment is missing (6.1), credentials that need the person, the cluster's version, or its connection in words when it is not connected (sync later), and, while some parts of the active list are not ready (3.7), the worst of them with how many, `Forbidden · 2 of 3 namespaces`, each named in its tooltip, one entry counting the listening port-forwards, `⇄ 3 forwards`, while any runs, in warning while one fails or reconnects, and one counting the space's sessions, `2 sessions`, while the panel is hidden (below); on the right the active list's rows and how many fail or wait, each a filter |
+| Part               | Holds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Title bar          | Breadcrumb of the space and its namespace scope; in the middle a search field with its key that opens quick access, as VS Code's Command Center; drag region; native traffic lights on macOS; where it is too narrow its parts give way (below). The side bars show and hide by keys (⌘B, ⌥⌘B), the View menu and the palette, not buttons; so does the panel, by ⌘J, and by buttons too: its strip's Hide, and the status bar's count of sessions, which shows it, besides the other ways it hides (the Panel row)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Space rail         | Tiles of the open spaces (D6, Lens's hotbar), each with a dot of its connection and a lock while its mode holds writes back (4.2), ⌘1..9 by position, a button that opens any context                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Primary side bar   | View containers as the plates of a `TabBar` in its header (Explorer and Port forwards; Extensions and contributed ones come with extensions), or the title of the only one; the active one's views: the resource tree, with pinned lists at its top (4.4), and the Port forwards view                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Editor area        | Dockview grid of editor groups: tabs, preview tabs, splits, drag between groups; with no editor open, the space's home                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Panel              | A dockview of its own for sessions opened by URI, its layout kept per space beside the editor area's: logs, shell and terminal tabs now (4.6); the cluster's Events, Output (Twigo logs per channel) and Agent activity (audit, 6.6) later. Its tabs split and move; it maximizes over the editor area, and hides with ⌘J, its strip's Hide, Toggle Terminal, a drag of its sash past half its minimum, or a person's close of its last tab (below)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Secondary side bar | The ACP agent panel later; hidden while nothing lives there                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Status bar         | In the shell's colour, entries as data: on the left the active space as a full-height block of its context's colour in the bar's corner, with a lock while its mode holds writes back (6.4), a warning while the login shell's environment is missing (6.1), credentials that need the person, the cluster's version, or its connection in words when it is not connected (sync later), and, while some parts of the active list are not ready (3.7), the worst of them with how many, `Forbidden · 2 of 3 namespaces`, each named in its tooltip, one entry counting the listening port-forwards, `⇄ 3 forwards`, while any runs, in warning while one fails or reconnects, one counting the space's sessions, `2 sessions`, while the panel is hidden (below), one for each command that waits, as for a deleted object to go, with its words and a spinner, a click stopping the wait (4.7), and the open shells while the panel shows (4.6); on the right a chord's first key while it waits for the next, then the active list's rows and how many fail or wait, each a filter |
 
 The parts sit flush, split by hairlines, with no cards or gaps: the owner tried islands, as JetBrains Islands and VS Code's 2026 layout ([research](research/workbench-chrome.md)), and preferred flat parts.
 Views are descriptors (ID, title, container, `when`, provider), so the user can move a view to another container, VS Code style.
@@ -911,7 +934,7 @@ A context nobody marked has a quiet chip, `Not marked`, that opens the same choi
 The panel hides when a person's close takes its last tab (`Editors.dismiss`, 4.3): its X, a middle click, ⌘W, Delete or Backspace on the focused tab, and the Close Terminal… and Close Shell… picks.
 It leaves maximize and hides in one step, and gives the focus back (4.3).
 The app's own close of a tab, a session that ends by itself and keeps its tab, a move between groups, a switch of spaces and a restart that reuses a tab hide nothing.
-Its dockview keeps its last group as it empties (`noPanelsOverlay: 'emptyGroup'`, [`doClose`](https://github.com/mathuo/dockview/blob/v8.8.3/packages/dockview-core/src/dockview/dockviewGroupPanelModel.ts#L1644-L1655) at dockview 8.8.3) and makes one for a space that has none, so its strip keeps Hide in every state, the empty one included; Maximize Panel Size shows and runs only while it holds an editor (`panelHasEditor`).
+Its dockview keeps its last group as it empties (`noPanelsOverlay: 'emptyGroup'`, [`doClose`](https://github.com/mathuo/dockview/blob/v8.9.1/packages/dockview-core/src/dockview/dockviewGroupPanelModel.ts#L1651-L1662) at dockview 8.9.1) and makes one for a space that has none, so its strip keeps Hide in every state, the empty one included; Maximize Panel Size shows and runs only while it holds an editor (`panelHasEditor`).
 Opened with nothing in it, as by ⌘J, it names the space, `No sessions in prod-eu`, and offers the `panel/empty` menu as the outline buttons an empty state draws for its action, each with its key where it has one: New Terminal, and Reopen Logs while the space has a closed logs tab to bring back (4.3).
 Its sash snaps it shut: allotment's `snap` hides the pane once a drag takes it half its 80 px minimum past that minimum ([split-view.ts at v1.20.6](https://github.com/johnwalley/allotment/blob/v1.20.6/src/split-view/split-view.ts#L868-L879)), a drag that brings it back shows it unmaximized, and a double click on the sash restores the default height of 340 px while the panel shows, as allotment resets no pane that its snap hid ([the reset](https://github.com/johnwalley/allotment/blob/v1.20.6/src/split-view/split-view.ts#L504-L525)).
 A height is remembered only from a drag that ends with the panel not maximized.
@@ -943,12 +966,13 @@ On a layout where `=` needs ⇧, as the German one, ⌘+ zooms nothing, while th
 - What can outlive its space, or be left with the person while another space shows, leads with that space's 20 px tile, so it says whose it is whichever space shows: a toast about a space or a context, a command's or a forward's failure that the gate refused among them; the confirm and approval dialogs, before the badge with the context's type or mode; the unlock banner; a terminal's offer (4.6); and a row of quick access that opens something in another space (4.5).
   What belongs to no space, as the app's own failures, has no tile.
 - Every editor in a space belongs to that space's contexts.
-  Opening another cluster's object means switching spaces or running **Compare with…**, which opens a diff editor against an object picked from any context and says so in its title.
+  Opening another cluster's object means switching spaces; **Compare with…** opens a diff editor against another object of the same space, picked as 4.3 says.
 - A multi-context space ("dev+qa", 7.2) gets merged tables with a Context column.
   Its editors still each carry one context, shown as a chip on the tab.
 - A space connects lazily on its first activation.
   A background space's sessions (port-forwards, exec, logs) survive; its list subscriptions linger, then stop (3.2).
-- Shortcuts: ⌘1..9 selects a space by its place in the rail; the rail's button and `ctx ` in quick access switch to a space or open one for any context; ⌘⇧N opens a space in a new window.
+- Shortcuts: ⌘1..9 selects a space by its place in the rail; the rail's button and `ctx ` in quick access switch to a space or open one for any context.
+  A space in a window of its own is not built.
 - The `ctx ` picker lists the open spaces first, each with its tile, its context's server as host and port, its connection as the rail has it (the cluster's version alone while connected) and its ⌘ key; then the other contexts under the kubeconfig file that defines them (5.5).
 
 ### 4.3 Editor model
@@ -969,7 +993,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 | `diff://edit/apply?editor=<uri>`, `diff://<space>/objects?…`        | Monaco diff: the apply dry-run of an editor's edit, its opened object against the server's now (`edit/server`), Compare with…, any two objects                         |
 | `diff://<space>/release?namespace=…&name=…&from=N&to=M&part=…`      | Monaco diff of two revisions of a Helm release: their values, the chart's defaults or their manifests, a masked value that changed marked on both sides                |
 | `untitled://<space>/manifest-n`                                     | New manifest of a space, numbered within it; its first Apply asks for the target context and, once applied, opens the object it made                                   |
-| `twigo://settings`, `twigo://keybindings`, `twigo://extension/<id>` | Settings UI, keybindings UI, extension details                                                                                                                         |
+| `twigo://settings`, `twigo://keybindings`, `twigo://extension/<id>` | Later: the settings UI, the keybindings UI and extension details; no editor opens them yet                                                                             |
 
 - **Details.**
   A click or Enter on a row opens its details, and Space shows or hides them, as Linear's peek; arrows move them along and Esc closes them.
@@ -1070,7 +1094,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   - Property rows run in two columns, each a label of 112 px and its value, 12 px apart, a long or plural value taking both; a pod's containers sit as two cards side by side.
 - **Closing a tab.**
   When an editor that opens, closes or moves, or a space that shows, drops the keyboard focus to the page, the active group takes it, and the active editor its own where it has something to hold it, a text editor or a list's grid, so a key such as ⌘S, ⌘Z or `j` still reaches an editor.
-  A person's close is `Editors.dismiss`: a tab's X, a middle click, ⌘W and Close Editor, Delete or Backspace on a focused tab, which dockview 8.8.3 would otherwise close itself ([`_closeTab`](https://github.com/mathuo/dockview/blob/v8.8.3/packages/dockview-core/src/dockview/components/titlebar/tabs.ts#L782-L817)), the Close Terminal… and Close Shell… picks, and the Close button of a port-forward tab whose forward is gone.
+  A person's close is `Editors.dismiss`: a tab's X, a middle click, ⌘W and Close Editor, Delete or Backspace on a focused tab, which dockview 8.9.1 would otherwise close itself ([`_closeTab`](https://github.com/mathuo/dockview/blob/v8.9.1/packages/dockview-core/src/dockview/components/titlebar/tabs.ts#L769-L804)), the Close Terminal… and Close Shell… picks, and the Close button of a port-forward tab whose forward is gone.
   It keeps the editor for Reopen Closed Editor (below), and when it takes the panel's last tab the panel hides (4.1), and the focus, where the panel held it or it had fallen to the page, goes back to the last element outside the panel that held it, else to the editor area's active editor.
   Quick access, dialogs, menus and toasts give the focus back themselves, so none of them is that element; a dockview floating group, also a `role=dialog`, can be.
   Delete or Backspace on a focused tab with others beside it in its group focuses the tab dockview would have, the next, else the previous, so the next key stays in the strip; ⌘W leaves the focus to the editor that becomes active.
@@ -1207,14 +1231,14 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
     Without a usage in the batch a node has no section, a pod's containers no lines and its cells a dash.
     The webview remembers nothing of what the Metrics API said and draws the usage it is sent: the core says a refusal with the Overview where it remembers one for the scope (a namespace of pods, or the nodes), and keeps an object's last figures while its scope is asked anew, so a tab that returns or a document shown again does not blank what it shows (3.6).
     A usage that says `absent`, once the context stops serving the resource, withdraws the figures as if none had come, until a later batch brings one.
-  - Any kind, CRDs included, gets a generic overview: the server's printer columns, a `status.conditions` table when present, spec and status as a tree with the descriptions of their schema, metadata, events.
+  - Any kind, CRDs included, gets a generic overview: a Summary of the cells the server prints for it, its spec, its other top-level fields and its status as trees of their keys, its conditions as chips (below), events and metadata.
   - A workload's pods, a CronJob's jobs and a node's pods are live resource tables inside the Overview, run by query views: a workload's by the uids of what controls them, a node's by a field selector.
     They draw as a list does (4.4): their columns of priority 0 give way by their measured width, and their rows come in the order the core gives; a click or Enter on a row opens its object in a tab of its own.
   - Extensions add declarative sections per GVK (5.4), and replace a core section only by naming its id.
 
 ### 4.4 Resource tables and the keyboard
 
-- Columns come from the Table `columnDefinitions` (priority 0 by default, wide on toggle), plus Context, and Namespace unless the query names one namespace.
+- Columns come from the Table `columnDefinitions` (priority 0 by default, wide on toggle), plus Namespace unless the query names one namespace; a space of several contexts adds Context (7.2).
   Pod and node lists of a context that serves the Metrics API (3.6) also get CPU and Memory, of priority 0, just before the Age column, whose cells are numbers the webview prints as kubectl does.
   Each kind keeps a preset for every space: the columns the user showed or hid by name from the head of the actions column (a column nobody chose for follows its priority), the widths they dragged or fitted, and the column the rows are grouped by.
 - What a column does is data in `packages/kube`, a rule by kind, then by name, then by `group/resource/column`: its cell, starting width, alignment, whether its text cells are secondary and read in support, whether rows group by it, which way its first click sorts, the tone of its abnormal values, where it goes as the list narrows, and whether a hovered row's icons may lie over it.
@@ -1231,11 +1255,13 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   - a status shows a tone dot, its text coloured and at weight 600 when abnormal, the dot pulsing while the state is in flight (ContainerCreating, Terminating); the pods' Status column starts at 168 px, since `Init:ImagePullBackOff`, the widest of the statuses that fitted its former 160 px at weight 400, takes 166.2 px at 600 with its dot (Chrome on the mock, 2026-11-16);
   - a healthy value of a kind's health column, and of a pod's Ready, reads in support, so that only an abnormal one stands out: a pod's Ready and Status, a node's Status and a Deployment's Ready, by their column rules' `recedes`; Name, CPU and Memory stay in content;
   - a ratio short of its total (Ready `0/1`) is pending, unless the row's status already carries a tone, so that a row raises one alarm; a pod that ran to completion, whose Status reads `Completed`, `Succeeded` or `ExitCode:0` as kubectl prints it, is short of nothing, since [`printPod`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/pkg/printers/internalversion/printers.go#L1086-L1089) counts a container ready only while it runs, so its Ready recedes as a healthy one does;
-  - restarts read as a count in a column of its own and how long ago the last was, the age growing from the moment the server printed it (3.4); a restart within the hour draws the count and its age in the warning tone, unless the row raises its alarm already, by its tone or by a ratio that draws one, or its pod ran to completion; whether a row raises its alarm is decided once per row and render from its columns' rules, not by each cell (`decideRows`);
+  - restarts read as a count in a column of its own and how long ago the last was, the age growing from the moment the server printed it (3.4); a restart within the hour draws the count and its age in the warning tone, unless the row raises its alarm already, by its tone or by a ratio that draws one, or its pod ran to completion; whether a row raises its alarm is decided once per row and set of columns from their rules, not by each cell (`decideRows`);
   - a CronJob's Last Schedule, an event's Last Seen and First Seen and a custom resource's `date` columns, the other columns that print a duration (3.3), grow from the same moment ([decision](decisions/printed-durations.md)), each cell drawn again only when its text or its tone changes, on the one timer of the page's ages; a cell with no moment to count back from, as a stamp that does not parse or a moment more than a second ahead of the clock, shows what the server printed, in the plain step;
   - Namespace and Context read in support, an age in content for its first ten minutes and in support after, and a zero count, an empty value and a quantity's unit (the `m` of `120m`) quiet;
   - figures line up in tabular numerals: a column of ratios, restarts, ages, CPU or memory, or one the server declares a number, and in any other column each cell whose text is figures or IPv4 addresses, since rows stream.
 - Rows are 24 px with no line under them, under a 28 px header that keeps its line, as a group's header does.
+  A row draws again only when what it shows changes: its data, its tone, its flash, its mark and whether any row is marked, the cursor, the first column's hold, its index, the columns, the template or the cell renderer.
+  A scroll that keeps it in the window moves it as it is, and the owner's new handlers reach only the actions of a row that shows them.
 - A failing or pending row is a band: a 3 px edge in its tone at its left and the tone over the row, 9 % for an error and 7 % for a warning, quiet reading as support on it.
   The pointer's hover lies over the band; under the cursor and on a marked row the selection's fill takes the band's place, since laid over the band it takes text in the tone below 4.5:1 in both themes, and support in the light one.
   The band carries over to the row's held first cell, its hover icons and a laid-over menu, as the selection's fill does.
@@ -1269,7 +1295,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   While the popover is open the filter stays an icon, wherever the focus is in it.
   Beside docked details the actions end at the list's right edge, and the details shrink so that the list keeps what its strip needs at the last stage (`STRIP_KEPT`): the 4 px before the first tab, the active list's tab at 220 px, the overflow button's 28 px, and the actions at their last stage, the scope chip as its glyph, with the 6 px after them (4.3).
   The room the details take is read as they dock, before paint, so their first frame ends the actions at that edge too.
-  A group's actions are keyed by their editor, so one list's stage does not carry over to the next, and as they settle the strip scrolls its own tab list, not the split views around it, to keep the active tab in view, as dockview 8.8.3 does only as a tab activates ([`_scrollTabIntoView`](https://github.com/mathuo/dockview/blob/v8.8.3/packages/dockview-core/src/dockview/components/titlebar/tabs.ts#L839-L888)).
+  A group's actions are keyed by their editor, so one list's stage does not carry over to the next, and as they settle the strip scrolls its own tab list, not the split views around it, to keep the active tab in view, as dockview 8.9.1 does only as a tab activates ([`_scrollTabIntoView`](https://github.com/mathuo/dockview/blob/v8.9.1/packages/dockview-core/src/dockview/components/titlebar/tabs.ts#L826-L875)).
 - Helm releases are a list of the same shape, at `helm-list://<space>`, opened from the explorer's last section, `:helm` and the palette: its resource, `HELM_RELEASES`, is a stand-in that the columns' rules, the presets, the icon and the scope chip read as any resource's, subscribed with `helm_list_subscribe`.
   - Its columns are Name, Namespace (as every list adds it), Revision, Status, Chart (the name in content and the version in support), App Version and Updated, leaving as the grid narrows in the order Namespace, App Version, Updated, Chart, Revision and Status, the Name column never (`packages/kube/src/columns.ts`); the Status column, which starts at 160 px for `pending-upgrade` with its dot and the request-failed mark and narrows at the last dash of a word so that the tail that tells the `pending-*` statuses apart stays, is its health column, so the list counts, filters and groups by it: `deployed` recedes, `superseded` and `uninstalled` too, `failed` and `unreadable` fail, the `pending-*` statuses and `uninstalling` wait with a pulsing dot, and `unknown` or a word Helm does not know warns (`packages/kube/src/helm/status.ts`).
   - A release whose latest revision cannot be read keeps its place with its name and revision from the Secret's labels and the status `unreadable`, which the list counts, filters and groups as failing, and says why in place of its status, in the error tone (`helm.truncated` as Truncated).
@@ -1280,7 +1306,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 - An empty list names where it looked, the context, then the namespaces it is narrowed to: `No pods in prod-eu`, `No pods in prod-eu · payments`, and `No matching pods in dev · payments-x, auth-x` under a filter; so do a list inside an Overview and the Port forwards view, as the empty panel names its space (4.1).
   A list of all namespaces that leaves some out because the credentials may not list the kind there speaks of the ones it reads, `No pods in the 3 namespaces you may list`.
   The status bar's cluster entry says the same in numbers, `3 of 46 namespaces` in the quiet role, with how many are left out in its tooltip, unless a parts line that names unready parts (3.7) takes its place, and its rows entry says `1 deployment` where it has one row.
-  A list of all namespaces that the cluster refuses says `These credentials may not list pods in every namespace at once.` and offers Choose namespaces, which opens the picker (4.5), where a refused selection or a cluster-scoped kind keeps `These credentials may not watch pods.` and its Retry.
+  A list of all namespaces that the cluster refuses says `You may not list pods in every namespace at once.` and offers Choose namespaces, which opens the picker (4.5), where a refused selection or a cluster-scoped kind says what it may not do, as `You may not watch pods.`, and keeps its Retry.
   While parts of the list are not shown it can speak only of the namespaces that are: `No pods in the namespaces shown`, `No matching pods in the namespaces shown`, and the page says that the namespaces that are not ready are left out and the status bar says which (3.7).
 - Single-key verbs work only when a table is focused (context key `listFocus`), or on an object editor's Overview outside a text field (5.1): `l` logs, `s` shell, `f` port-forward, which asks which port, even of one, `⌘⌫` delete (with confirmation), off a bare key since k9s users deleted the wrong object from one ([research](research/workbench-design.md)).
   `e` shows the YAML and `⌘↵` opens the object in an editor in a list only, since both need `list.uri`.
@@ -1289,13 +1315,14 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   These are ordinary commands with keybindings, so users can remap them.
 - Changed cells flash briefly: the cell's background starts at the `--flash` tint and fades out over 1 s, as the opacity of a layer behind the text, which runs on the compositor and leaves the page asleep ([bench](bench.md#the-visible-window)).
   A batch that changes more than 8 rows flashes nothing, so a rollout does not strobe the table.
-  The flash is a setting, on by default.
+  No setting turns the flash off yet; the system's reduced-motion preference cuts it to 0.01 ms, as it cuts every animation (`packages/ui/src/styles/index.css`).
 - CPU and Memory are measures, not states (3.6): end-aligned numbers as `kubectl top` prints them, CPU in whole millicores rounded up (`12m`) and memory in whole Mi rounded down (`34Mi`), and a quiet dash for a row without a sample, never zero.
   They never flash, and count for none of a batch's 8 rows, since a poll moves them every 15 s.
   The list says with its window that it reads them while its editor is on screen, behind no other tab and under no maximized panel, and the document is visible, and either it does not know yet which columns of its resource are measures, from its own columns or from a list of the resource opened earlier in the session in the same space, since one space's cluster may serve the Metrics API and another's not, so that a list sorted by one is held from its first rows, or it draws one or is sorted by one; a resource whose columns came with none says it reads nothing, and a list too narrow for its metric columns draws none and reads none unless it is sorted by one.
   While a new subscription has no columns yet, the list keeps the metric columns it last drew, so a narrow list does not read them meanwhile.
   A list inside an Overview follows the same rule and counts every column as drawn until its width is measured, which comes after its first window, so that one sorted by a measure is held from its first rows; once measured it reads only the measures that its width leaves drawn, or that it is sorted by.
-  A new query, from a sort, a filter or a change of namespaces, opens its subscription before the old one closes, and the old one stays on screen and open until the new one's first batch, so a scope the old one read keeps its reader and its samples.
+  A sort, a filter, a grouping or a choice of columns changes the view of the subscription the list has, and the rows on screen stay until the first batch that names the change (3.4), so nothing opens or closes.
+  A change of namespaces, or of what the list reads otherwise, opens a new subscription before the old one closes, and the old one stays on screen and open until the new one's first batch, so a scope the old one read keeps its reader and its samples.
   A first click on their header sorts the largest first, as [`kubectl top --sort-by`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/kubectl/pkg/metricsutil/metrics_sorter.go#L71-L83) orders, and the second ascends.
   A header whose Metrics API does not answer, or may not be read, carries a quiet mark with the reason in its tooltip, and its cells stay dashes.
 
@@ -1303,14 +1330,14 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 
 One input, with providers registered by prefix (VS Code `QuickAccessRegistry` mechanics, Kubernetes-oriented prefixes):
 
-| Prefix        | Provider                                                                                                                                                       |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| _(none)_ ⌘P   | Go to resource: names from the space's live upstreams, recently opened objects, and a metadata search per kind when asked                                      |
-| `>` ⌘⇧P       | Commands. Shows only commands whose `commandPalette` menu `when` holds; recently used first (legacy `commandHistory`)                                          |
-| `:`           | k9s grammar: `:deploy`, `:po payments /api app=web @prod-eu`, aliases (`:dp`, user-defined `fred: pod fred app=blee`). Opens or focuses a `k8s-list://` editor |
-| `@`           | Symbols of the current editor (YAML outline, overview sections)                                                                                                |
-| `ctx `, `ns ` | Switch or create a space; set the namespace scope                                                                                                              |
-| `?`           | List the prefixes and the current keybindings                                                                                                                  |
+| Prefix        | Provider                                                                                                                                                                                                                                                             |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| _(none)_ ⌘P   | Go to resource: names from the space's live upstreams, recently opened objects, and a metadata search per kind when asked                                                                                                                                            |
+| `>` ⌘⇧P       | Commands. Shows only commands whose `commandPalette` menu `when` holds; recently used first (legacy `commandHistory`)                                                                                                                                                |
+| `:`           | k9s grammar: `:deploy`, `:po payments /api app=web @prod-eu`, a kind by its plural, singular, kind or short name, matched fuzzily while it is the only word; user-defined aliases (`fred: pod fred app=blee`) are not built. Opens or focuses a `k8s-list://` editor |
+| `@`           | Symbols of the current editor: the documents of a Helm release's Manifest view, the only editor that publishes them (4.3)                                                                                                                                            |
+| `ctx `, `ns ` | Switch or create a space; set the namespace scope                                                                                                                                                                                                                    |
+| `?`           | List the prefixes and the current keybindings                                                                                                                                                                                                                        |
 
 Quick-access providers are core-only in v1, as in VS Code.
 Extensions add commands, not prefixes.
@@ -1406,7 +1433,7 @@ Extensions add commands, not prefixes.
     - a line is the monospace at 13 / 20 (4.9): its source in support, or the brand for a pod that joined after the tab first listed its pods, as a rollout's new ones; its time quiet, the part that changed from the line above in support, in tabular figures; its message in content, and in support where it starts with whitespace, as a stack trace's continuation does; a wrapped line hangs under the start of its message;
     - F, W and T toggle follow, wrap and timestamps while the lines have the focus, ⌘F finds and `/` filters; below 1,100 px the toolbar drops the level counts, narrows its fields and shortens the range's label, and below 800 px, a split panel's group, the filter and the search go to a row of their own under it, which opens once their icons, `/` or ⌘F ask for a field, and while either is set, so a split panel keeps every control.
 - **Exec and attach.**
-  xterm.js 6.1.0-beta.337 with the WebGL addon 0.20.0-beta.330, the fit addon and Unicode 11: VS Code 1.145.2 locks 6.1.0-beta.304, whose `flushSync`, which every resize runs, parsed again the chunks its write queue had parsed and kept, repeating output and acks, until [#6201](https://github.com/xtermjs/xterm.js/pull/6201).
+  xterm.js 6.1.0-beta.338 with the WebGL addon 0.20.0-beta.331, the fit addon and Unicode 11: VS Code 1.145.2 locks 6.1.0-beta.304, whose `flushSync`, which every resize runs, parsed again the chunks its write queue had parsed and kept, repeating output and acks, until [#6201](https://github.com/xtermjs/xterm.js/pull/6201).
   No release has followed 6.0.0 (2025-12-22), which rebuilds a hidden terminal's rows on every scroll: 12,642 DOM mutations in 5 s of `yes` behind another tab, against 0 on 6.1.0-beta.337 (Chromium on the mock, 2026-11-09).
   It falls back to the DOM renderer on context loss, which happens on WebKitGTK.
   WebGL is disposed on hidden tabs.
@@ -1479,7 +1506,7 @@ Extensions add commands, not prefixes.
     A finished tab stays with its scrollback readable and selectable and its input off, until it is closed or restarted; Restart plans a new shell, so `guarded` asks again.
     A session that waits for a place among the cluster's 64 says so in its tab, and while the panel shows, the status bar lists open shells while there are any, to go to one or close it; while it is hidden, one entry counts every session instead (4.1).
   - The theme is the editor's surface and the logs' sixteen colours from the tokens, and follows the document's theme live.
-  - The font is `--font-mono`, the bundled JetBrains Mono (4.9), at 12 px, and a terminal opens only once its regular and bold faces have loaded or failed: xterm measures its cell when it opens ([CoreBrowserTerminal.ts](https://github.com/xtermjs/xterm.js/blob/f70764dd3da05ebda0390605c6f9adbbea3f0e90/src/browser/CoreBrowserTerminal.ts#L648-L649), at the commit 6.1.0-beta.337 is built from), when `fontFamily` or `fontSize` change ([CharSizeService.ts](https://github.com/xtermjs/xterm.js/blob/f70764dd3da05ebda0390605c6f9adbbea3f0e90/src/browser/services/CharSizeService.ts#L34)) or the pixel ratio does ([RenderService.ts](https://github.com/xtermjs/xterm.js/blob/f70764dd3da05ebda0390605c6f9adbbea3f0e90/src/browser/services/RenderService.ts#L289-L293)), and after every resize of its buffer ([the listener](https://github.com/xtermjs/xterm.js/blob/f70764dd3da05ebda0390605c6f9adbbea3f0e90/src/browser/CoreBrowserTerminal.ts#L197), [`_afterResize`](https://github.com/xtermjs/xterm.js/blob/f70764dd3da05ebda0390605c6f9adbbea3f0e90/src/browser/CoreBrowserTerminal.ts#L1078-L1080)), but not when a face loads.
+  - The font is `--font-mono`, the bundled JetBrains Mono (4.9), at 12 px, and a terminal opens only once its regular and bold faces have loaded or failed: xterm measures its cell when it opens ([CoreBrowserTerminal.ts](https://github.com/xtermjs/xterm.js/blob/c9cc4785d24c9fad658627d5a458350d0baf3f1d/src/browser/CoreBrowserTerminal.ts#L648-L649), at the commit 6.1.0-beta.338 is built from), when `fontFamily` or `fontSize` change ([CharSizeService.ts](https://github.com/xtermjs/xterm.js/blob/c9cc4785d24c9fad658627d5a458350d0baf3f1d/src/browser/services/CharSizeService.ts#L34)) or the pixel ratio does ([RenderService.ts](https://github.com/xtermjs/xterm.js/blob/c9cc4785d24c9fad658627d5a458350d0baf3f1d/src/browser/services/RenderService.ts#L289-L293)), and after every resize of its buffer ([the listener](https://github.com/xtermjs/xterm.js/blob/c9cc4785d24c9fad658627d5a458350d0baf3f1d/src/browser/CoreBrowserTerminal.ts#L197), [`_afterResize`](https://github.com/xtermjs/xterm.js/blob/c9cc4785d24c9fad658627d5a458350d0baf3f1d/src/browser/CoreBrowserTerminal.ts#L1078-L1080)), but not when a face loads.
     A face that came later would leave the fallback's cell only until the next resize, and waiting for the faces is what keeps the first screen right.
 - **Port-forward manager.**
   A target is a Pod, a Service or a Deployment, ReplicaSet, StatefulSet or DaemonSet, and a forward is one port of one target, named by the target the person chose; the pod it reaches is a detail of it.
@@ -1505,7 +1532,7 @@ Extensions add commands, not prefixes.
     - A workload's pods are those it controls by controller reference, as the logs find them, a Deployment's through its ReplicaSets; they count when they are Ready by their conditions and not being deleted, and a workload's port that has a name is each pod's container port of that name.
     - The pod is sticky.
       Connections go to the forward's current pod while it is a candidate, so a client's connections do not spread over the replicas; another is picked when it leaves or a connection to it fails, and a pod that failed is avoided for a backoff unless it is the only one: 0.5 s at first, doubling to 30 s, each with a jitter of up to the delay again, so 0.5–1 s at first and 30–60 s at its longest ([`ExponentialBackoff::next`](https://github.com/Xuanwo/backon/blob/e24dc92742e201f7320868d46a12ff59eb82ef72/backon/src/backoff/exponential.rs#L210-L235), backon 1.6.0).
-      A pod whose upgrade answered `404` is avoided for 30 s, the backoff's longest delay before its jitter, the only one too, and a failure meanwhile does not shorten that: a kubelet answers `404` for a pod that its pod manager does not hold, as around its restart ([`getPortForward`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/pkg/kubelet/server/server.go#L1251-L1255), [`GetPodByName`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/pkg/kubelet/kubelet_getters.go#L273-L275)), and kube-client 5.0.0 turns a `404` that a proxy answers in its own words into the same error ([`handle_api_errors`](https://github.com/kube-rs/kube/blob/5.0.0/kube-client/src/client/mod.rs#L579-L605)).
+      A pod whose upgrade answered `404` is avoided for 30 s, the backoff's longest delay before its jitter, the only one too, and a failure meanwhile does not shorten that: a kubelet answers `404` for a pod that its pod manager does not hold, as around its restart ([`getPortForward`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/pkg/kubelet/server/server.go#L1251-L1255), [`GetPodByName`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/pkg/kubelet/kubelet_getters.go#L273-L275)), and kube-client 5.1.0 turns a `404` that a proxy answers in its own words into the same error ([`handle_api_errors`](https://github.com/kube-rs/kube/blob/5.1.0/kube-client/src/client/mod.rs#L585-L611)).
       A choice then takes another pod when there is one.
       When there is none, a person's proof fails at the end of its 20 s, before the pod is back, the space's and a sign-in's say `Reconnecting` at once, and a connection waits within its own 20 s, so only one whose wait reaches the avoidance's end goes to the pod: nothing tries it again and again.
       A person's start or resume forgets what was avoided, a pod that carries a connection is no longer avoided, and what was avoided of a pod goes once it is no candidate; each wakes the connections that wait for a pod, and a wait that ends chooses once more before it gives up.
@@ -1659,7 +1686,7 @@ Extensions add commands, not prefixes.
     A job moved out of both groups, as `nohup … &` under job control moves it, survives, as in any terminal.
     Only a shell nobody has reaped is signalled, since another process may have the pid of one reaped: the wait that reaps the shell ends the hangup under the hangup's own lock, so closing a terminal whose shell has ended sends nothing, and the kill keeps the shell unreaped through the 3 s, so its pid and its group's id stay its own.
     The foreground job's leader is the shell's to reap, and goes at once, so its group's id can pass to another group within the 3 s: the kill signals a group only while it still belongs to the shell's session, `getsid` of its id answering the shell's pid, or answering that no process has that pid while `killpg` still finds members, as an id in use as a group's is never given to another process ([POSIX 4.17](https://pubs.opengroup.org/onlinepubs/9799919799/basedefs/V1_chap04.html#tag_04_17)).
-    At quit nothing drops the terminals: after `RunEvent::Exit` Tauri 2.12.5 clears its resource tables, not the app's state, and ends the process ([`RuntimeRunEvent::Exit`](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.5/crates/tauri/src/app.rs#L1449-L1456), [`cleanup_before_exit`](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.5/crates/tauri/src/app.rs#L1128-L1140), [`run`](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.5/crates/tauri/src/app.rs#L1362-L1365)), so the `Exit` handler's `Core::shutdown` hangs up every terminal at once, `SIGHUP` to both groups, and kills nothing later, as the process ends before the kill would come.
+    At quit nothing drops the terminals: after `RunEvent::Exit` Tauri 2.12.7 clears its resource tables, not the app's state, and ends the process ([`RuntimeRunEvent::Exit`](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.7/crates/tauri/src/app.rs#L1449-L1456), [`cleanup_before_exit`](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.7/crates/tauri/src/app.rs#L1128-L1140), [`run`](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.7/crates/tauri/src/app.rs#L1362-L1365)), so the `Exit` handler's `Core::shutdown` hangs up every terminal at once, `SIGHUP` to both groups, and kills nothing later, as the process ends before the kill would come.
     A terminal dropped once its runtime is gone hangs up at once too, and nothing kills later.
   - **Offers.** kubectl and most tools write new entries, as `aws eks update-kubeconfig` does, to the first file in `KUBECONFIG`: Twigo's, or a proxy terminal's own.
     Twigo watches the directory that holds it, since kubectl, aws and gcloud write in place, az replaces the file by a rename, gcloud may rename it to a backup and write a new one, and kubectl creates and removes `<file>.lock` beside it; a read that does not parse waits for the next event or 200 ms.
@@ -1834,9 +1861,9 @@ It lives in `packages/ui`: the tokens, and primitives that draw every recurring 
   - A title whose end tells tabs apart is cut in the middle, down to 16 characters, head and tail together, around a middle of at least 2em, and any other at its end: the editor's registration says which (`titleEndTells`), set by objects, diffs, logs, shells and port-forwards, whose titles end in a name or a port, and not by a list, whose kind is its title, a terminal or a new manifest.
   - A session's tab says how the session stands, from its registration's `session`: nothing while it runs, the status dot's pulse while it connects, `ended` after the title in quiet with the icon at half strength once it ended, and the error dot when it failed; logs, shells, terminals and port-forwards say it.
   - The close mark is a 20 px element of `role="button"` with a 4 px radius, not a native button: WebKit's accessibility press on an element of `role="tab"` acts on the first native control inside it ([`actionElement`](https://github.com/WebKit/WebKit/blob/WebKit-7625.2.8.11.9/Source/WebCore/accessibility/AccessibilityNodeObject.cpp#L1603-L1678)), so a native button there would take VoiceOver's press and close the tab, which the press selects instead.
-    A press on the close mark never selects its tab first: dockview activates a tab on its left button's `pointerdown` unless that event's default is prevented ([tabs.ts](https://github.com/mathuo/dockview/blob/v8.8.3/packages/dockview-core/src/dockview/components/titlebar/tabs.ts#L1029-L1071)), and the close mark prevents it.
+    A press on the close mark never selects its tab first: dockview activates a tab on its left button's `pointerdown` unless that event's default is prevented ([tabs.ts](https://github.com/mathuo/dockview/blob/v8.9.1/packages/dockview-core/src/dockview/components/titlebar/tabs.ts#L1016-L1058)), and the close mark prevents it.
   - Where the tabs outgrow the strip, dockview's overflow button is a 24 px icon with a 6 px radius and `--row-hover` under the pointer, and its list is drawn as Twigo's menus are: a popover of 8 px radius and 4 px padding whose rows are a menu's, 28 px, 12 px text in content with a 14 px icon; the active tab's row has no mark, since a menu marks a current item with a check where the icon is.
-    Dockview 8.8.3 places the list at the click, its inline `top` and `left` the click's `clientY` and `clientX` ([tabsContainer.ts](https://github.com/mathuo/dockview/blob/v8.8.3/packages/dockview-core/src/dockview/components/titlebar/tabsContainer.ts#L532-L537), [popupService.ts](https://github.com/mathuo/dockview/blob/v8.8.3/packages/dockview-core/src/dockview/components/popupService.ts#L65-L66)), which no CSS reaches, so a margin of 28 px, the button's 24 and the menu's 4, keeps it from covering the button wherever the button is clicked.
+    Dockview 8.9.1 places the list at the click, its inline `top` and `left` the click's `clientY` and `clientX` less the popup anchor's position ([tabsContainer.ts](https://github.com/mathuo/dockview/blob/v8.9.1/packages/dockview-core/src/dockview/components/titlebar/tabsContainer.ts#L532-L537), [popupService.ts](https://github.com/mathuo/dockview/blob/v8.9.1/packages/dockview-core/src/dockview/components/popupService.ts#L61-L66)), which no CSS reaches, so a margin of 28 px, the button's 24 and the menu's 4, keeps it from covering the button wherever the button is clicked.
     It takes its natural width, and container queries on the dockview element hold it no wider than its area less 10 px on each side and no taller than what the area leaves under the strip less 10 px, past which it scrolls.
 - **Shapes and fills** ([decision](decisions/shapes-and-fills.md)).
   - One edge per control: a fill or an outline, never both.
@@ -2048,13 +2075,17 @@ A view that keeps something of the item says so over it: the YAML tab keeps a he
 
 ```ts
 interface CommandDescriptor {
-  id: string; // "k8s.resource.delete", "segla.cluster.create"
+  id: string; // "k8s.resource.delete", "workbench.action.quickOpen"
   title: string;
-  category: string; // palette group: "Kubernetes", "View", "Segla"
-  icon?: string;
+  category: string; // palette group: "Kubernetes", "View"
+  icon?: LucideIcon;
   enablement?: string; // when-expression, evaluated against context keys
-  args?: JSONSchema; // typed arguments: palette prompts for missing ones
-  handler: "frontend" | "backend" | { extension: string };
+  requires?: { when: string; reason: string }[]; // each says why it cannot run while it fails
+  danger?: boolean; // destroys what it acts on
+  sends?: "write" | "exec"; // the class of request it asks the gate for
+}
+interface Command extends CommandDescriptor {
+  run(args: unknown, lookup: Lookup): void | Promise<void>;
 }
 ```
 
@@ -2091,9 +2122,11 @@ interface CommandDescriptor {
   - `editor/title`
   - `panel/title`, `panel/empty` (the panel's strip and what an empty panel offers, 4.1)
   - `edit/toolbar`, `edit/changed`, `edit/conflicts`, `edit/immutable`, `edit/diff`, `edit/answer` (the YAML editor's toolbar and the bars of what an apply answered, 4.3, 6.5)
+  - `edit/server`, `edit/preview` (the bars of the server's diff and of a ready preview)
+  - `helm/marked`, `helm/revision`, `helm/revisions`, `helm/text` (a release's marked bar, a revision's menu, the comparisons of History and the bar over a text, 4.3)
   - `space/context`
-  - `statusBar`
-  - `explorer/kind`
+  - `menubar/file`, `menubar/edit`, `menubar/view`, `menubar/go`, `menubar/window`, `menubar/help` (the native menu bar)
+  - `statusBar`, `explorer/kind` (declared; nothing is in them yet)
 
   The native macOS menu is generated from the registry, replacing legacy `menu.ts`'s hand-written list.
 
@@ -2106,21 +2139,24 @@ interface CommandDescriptor {
 - **Context keys** are typed values scoped to the focused element.
   A `when` expression evaluates them, using a subset of the VS Code grammar: `==`, `!=`, `&&`, `||`, `!`, `=~`, `in`, `<`, `>`.
   Core keys:
-  - `space.id`, `space.contexts`, `space.multiContext`
-  - `context.name`, `context.readOnly`, `context.mode`, `context.unlocked`, `context.provider`
+  - `space.id`, `space.contexts`, `space.multiContext`, `space.count`
+  - `context.name`, `context.readOnly`, `context.mode`, `context.unlocked`
   - `listFocus`, `treeFocus` (a tree, which is also a list: left and right close and open), `editorFocus`, `inputFocus`
   - `pageFocus`: the focus is in the details or an object editor while their Overview view is shown, which the bare keys of 5.2 and the filter's `/` and Escape read
   - `object.uri`: the URI of the editor whose Overview holds the focus, the list editor's for the details, which the page's own commands act on, and unset while another view is shown
   - `object.filtered`: that page's filter holds text
   - `object.subject`: the object an object editor shows, as `resource/details` names it, once discovery has named its resource; the commands of a resource take it as their subject where they are given none, and the details set none, their verbs acting on the list's selected row
   - `inQuickOpen`, `quickOpenToSide` (the open provider opens rows to the side), `quickOpenCanPickMany` (it takes ticked rows)
-  - `resource.group`, `resource.kind`, `resource.namespaced`, `resource.namespace`, `resource.scalable` (discovery lists its `scale` subresource)
+  - `resource.group`, `resource.kind`, `resource.namespaced`, `resource.scalable` (discovery lists its `scale` subresource), `resource.logs`, `resource.shell`, `resource.forward` (its kind has logs, a shell or ports to forward)
   - `resource.selected`: a command of a resource has an object to act on, the list's selected row, or an object editor's once discovery names its resource, and false in a list inside an Overview
   - `resource.cordoned`, `resource.suspended`, `resource.ended`: what the selected row's cells say, or an object editor's printed cells (`header.printed`) once its Overview has come, so a menu offers Uncordon only on a cordoned node, Resume only on a suspended Job or CronJob, and neither Suspend nor Resume on a Job that ended
   - `resource.noContainerRuns`: on the scope of the details and of an object editor, true only while the object's Overview lists containers and none of them runs, on every view (4.6)
   - `list.uri`: the list editor's URI on its scope, so a command on rows acts on that list's selected row or marks, and on nothing where no list is named (4.4)
-  - `selection.count`
-  - `editor.open`, `editor.dirty`, `editor.type`
+  - `editor.open`, `editor.type`
+  - `detailsOpen`, `listMarked`, `panelVisible`, `panelMaximized`, `shellEnvironment`, `operationCountingDown`
+  - `logsFocus`, `logLines`, `forwardsFocus`, `terminalFocus`: the focus is in a logs tab, its lines, the Port forwards view or a terminal
+  - `edit.object`, `edit.new`, `edit.dirty`, `edit.answered`, `edit.conflicts`, `edit.keepable`, `edit.ready`, `edit.unshown`, `edit.policyLocked`, `edit.applicable`, `edit.recreate`: the YAML editor's text and the answer of its dry run, which its toolbar and bars read (4.3, 6.5)
+  - `helm.page`, `helm.tab`, `helm.revision`, `helm.previous`, `helm.marked`, `helm.noCommand` and the `helm.can*` keys: a release page's view, its revisions and marked rows, and what it can reveal or hide (4.3)
   - `panelHasEditor`: the panel holds an editor, which Maximize Panel Size needs (4.1)
   - `logsReopenable`: the active space has a closed logs tab to bring back, for Reopen Logs (4.3)
   - `capability.<verb>.<resource>[/<subresource>]`, the resource by kubectl's name (`capability.create.jobs.batch`), and `resource.capability.<verb>[/<subresource>]` for the list's own resource, which a command of every resource, as delete, cannot name.
@@ -2164,7 +2200,7 @@ interface CommandDescriptor {
   On macOS ⌃N and ⌃P move the cursor down and up too, as VS Code binds them under the same `inQuickOpen` ([`quickOpenSelectNext` and `quickOpenSelectPrevious`](https://github.com/microsoft/vscode/blob/1.144.0/src/vs/workbench/browser/actions/quickAccessActions.ts#L245-L279)); the footer names ↑ and ↓.
   Space is the same under `inQuickOpen && quickOpenCanPickMany`, where the open provider takes ticked rows: what is picked is never a name that holds a space, so Space ticks the row under the cursor and types nothing, while the space that ends the `ns ` prefix is still typed, since the input resolves to the provider with no prefix until it is.
 - **The keybindings editor** shows conflicts and the source of every binding.
-- **Keymaps** ship as contributions: Default (VS Code-like) and k9s (vim movement, `:` mode on bare `:` in `listFocus`).
+- **Keymaps** are to ship as contributions (5.4): Default (VS Code-like) and k9s (`:` mode on bare `:` in `listFocus`); none is built yet, and the core's `list.*` bindings already take vim's `j`, `k` and `⇧G` (4.4).
 - **macOS native menu accelerators** come from the same table.
   The OS consumes them before the webview does, as legacy's menu already relied on.
 - **Shortcuts the webview reserves** (for example ⌘Q, ⌘H, ⌘M, and some ⌘⌥ combinations on WebKitGTK) are documented and refused in the editor.
@@ -2303,7 +2339,8 @@ A section takes over a core one only by naming its id in `replaces`, and its hea
 
 ### 5.5 Catalog and the "Create cluster" provider
 
-- **Catalog entities** (Lens's model): an ID, a name, a source, labels and tags, an icon or colour, a status (phase, reason), and a connection.
+- **Catalog entities** follow Lens's model: an ID, a name, a source, labels and tags, an icon or colour, a status (phase, reason), and a connection.
+  The core's kubeconfig source gives each context its name, colour, file, server, access, namespace and problem so far (`Context` in `twigo-ipc`); the rest comes with providers.
 - **Sources.**
   - The core ships one: kubeconfig files, as kubectl reads them, and folders the user adds (M3).
     - The files `KUBECONFIG` lists, as the login shell sets it (6.1), else `~/.kube/config`, merged by kubectl's rules: the first file to define a name wins ([research](research/state.md)).
@@ -2320,7 +2357,7 @@ A section takes over a core one only by naming its id in `replaces`, and its hea
     Each context says the file that defines it, from `~` under the home directory, and its cluster's URL with only scheme, host and port, so no credential written into the URL reaches the webview.
   - Each extension's `clusterProviders` is a further source.
   - Later: Cluster Inventory `ClusterProfile` (SIG Multicluster, alpha).
-- **Connection** is either
+- **Connection** is to be either
   - `KubeconfigRef { file, context }`, or
   - `Provider { provider, clusterId, server, caData }`, whose credentials come from the provider's `resolve-credential`.
     The token or certificate stays in Rust, is cached until 60 s before it expires, and is refreshed on 401.
@@ -2386,7 +2423,7 @@ That is why `aws`, `gke-gcloud-auth-plugin` and `kubelogin` "are not found" in L
   Twigo never calls `set_var` on its own process; that is unsafe once threads exist.
 - **The core reads `KUBECONFIG` and the proxy variables from `ShellEnv` explicitly**, in the catalog and in the connector.
   kube-rs reads them from the process environment, which on a Dock launch is launchd's.
-- **`--dump-env` and `twigo mcp` are handled in `main()` before the Tauri builder**, so the single-instance plugin does not swallow them.
+- **`--dump-env` is handled in `main()` before the Tauri builder**, so the single-instance plugin does not swallow it; `twigo mcp` is to be handled there too once the MCP shim exists (6.6).
 - **Ordering.**
   Connecting to a cluster waits for the environment.
   On a timeout or any other failure, Twigo proceeds with the process environment and shows a status-bar warning, whose popover offers "Retry" and "Show details": what the shell printed before the frame, never the environment itself.
@@ -2397,7 +2434,8 @@ That is why `aws`, `gke-gcloud-auth-plugin` and `kubelogin` "are not found" in L
 ### 6.2 Credentials (`twigo-kube`)
 
 kube-rs's built-in exec auth does not suit a GUI.
-kube-client 4.2.0 runs the plugin with a blocking `Command::output()` and no timeout, three times for each client it builds, with the terminal's stdin and stderr, so device codes disappear ([research](research/credentials.md)).
+kube-client 5.1.0 runs the plugin with a blocking `Command::output()` and no timeout, with the terminal's stdin and stderr unless the entry's `interactiveMode` is `Never`, so device codes disappear ([research](research/credentials.md)).
+Its builder calls `Auth::try_from` three times for each client, through `auth_layer` and twice through `exec_identity_pem`, and each call runs the plugin: read in `builder.rs` and `config_ext.rs` of 5.1.0, not run; the research counted three runs for each client on 4.2.0.
 Twigo therefore owns credentials, and follows client-go's rules where the plugin sees them:
 
 - **Clients.**
@@ -2462,11 +2500,11 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
 ### 6.3 Transport
 
 - TLS is rustls with ring by default, using the OS trust store when the kubeconfig has no CA.
-  An optional per-context openssl stack covers legacy clusters that rustls rejects: TLS < 1.2, X.509 v1, CN-only certificates.
+  rustls is the only stack, so a cluster that rustls rejects (TLS < 1.2, X.509 v1, CN-only certificates) cannot be reached; a per-context openssl stack would cover them, and is not built.
 - Proxies are picked as kubectl picks them, so a kubeconfig that works there works here.
   - The cluster's `proxy-url` carries every request, to loopback too; client-go accepts http, https and socks5.
   - Without it, the login shell's `HTTPS_PROXY` (or `HTTP_PROXY` for an http server) does, by the rules of Go's `golang.org/x/net/http/httpproxy`: never for `localhost` or a loopback address, and never for a server `NO_PROXY` lists, where `.x` and `*.x` match subdomains only, `x` the domain too, an entry may carry a port, and a CIDR matches servers given by IP.
-    kube-client 4.2.0 instead reads `HTTPS_PROXY` from the process environment and has no `NO_PROXY` (`kube-client/src/config/file_loader.rs`), and hyper-util's matcher follows curl's rules, which proxy loopback and read `.x`, `*.x` and ports otherwise.
+    kube-client 5.1.0 instead reads `HTTPS_PROXY` from the process environment, and `NO_PROXY` only with its `http-proxy` or `socks5` feature, which Twigo's build leaves off (`kube-client/src/config/file_loader.rs`, `no_proxy.rs`), and hyper-util's matcher follows curl's rules, which proxy loopback and read `.x`, `*.x` and ports otherwise.
   - The OS proxy settings are not read: kubectl never reads them, so they would send through a proxy what kubectl reaches directly (the owner's choice, 2026-11-01).
   - socks5 and socks5h both leave names to the proxy, as Go does.
   - An https proxy's certificate is checked against the OS trust store, and the proxy gets no client certificate.
@@ -2490,7 +2528,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   New proxy variables in the login shell rebuild every context's clients the same way.
 - Exec, attach and port-forward use kube-rs WebSockets (`v5.channel.k8s.io`, falling back to `v4`; there is no SPDY) over the HTTP/1.1 client; requests, watches and logs share the HTTP/2 connection (3.2).
   RBAC needs `create` on `pods/exec`, `pods/attach` and `pods/portforward` for WebSocket upgrades from 1.35.
-  The action is offered only after a cached access review.
+  No access review comes first: Shell and Attach need only a container that runs and Forward only a kind that has ports, and a refused upgrade comes back as the API server's own words (3.7, 4.6).
 
 ### 6.4 Read-only enforcement (`twigo-policy`)
 
@@ -2529,7 +2567,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
     - `helm`, whose release storage is Secrets, and which stays the actor of its CLI (7.2): a read by Twigo's own view as that actor would write an audit line for every page, watch and `GET` and tell the cluster's audit log that the CLI made them;
     - Twigo's MCP tools, which read inside the core only to return keys and sizes;
     - extensions, only with the named `secrets` grant;
-    - agents through the proxy, only with an approval scoped to the session and namespace, and a fresh one per call after untrusted content (6.6).
+    - agents, never yet: the gate refuses an agent's read of a Secret whatever approval it carries, a `403` with no ask (below); a scope for the session and namespace, and a fresh one per call after untrusted content, are to come with agents (6.6).
   - forward: `pods/portforward`, and GET without `Upgrade` on `pods/*/proxy` and `services/*/proxy`;
   - exec: `pods/exec`, `pods/attach`, every `nodes/*/proxy` request (it reaches the kubelet, including its exec), and any other request that carries an `Upgrade` header or uses a proxy subresource.
     A `CONNECT` counts too, and so does a path with an empty, `.` or `..` segment, which a server or a proxy in front of it may clean into another.
@@ -2541,7 +2579,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   Confirmations, typed context names and diffs belong to the commands above the layer, because at the HTTP level a scale is one PATCH and a drain is many requests.
 
 - **Actors.**
-  Each actor (the UI, an extension, an MCP client, an agent session) gets its own two kube clients, which carry its policy layer over the context's two shared hyper-util clients and the context's stream counter (3.2).
+  Each actor (the UI, a terminal, `helm`, an MCP client, an extension, an agent session) gets its own two kube clients, which carry its policy layer over the context's two shared hyper-util clients and the context's stream counter (3.2).
   The hub, commands and discovery use the UI's.
   A hyper-util client clone shares its pool, so every actor uses the same HTTP/2 connection, and the layer knows who is asking without per-call plumbing.
   Each request of an actor's clients carries `User-Agent: twigo/<version> (<actor>)`, the actor as the audit log names it, so the cluster's own audit log tells Twigo's requests, and whose they are, from another client's: neither kube nor hyper sets one (kube-client 5.1.0, hyper 1.12.0, hyper-util 0.1.21).
@@ -2568,7 +2606,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
     A relock leaves a read's answer, and a write's, which comes once the write is done, but ends one of the exec or forward class, such as a `proxy` subresource's without `Upgrade` (`GET nodes/<n>/proxy/…`, `POST pods/<p>/proxy/…`), by the rule that ends a splice (below): its context's mode now refuses its class whatever any approval says; such an answer also ends when its context names another cluster.
     The connection that carries an answer ends when the answer's process's handle drops or a relock ends the answer, whatever its client reads: hyper polls a body only while it can buffer what the body gives ([`poll_write`](https://github.com/hyperium/hyper/blob/v1.12.0/src/proto/h1/dispatch.rs#L384-L401)), so a watch whose client stopped reading would otherwise keep its stream and its upstream.
   - An upgrade is a `GET` or a `POST` that carries `Upgrade` to a pod's `exec`, `attach` or `portforward`, or to the `proxy` of a pod, a service or a node, in the core group.
-    It takes a session of the context's budget (3.2), goes on the actor's HTTP/1.1 client with an empty body, and on a `101` is spliced with `hyper::upgrade::on`, which is all kube's own `connect` does ([`connect`](https://github.com/kube-rs/kube/blob/5.0.0/kube-client/src/client/mod.rs#L240-L275)).
+    It takes a session of the context's budget (3.2), goes on the actor's HTTP/1.1 client with an empty body, and on a `101` is spliced with `hyper::upgrade::on`, as kube's own `connect` does once it has read the answer ([`connect`](https://github.com/kube-rs/kube/blob/5.1.0/kube-client/src/client/mod.rs#L237-L277)).
     Any other answer passes through, holds the session until its body ends, and ends with what ends a splice.
     The raw upgraded stream passes through whatever the protocol: WebSocket, SPDY, or SPDY over WebSocket.
     Either direction's end ends both, as kube-apiserver's own proxy does, and so do the process's handle dropping, its context naming another cluster, and a mode that now refuses its class whatever any approval says: a terminal's `kubectl exec` ends when its context turns `read-only` (within 3 ms of the relock in two runs of `crates/twigo-core/tests/proxy_live.rs` on kind 1.37, 2026-11-10), while `guarded` ends none.
@@ -2882,7 +2920,7 @@ Their plans read the objects and what the garbage collector takes with them (eve
     The key is all that keeps them out: WebKit gives them the page's message handler, and Tauri cannot tell their requests from the window's on Linux, nor from the app's on either platform.
   - The M0 spike showed on WebKitGTK and macOS that such a frame invokes nothing, and CI repeats the probe on every Tauri and wry update and weekly ([isolation spike](spikes/tauri-isolation.md)).
   - No frame gets `allow-same-origin`, and the host relays only data, from messages whose `event.source` is that extension's frame.
-  - The page's CSP lists `twigo-ext:` in `frame-src`; Windows serves custom schemes as `http://<scheme>.localhost` (`https://` with `useHttpsScheme`) and needs that form.
+  - The page's CSP has no `frame-src` yet: tier-2 frames need `twigo-ext:` there, and Windows serves custom schemes as `http://<scheme>.localhost` (`https://` with `useHttpsScheme`) and needs that form.
 - **Releases.**
   - Signed updater artifacts (minisign, new key).
   - macOS notarization; Linux AppImage, deb and rpm.
@@ -2954,7 +2992,10 @@ Their plans read the objects and what the garbage collector takes with them (eve
   Catalog, environment, credentials, discovery, the watch hub with every upstream kind, explorer tables, resource editors (read), logs.
   Budgets green at 5k pods.
 - **M2, write path and sessions.**
-  Policy and the policy proxy, the dry-run diff and apply, actions, exec, port-forward, terminal, metrics, Helm read.
+  Modes and the gate below every client; the command bus, with friction checked in Rust, Reveal, undo and the audit log; delete of one or several objects, scale, rollout restart, cordon and uncordon, drain, CronJob trigger, and suspend and resume of Jobs and CronJobs.
+  The YAML editor with OpenAPI schemas, a dry-run diff, server-side apply and its conflicts, and new manifests; exec and attach; the policy proxy and its approval broker; the integrated terminal; the port-forward manager; metrics in pod and node lists and their Overviews; Helm releases read from their Secrets.
+  Passes after the steps: readability, security (protection that only a confirmed command lowers, contexts nobody marked that ask), transport (compressed and streaming lists, a connection no stalled stream can freeze), a picker of several namespaces, and panics and diagnostics.
+  Its last step is the budgets at 5k pods (3.8).
 - **M3, MVP beta.**
   MCP server, settings UI, keybindings editor, auto-update, signing, documentation.
 

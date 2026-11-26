@@ -11,7 +11,7 @@ pub const COUNTDOWN_SECONDS: u32 = 5;
 /// What a command risks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Risk {
-    /// An undo puts it back: scale, cordon, suspend (decision 1 of M2).
+    /// An undo puts it back: scale, cordon, suspend (ARCHITECTURE 6.4).
     Reversible,
     /// A pod that its controller replaces goes.
     Replaced,

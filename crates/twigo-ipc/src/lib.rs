@@ -55,8 +55,8 @@ pub use helm::{
 pub use keyboard::{KeyMapping, KeyboardLayout};
 pub use list::{
     Ack, Cell, Column, ColumnKind, ColumnValues, Grouping, Gvr, ListBatch, ListQuery, MetricsState,
-    Part, PartState, Parts, Row, RowGroup, RowId, SetWindow, Sort, SubscriptionId, ValueCount,
-    ViewState, Window,
+    Part, PartState, Parts, Row, RowGroup, RowId, SetView, SetWindow, Sort, SubscriptionId,
+    ValueCount, ViewState, Window,
 };
 pub use logs::{
     AnsiColor, Bucket, Containers, DownloadLogs, Histogram, Level, LevelFilter, LogAround,

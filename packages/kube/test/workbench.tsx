@@ -1,6 +1,6 @@
 import { act, render, within } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, vi } from "vitest";
-import type { Backend } from "@twigo/protocol";
+import type { Backend, ListBatch, RequestOf } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { WorkbenchView, type Workbench } from "@twigo/workbench";
 import { testWorkbench } from "@twigo/workbench/testing";
@@ -44,6 +44,32 @@ export async function openList(
   });
   await settle();
   return workbench;
+}
+
+export function scriptedBackend() {
+  const mock = createMockBackend("ready");
+  let send: ((batch: ListBatch) => void) | undefined;
+  let view = 0;
+  const backend: Backend = {
+    invoke: (command, request) => {
+      if (command === "list_set_view") {
+        view = (request as RequestOf<"list_set_view">).view;
+      }
+      return command.startsWith("list_")
+        ? Promise.resolve(null as never)
+        : mock.invoke(command, request);
+    },
+    subscribe(command, request, onMessage) {
+      if (command !== "list_subscribe")
+        return mock.subscribe(command, request, onMessage);
+      send = onMessage;
+      return Promise.resolve(1 as never);
+    },
+  };
+  return {
+    backend,
+    send: (batch: ListBatch) => send?.({ ...batch, view }),
+  };
 }
 
 export const hoverIcons = (row: HTMLElement) =>

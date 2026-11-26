@@ -12,6 +12,7 @@ import { Changes } from "@twigo/workbench";
 import {
   mountKube,
   openList,
+  scriptedBackend,
   settle,
   withScreenSize,
 } from "../../test/workbench";
@@ -68,35 +69,52 @@ function spied(backend: Backend) {
     subscriptions: () =>
       subscribe.mock.calls.filter(([command]) => command === "list_subscribe")
         .length,
-    queries: () =>
-      subscribe.mock.calls
-        .filter(([command]) => command === "list_subscribe")
-        .map(([, request]) => request as ListQuery),
+    queries: () => {
+      const asked = [
+        ...subscribe.mock.calls.flatMap(([command, request], at) =>
+          command === "list_subscribe"
+            ? [
+                {
+                  order: subscribe.mock.invocationCallOrder[at] ?? 0,
+                  query: request as ListQuery,
+                },
+              ]
+            : [],
+        ),
+        ...invoke.mock.calls.flatMap(([command, request], at) =>
+          command === "list_set_view"
+            ? [
+                {
+                  order: invoke.mock.invocationCallOrder[at] ?? 0,
+                  view: request as RequestOf<"list_set_view">,
+                },
+              ]
+            : [],
+        ),
+      ].sort((a, b) => a.order - b.order);
+      const queries: ListQuery[] = [];
+      for (const change of asked) {
+        const before = queries[queries.length - 1];
+        if ("query" in change) queries.push(change.query);
+        else if (before) {
+          const { id: _, view: __, ...fields } = change.view;
+          queries.push({ ...before, ...fields });
+        }
+      }
+      return queries;
+    },
   };
 }
 
 const last = <T,>(items: readonly T[]) => items[items.length - 1];
 
 function scripted() {
-  const mock = createMockBackend("ready");
-  let send: ((batch: ListBatch) => void) | undefined;
-  const backend: Backend = {
-    invoke: (command, request) =>
-      command.startsWith("list_")
-        ? Promise.resolve(null as never)
-        : mock.invoke(command, request),
-    subscribe(command, request, onMessage) {
-      if (command !== "list_subscribe")
-        return mock.subscribe(command, request, onMessage);
-      send = onMessage;
-      return Promise.resolve(1 as never);
-    },
-  };
+  const { backend, send } = scriptedBackend();
   return {
     backend,
     send: async (batch: ListBatch) => {
       act(() => {
-        send?.(batch);
+        send(batch);
       });
       await settle(1);
     },
@@ -113,6 +131,7 @@ const NAMES = [
 function batch(seq: number, known: boolean): ListBatch {
   return {
     seq,
+    view: 0,
     total: known ? 2 : 0,
     columns: known ? [...NAMES] : [],
     window: { start: 0, ids: known ? ["a", "b"] : [] },
@@ -254,7 +273,7 @@ describe("the main list", () => {
     expect(sent.subscriptions()).toBe(subscriptions);
   });
 
-  test("with a text filter set, showing or hiding CPU or Memory opens no subscription, though another column does", async () => {
+  test("with a text filter set, showing or hiding CPU or Memory changes no query, though another column does", async () => {
     const backend = createMockBackend("ready");
     const sent = spied(backend);
     await openList(backend);
@@ -262,14 +281,16 @@ describe("the main list", () => {
       target: { value: "auth" },
     });
     await settle(30);
+    const queries = sent.queries().length;
     const subscriptions = sent.subscriptions();
     await choose("CPU");
     await choose("Memory");
     await choose("CPU");
     expect(last(sent.reads())).toBe(true);
-    expect(sent.subscriptions()).toBe(subscriptions);
+    expect(sent.queries().length).toBe(queries);
     await choose("Restarts");
-    expect(sent.subscriptions()).toBe(subscriptions + 1);
+    expect(sent.queries().length).toBe(queries + 1);
+    expect(sent.subscriptions()).toBe(subscriptions);
   });
 
   test("reads while the list is sorted by a metric though none is drawn, and stops with the sort", async () => {
@@ -483,6 +504,7 @@ describe("a poll", () => {
     const first = seq === 1;
     return {
       seq,
+      view: 0,
       total: IDS.length,
       columns: first
         ? [
@@ -573,6 +595,7 @@ describe("a column named like a measure", () => {
   function pools(): ListBatch {
     return {
       seq: 1,
+      view: 0,
       total: 2,
       columns: [
         { name: "Name", kind: "string", priority: 0 },
@@ -694,7 +717,7 @@ describe("a kind whose first batches do not know the columns", () => {
       .filter((query) => query.text === "auth")
       .map((query) => query.columns);
 
-  test("opens one more subscription once its columns come, in ten seconds, and never another", async () => {
+  test("asks one more query once its columns come, in ten seconds, and never another", async () => {
     const sent = await filtered(
       lateColumns(),
       "k8s-list://prod-eu/v1/pods?q=auth",

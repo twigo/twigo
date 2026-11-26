@@ -1,4 +1,7 @@
 import {
+  createContext,
+  memo,
+  useContext,
   useEffect,
   useEffectEvent,
   useId,
@@ -13,6 +16,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronDown, ChevronRight, Ellipsis } from "lucide-react";
 import { cn } from "../lib/cn";
 import type { ListController } from "../lib/list";
+import type { Tone } from "../lib/tone";
 import { useWidth } from "../lib/useWidth";
 import {
   ActionContextMenu,
@@ -25,7 +29,7 @@ import { EmptyState } from "../components/empty-state";
 import { Skeleton } from "../components/skeleton";
 import { fitWidth } from "./fit";
 import { HeaderCell, MarkBox } from "./header";
-import type { GridColumn, GridItem, GridSort } from "./types";
+import type { GridColumn, GridItem, GridSort, RowFlash } from "./types";
 
 export const ROW_HEIGHT = 24;
 const HEADER_HEIGHT = 28;
@@ -93,6 +97,13 @@ export interface DataGridProps<R, G> {
   readonly indexOf: (id: string) => number;
   /** The items on screen, start inclusive, end exclusive; stable identity. */
   readonly onRange: (start: number, end: number) => void;
+  /**
+   * A cell's content. A row draws again when what it shows changes, its
+   * data, flash, mark, cursor, `columns`, `cell` or the grid's template, and
+   * a scroll that keeps it in the window moves it as it is. An owner with
+   * many rows keeps `columns`, `cell` and the data of rows that did not
+   * change the same between renders.
+   */
   readonly cell: (row: R, column: GridColumn) => ReactNode;
   readonly group?: (group: G) => ReactNode;
   readonly onToggleGroup?: (id: string) => void;
@@ -137,8 +148,12 @@ export interface DataGridProps<R, G> {
   readonly waiting?: string | undefined;
   /** What shows when there are no items. */
   readonly empty?: ReactNode;
-  /** When a cell last changed, to flash it; undefined when it did not. */
-  readonly flash?: (id: string, column: string) => number | undefined;
+  /**
+   * When the cells of a row last changed, to flash them; undefined for a row
+   * with none. The same map until one of its flashes starts or ends, since a
+   * row draws again only when it changes.
+   */
+  readonly flash?: (id: string) => RowFlash | undefined;
   /** Registers the focusable grid for the list commands while it is mounted. */
   readonly register?: (
     element: HTMLElement,
@@ -269,7 +284,9 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     length,
     item,
     indexOf,
+    onSelect,
     onActivate,
+    onOpen,
     onToggleGroup,
     marked,
     query,
@@ -286,7 +303,9 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
       length,
       item,
       indexOf,
+      onSelect,
       onActivate,
+      onOpen,
       onToggleGroup,
       marked,
       query,
@@ -310,6 +329,32 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     }
     setWanted(undefined);
   }, [wanted, wantedItem, ready]);
+
+  // Rows act through these, which never change, so that the owner's new
+  // handlers draw no row.
+  const act = useMemo<RowActs<R>>(
+    () => ({
+      select(id, data) {
+        setWanted(undefined);
+        setCursor(id);
+        latest.current.onSelect(id, data);
+      },
+      activate(id, data) {
+        latest.current.onActivate(id, data);
+      },
+      open(id, data) {
+        latest.current.onOpen?.(id, data);
+      },
+      mark(ids, on) {
+        latest.current.onMark?.(ids, on);
+      },
+      press(id) {
+        firstPress.current = id;
+      },
+      pressed: (id) => firstPress.current === id,
+    }),
+    [],
+  );
 
   const controller = useMemo<ListController>(() => {
     const at = () => {
@@ -441,25 +486,29 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     if (column.coverable !== true) break;
     room += widthOf(column);
   }
-  const active = virtual.find(
-    (at) => cursor !== undefined && item(at.index)?.id === cursor,
-  );
-  const cellClasses = columns.map((column) =>
-    cn(
-      "truncate px-2",
-      column.align === "end" && "text-right",
-      column.numeric && "tabular-nums",
-    ),
+  const cellClasses = useMemo(
+    () =>
+      columns.map((column) =>
+        cn(
+          "truncate px-2",
+          column.align === "end" && "text-right",
+          column.numeric && "tabular-nums",
+        ),
+      ),
+    [columns],
   );
 
-  const rows = virtual.map((at) => {
+  let active: number | undefined;
+  const rows: ReactNode[] = [];
+  for (const at of virtual) {
     const target = item(at.index);
+    const top = at.start - headerHeight;
     const place = {
-      transform: `translateY(${String(at.start - headerHeight)}px)`,
+      transform: `translateY(${String(top)}px)`,
       height: ROW_HEIGHT,
     };
     if (!target) {
-      return (
+      rows.push(
         <div
           key={`pending-${String(at.index)}`}
           role="row"
@@ -476,13 +525,15 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
           ))}
           {filler && <div role="gridcell" />}
           {!overlayMenu && <div role="gridcell" />}
-        </div>
+        </div>,
       );
+      continue;
     }
     const isCursor = target.id === cursor;
+    if (isCursor) active = at.index;
     if (target.type === "group") {
       const Chevron = target.open ? ChevronDown : ChevronRight;
-      return (
+      rows.push(
         <div
           key={target.id}
           id={rowId(at.index)}
@@ -510,179 +561,45 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
             <Chevron aria-hidden className="size-3.5 shrink-0 text-support" />
             {group?.(target.data)}
           </div>
-        </div>
+        </div>,
       );
+      continue;
     }
-    const isMarked = marked?.has(target.id) === true;
-    const { tone } = target;
-    const tint = isMarked
-      ? "bg-selected"
-      : isCursor
-        ? "bg-selected-unfocused group-focus/grid:bg-selected"
-        : undefined;
-    const held = holding
-      ? cn(
-          HELD,
-          isMarked
-            ? "before:bg-selected"
-            : isCursor
-              ? "before:bg-selected-unfocused group-focus/grid:before:bg-selected"
-              : tone
-                ? BAND_HELD
-                : "group-hover/row:before:bg-row-hover",
-        )
-      : undefined;
-    const markCell = anyMarked ? MARK_CELL : MARK_CELL_REVEALING;
-    const edge = held !== undefined && tone ? EDGE : undefined;
-    const ends = tint ?? (tone ? BAND_ENDS : undefined);
-    const select = () => {
-      setWanted(undefined);
-      setCursor(target.id);
-      onSelect(target.id, target.data);
-    };
-    return (
-      <DataRow
+    rows.push(
+      <GridRow
         key={target.id}
-        id={rowId(at.index)}
-        role="row"
-        aria-rowindex={at.index + (header ? 2 : 1)}
-        aria-selected={anyMarked ? isMarked : isCursor}
-        data-cursor={isCursor || undefined}
-        keepActions={isCursor}
-        overlay={overlayMenu ? (ends ?? "bg-row-hover") : undefined}
-        actions={
-          <>
-            {menu.length > 0 && (
-              <ActionDropdown
-                actions={menu}
-                label="Row actions"
-                onOpen={select}
-              >
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                  }}
-                  className={cn(
-                    "flex size-6 items-center justify-center rounded-md text-support outline-none hover:bg-row-hover hover:text-content focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-hover",
-                    !overlayMenu &&
-                      "opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100",
-                    !overlayMenu && isCursor && "opacity-100",
-                  )}
-                >
-                  <Ellipsis aria-hidden className="size-3.5" />
-                </button>
-              </ActionDropdown>
-            )}
-          </>
-        }
-        icons={
-          inline &&
-          (() => {
-            const actions = inline(target.data);
-            return (
-              actions.length > 0 &&
-              room >= iconsWidth(actions.length) && (
-                <RowIcons
-                  tint={ends}
-                  actions={actions.map(({ keys: _, ...action }) => ({
-                    ...action,
-                    run: () => {
-                      select();
-                      action.run();
-                    },
-                  }))}
-                  onShow={onRest && (() => onRest(target.data))}
-                />
-              )
-            );
-          })
-        }
-        onClick={(event) => {
-          // A click in a menu the row opened reaches it through the portal.
-          if (!event.currentTarget.contains(event.target as Node)) return;
-          select();
-          onActivate(target.id, target.data);
-        }}
-        onContextMenu={select}
-        onMouseDown={
-          onOpen &&
-          ((event) => {
-            if (event.detail > 1) event.preventDefault();
-            else firstPress.current = target.id;
-          })
-        }
-        onDoubleClick={
-          onOpen &&
-          ((event) => {
-            const { target: hit } = event;
-            if (
-              firstPress.current === target.id &&
-              hit instanceof Element &&
-              event.currentTarget.contains(hit) &&
-              !hit.closest("button, a, input, [data-mark]")
-            )
-              onOpen(target.id, target.data);
-          })
-        }
-        data-tone={tone}
-        className={cn(
-          "group/row absolute inset-x-0 top-0 grid items-center",
-          tint ?? (tone ? BAND : "hover:bg-row-hover"),
-          tone && EDGE,
-        )}
-        style={{ ...place, gridTemplateColumns: template }}
-      >
-        {marking && (
-          <div
-            role="gridcell"
-            data-mark=""
-            className={held ? cn(markCell, held, edge, "left-0") : markCell}
-          >
-            <MarkBox
-              checked={isMarked}
-              label={isMarked ? "Unmark row" : "Mark row"}
-              onToggle={() => {
-                onMark([target.id], !isMarked);
-              }}
-            />
-          </div>
-        )}
-        {columns.map((column, order) => {
-          const since = flash?.(target.id, column.id);
-          const first = order === 0;
-          return (
-            <div
-              key={column.id}
-              role="gridcell"
-              data-column={column.id}
-              style={
-                first && held ? { left: marking ? MARK_WIDTH : 0 } : undefined
-              }
-              className={
-                first && held
-                  ? cn(cellClasses[order], held, !marking && edge)
-                  : cellClasses[order]
-              }
-            >
-              <span
-                key={since ?? "steady"}
-                data-fit={column.id}
-                className={cn(
-                  "-mx-1 rounded-sm px-1",
-                  since !== undefined &&
-                    "relative isolate before:absolute before:inset-0 before:-z-10 before:rounded-[inherit] before:bg-(--flash) before:opacity-0 before:animate-flash",
-                )}
-              >
-                {cell(target.data, column)}
-              </span>
-            </div>
-          );
-        })}
-        {filler && <div role="gridcell" />}
-      </DataRow>
+        domId={rowId(at.index)}
+        rowIndex={at.index + (header ? 2 : 1)}
+        top={top}
+        id={target.id}
+        data={target.data}
+        tone={target.tone}
+        cursor={isCursor}
+        marked={marked?.has(target.id) === true}
+        anyMarked={anyMarked}
+        marking={marking}
+        holding={holding}
+        overlayMenu={overlayMenu}
+        filler={filler}
+        canOpen={onOpen !== undefined}
+        template={template}
+        columns={columns}
+        classes={cellClasses}
+        cell={cell}
+        flashes={flash?.(target.id)}
+        act={act}
+      />,
     );
-  });
+  }
+  const live: GridLive = {
+    menu,
+    inline: inline && ((data) => inline(data as R)),
+    onRest: onRest && ((data) => onRest(data as R)),
+    room,
+    select: (id, data) => {
+      act.select(id, data as R);
+    },
+  };
 
   return (
     <div
@@ -698,7 +615,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
       }}
       aria-rowcount={length + (header ? 1 : 0)}
       aria-multiselectable={marking || undefined}
-      aria-activedescendant={active && rowId(active.index)}
+      aria-activedescendant={active === undefined ? undefined : rowId(active)}
       className="group/grid h-full min-h-0 overflow-auto outline-none"
     >
       {header && (
@@ -783,11 +700,292 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
             className="relative"
             style={{ height: virtualizer.getTotalSize(), minWidth }}
           >
-            {rows}
+            <Live value={live}>{rows}</Live>
           </div>
         </ActionContextMenu>
       )}
     </div>
+  );
+}
+
+/**
+ * What a row's actions read from the grid when they show. It changes with
+ * every render of the grid, as the owner's menu and handlers do, and draws
+ * again only the actions mounted, never a row.
+ */
+interface GridLive {
+  readonly menu: ActionGroups;
+  readonly inline: ((data: unknown) => readonly Action[]) | undefined;
+  readonly onRest: ((data: unknown) => () => void) | undefined;
+  /** What the columns at the row's end that may be covered take. */
+  readonly room: number;
+  readonly select: (id: string, data: unknown) => void;
+}
+
+const Live = createContext<GridLive | undefined>(undefined);
+
+function useLive(): GridLive {
+  const live = useContext(Live);
+  if (!live) throw new Error("a row's actions need the grid that draws them");
+  return live;
+}
+
+interface RowActs<R> {
+  readonly select: (id: string, data: R) => void;
+  readonly activate: (id: string, data: R) => void;
+  readonly open: (id: string, data: R) => void;
+  readonly mark: (ids: readonly string[], on: boolean) => void;
+  /** The first press of a double click lands on a row. */
+  readonly press: (id: string) => void;
+  /** Whether the first press of a double click landed on that row. */
+  readonly pressed: (id: string) => boolean;
+}
+
+interface GridRowProps<R> {
+  readonly domId: string;
+  readonly rowIndex: number;
+  readonly top: number;
+  readonly id: string;
+  readonly data: R;
+  readonly tone: Tone | undefined;
+  readonly cursor: boolean;
+  readonly marked: boolean;
+  readonly anyMarked: boolean;
+  readonly marking: boolean;
+  readonly holding: boolean;
+  readonly overlayMenu: boolean;
+  readonly filler: boolean;
+  readonly canOpen: boolean;
+  readonly template: string;
+  readonly columns: readonly GridColumn[];
+  /** A cell's classes, parallel to `columns`. */
+  readonly classes: readonly string[];
+  readonly cell: (row: R, column: GridColumn) => ReactNode;
+  readonly flashes: RowFlash | undefined;
+  readonly act: RowActs<R>;
+}
+
+/**
+ * A row of data. It draws again only when a prop changes, so a scroll that
+ * keeps it in the window moves it as it is.
+ */
+const GridRow = memo(function GridRow<R>({
+  domId,
+  rowIndex,
+  top,
+  id,
+  data,
+  tone,
+  cursor,
+  marked,
+  anyMarked,
+  marking,
+  holding,
+  overlayMenu,
+  filler,
+  canOpen,
+  template,
+  columns,
+  classes,
+  cell,
+  flashes,
+  act,
+}: GridRowProps<R>) {
+  const tint = marked
+    ? "bg-selected"
+    : cursor
+      ? "bg-selected-unfocused group-focus/grid:bg-selected"
+      : undefined;
+  const held = holding
+    ? cn(
+        HELD,
+        marked
+          ? "before:bg-selected"
+          : cursor
+            ? "before:bg-selected-unfocused group-focus/grid:before:bg-selected"
+            : tone
+              ? BAND_HELD
+              : "group-hover/row:before:bg-row-hover",
+      )
+    : undefined;
+  const markCell = anyMarked ? MARK_CELL : MARK_CELL_REVEALING;
+  const edge = held !== undefined && tone ? EDGE : undefined;
+  const ends = tint ?? (tone ? BAND_ENDS : undefined);
+  return (
+    <DataRow
+      id={domId}
+      role="row"
+      aria-rowindex={rowIndex}
+      aria-selected={anyMarked ? marked : cursor}
+      data-cursor={cursor || undefined}
+      keepActions={cursor}
+      overlay={overlayMenu ? (ends ?? "bg-row-hover") : undefined}
+      actions={
+        <RowMenu
+          id={id}
+          data={data}
+          cursor={cursor}
+          overlayMenu={overlayMenu}
+        />
+      }
+      icons={<RowInline id={id} data={data} tint={ends} />}
+      onClick={(event) => {
+        // A click in a menu the row opened reaches it through the portal.
+        if (!event.currentTarget.contains(event.target as Node)) return;
+        act.select(id, data);
+        act.activate(id, data);
+      }}
+      onContextMenu={() => {
+        act.select(id, data);
+      }}
+      onMouseDown={
+        canOpen
+          ? (event) => {
+              if (event.detail > 1) event.preventDefault();
+              else act.press(id);
+            }
+          : undefined
+      }
+      onDoubleClick={
+        canOpen
+          ? (event) => {
+              const { target: hit } = event;
+              if (
+                act.pressed(id) &&
+                hit instanceof Element &&
+                event.currentTarget.contains(hit) &&
+                !hit.closest("button, a, input, [data-mark]")
+              )
+                act.open(id, data);
+            }
+          : undefined
+      }
+      data-tone={tone}
+      className={cn(
+        "group/row absolute inset-x-0 top-0 grid items-center",
+        tint ?? (tone ? BAND : "hover:bg-row-hover"),
+        tone && EDGE,
+      )}
+      style={{
+        transform: `translateY(${String(top)}px)`,
+        height: ROW_HEIGHT,
+        gridTemplateColumns: template,
+      }}
+    >
+      {marking && (
+        <div
+          role="gridcell"
+          data-mark=""
+          className={held ? cn(markCell, held, edge, "left-0") : markCell}
+        >
+          <MarkBox
+            checked={marked}
+            label={marked ? "Unmark row" : "Mark row"}
+            onToggle={() => {
+              act.mark([id], !marked);
+            }}
+          />
+        </div>
+      )}
+      {columns.map((column, order) => {
+        const since = flashes?.get(column.id);
+        const first = order === 0;
+        return (
+          <div
+            key={column.id}
+            role="gridcell"
+            data-column={column.id}
+            style={
+              first && held ? { left: marking ? MARK_WIDTH : 0 } : undefined
+            }
+            className={
+              first && held
+                ? cn(classes[order], held, !marking && edge)
+                : classes[order]
+            }
+          >
+            <span
+              key={since ?? "steady"}
+              data-fit={column.id}
+              className={cn(
+                "-mx-1 rounded-sm px-1",
+                since !== undefined &&
+                  "relative isolate before:absolute before:inset-0 before:-z-10 before:rounded-[inherit] before:bg-(--flash) before:opacity-0 before:animate-flash",
+              )}
+            >
+              {cell(data, column)}
+            </span>
+          </div>
+        );
+      })}
+      {filler && <div role="gridcell" />}
+    </DataRow>
+  );
+}) as <R>(props: GridRowProps<R>) => ReactNode;
+
+function RowMenu({
+  id,
+  data,
+  cursor,
+  overlayMenu,
+}: {
+  id: string;
+  data: unknown;
+  cursor: boolean;
+  overlayMenu: boolean;
+}) {
+  const { menu, select } = useLive();
+  if (menu.length === 0) return null;
+  return (
+    <ActionDropdown
+      actions={menu}
+      label="Row actions"
+      onOpen={() => {
+        select(id, data);
+      }}
+    >
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+        }}
+        className={cn(
+          "flex size-6 items-center justify-center rounded-md text-support outline-none hover:bg-row-hover hover:text-content focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-hover",
+          !overlayMenu &&
+            "opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100",
+          !overlayMenu && cursor && "opacity-100",
+        )}
+      >
+        <Ellipsis aria-hidden className="size-3.5" />
+      </button>
+    </ActionDropdown>
+  );
+}
+
+function RowInline({
+  id,
+  data,
+  tint,
+}: {
+  id: string;
+  data: unknown;
+  tint: string | undefined;
+}) {
+  const { inline, onRest, room, select } = useLive();
+  const actions = inline?.(data) ?? [];
+  if (actions.length === 0 || room < iconsWidth(actions.length)) return null;
+  return (
+    <RowIcons
+      tint={tint}
+      actions={actions.map(({ keys: _, ...action }) => ({
+        ...action,
+        run: () => {
+          select(id, data);
+          action.run();
+        },
+      }))}
+      onShow={onRest && (() => onRest(data))}
+    />
   );
 }
 
@@ -809,7 +1007,7 @@ function DataRow({
   /** The row's tint, when the actions lie over its end rather than in a column. */
   overlay: string | undefined;
   actions: ReactNode;
-  icons: (() => ReactNode) | undefined;
+  icons: ReactNode;
 }) {
   const [pointed, setPointed] = useState(false);
   const [rested, setRested] = useState(false);
@@ -846,7 +1044,7 @@ function DataRow({
       {overlay === undefined ? (
         <div role="gridcell" className="flex items-center justify-center">
           {shown && actions}
-          {rested && icons?.()}
+          {rested && icons}
         </div>
       ) : (
         shown && (

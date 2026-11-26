@@ -219,6 +219,73 @@ async fn a_reader_hears_only_the_keys_whose_values_changed_appeared_or_went() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_poll_builds_every_sample_anew_and_holds_no_answer_but_the_last_while_it_sleeps() {
+    let rig = rig().await;
+    let mut reader = rig.context.reader(Kind::Pods);
+    reader.want(namespace("a"));
+    sleep(Duration::from_millis(1)).await;
+    drop(reader.drain());
+    let held = |name| reader.sample("a", name).expect("a sample");
+    let (p1, p2) = (held("p1"), held("p2"));
+
+    sleep(INTERVAL + Duration::from_secs(1)).await;
+    for (before, name) in [(&p1, "p1"), (&p2, "p2")] {
+        let now = held(name);
+        assert_eq!(*before, now, "the same values at the next poll");
+        assert!(!Arc::ptr_eq(before, &now), "{name}");
+        assert_eq!(
+            Arc::strong_count(before),
+            1,
+            "{name}: the poll holds the answer before only while it reads the next"
+        );
+    }
+}
+
+fn held_by_a_late_reader(rig: &Rig) -> Arc<Samples> {
+    let mut late = rig.context.reader(Kind::Pods);
+    late.want(namespace("a"));
+    let update = late.drain();
+    let [reset] = &update.resets[..] else {
+        panic!("one reset: {update:?}");
+    };
+    Arc::clone(&reset.samples)
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_pod_found_again_keeps_the_name_of_the_answer_before_whether_its_values_moved_or_not() {
+    let rig = rig().await;
+    let mut reader = rig.context.reader(Kind::Pods);
+    reader.want(namespace("a"));
+    sleep(Duration::from_millis(1)).await;
+    let first = held_by_a_late_reader(&rig);
+
+    rig.fake.pod_usage("a", "p2", &[("main", "2", "40Mi")]);
+    sleep(INTERVAL + Duration::from_secs(1)).await;
+    let second = held_by_a_late_reader(&rig);
+
+    assert_eq!(polls(&rig.fake), 2);
+    assert!(!Arc::ptr_eq(&first, &second), "the second poll's answer");
+    assert_ne!(
+        first.get("a", "p2"),
+        second.get("a", "p2"),
+        "the values of p2 moved"
+    );
+    let name_of = |samples: &Samples, name: &str| {
+        samples
+            .iter()
+            .find_map(|(_, found, _)| (found == name).then_some(found.as_ptr()))
+            .expect("a pod of the answer")
+    };
+    for name in ["p1", "p2"] {
+        assert_eq!(
+            name_of(&first, name),
+            name_of(&second, name),
+            "{name}: one allocation for the name in both answers"
+        );
+    }
+}
+
+#[tokio::test(start_paused = true)]
 async fn an_answer_twigo_cannot_decode_is_unavailable_and_logged_once_at_error_with_its_code() {
     let rig = rig().await;
     let events = twigo_log::capture();
@@ -562,7 +629,7 @@ async fn an_answer_that_lands_between_the_check_and_the_drain_is_in_the_update_a
         rig.context.board(Kind::Pods).land(
             &Scope::Namespace("a".into()),
             MetricsState::Ready,
-            sample::parse(answer, Kind::Pods).unwrap(),
+            sample::parse(answer, Kind::Pods, None).unwrap(),
             None,
         );
     });

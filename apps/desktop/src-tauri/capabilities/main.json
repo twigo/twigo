@@ -31,6 +31,7 @@
     "allow-resources-watch",
     "allow-list-subscribe",
     "allow-list-set-window",
+    "allow-list-set-view",
     "allow-list-ack",
     "allow-list-unsubscribe",
     "allow-helm-list-subscribe",

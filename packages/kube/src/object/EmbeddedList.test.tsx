@@ -290,6 +290,7 @@ test("a node's pod that is not ready and restarted within the hour warns in Read
   act(() => {
     send?.({
       seq: 1,
+      view: 0,
       total: 2,
       columns: [
         { name: "Name", kind: "string", priority: 0 },

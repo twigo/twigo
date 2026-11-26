@@ -26,7 +26,7 @@ export const CANCEL_COUNTDOWN = "workbench.action.cancelCountdown";
 /** The context key that lists the spaces whose last action an undo puts back now. */
 export const UNDOABLE = "operationUndo";
 
-/** Puts back the active space's last action (decision 5 of M2). */
+/** Puts back the active space's last action (ARCHITECTURE 6.4). */
 export const UNDO = "workbench.action.undo";
 
 /** How a command's caller draws its friction: the button's icon; the plan says whether it destroys. */

@@ -26,8 +26,8 @@ use crate::{
 /// code that keeps the revision from being read, as
 /// [`ReleaseBatch::problem`] tells them, and is empty when it is read: a
 /// request that fails keeps the label's Status. Its batches are
-/// [`ListBatch`](crate::ListBatch)es, and `list_set_window`, `list_ack` and
-/// `list_unsubscribe` serve it.
+/// [`ListBatch`](crate::ListBatch)es, and `list_set_window`, `list_set_view`,
+/// `list_ack` and `list_unsubscribe` serve it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ReleaseListQuery {

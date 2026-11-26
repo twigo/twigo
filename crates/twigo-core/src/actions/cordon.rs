@@ -1,7 +1,7 @@
 //! Marks a node unschedulable, or schedulable again, as `kubectl cordon`
 //! and `kubectl uncordon` do (kubectl v0.37.1, `pkg/drain/cordon.go`): a
 //! strategic merge patch of `spec.unschedulable`, which uncordon removes.
-//! Either runs at once with an undo (decision 1 of M2). The run reads the
+//! Either runs at once with an undo (ARCHITECTURE 6.4). The run reads the
 //! node first and writes as of that read, so its undo puts back only what
 //! its own write changed: a node someone cordoned meanwhile is cordoned
 //! already, as kubectl says, and offers no undo.

@@ -15,6 +15,7 @@ import type {
   MetricsState,
   Report,
   RowId,
+  SetView,
   ShellEnvironment,
   ShellKind,
   ShellTarget,
@@ -740,6 +741,10 @@ export function createMockBackend(
       subscription(id).setWindow(start, end, reads);
       return null;
     },
+    list_set_view: ({ id, ...view }) => {
+      subscription(id).setView(view);
+      return null;
+    },
     list_ack: ({ id, seq }) => {
       subscription(id).ack(seq);
       return null;
@@ -1264,6 +1269,8 @@ class Subscription {
   #seq = 0;
   #acked = 0;
   #dirty = true;
+  /** The number of the latest view change, which the batches reflect. */
+  #view = 0;
   #base: { version: number; rows: MockRow[] } | undefined;
   #cache:
     | {
@@ -1277,6 +1284,7 @@ class Subscription {
   #scrape = -1;
   #sentRows = false;
   #sent: {
+    view: number;
     total: number;
     start: number;
     ids: readonly RowId[];
@@ -1289,6 +1297,7 @@ class Subscription {
     layout: readonly Column[];
     metrics: MetricsState | null;
   } = {
+    view: 0,
     total: -1,
     start: 0,
     ids: [],
@@ -1365,6 +1374,24 @@ class Subscription {
   setWindow(start: number, end: number, metrics: boolean): void {
     this.#window = [start, end];
     this.#join?.reads(metrics);
+    this.#moved = true;
+    this.touch();
+    this.#flushSoon();
+  }
+
+  /**
+   * Changes the view part of the query in place, as Rust's does, and flushes at once: a text
+   * that does not parse is refused and changes nothing, and a list sorted by a metric holds
+   * its first order for the scopes it reads again.
+   */
+  setView({ view, ...shape }: Omit<SetView, "id">): void {
+    this.#query = compileQuery(
+      { ...this.#query.query, ...shape },
+      this.#columns,
+    );
+    this.#cache = undefined;
+    this.#view = view;
+    this.#sentRows = false;
     this.#moved = true;
     this.touch();
     this.#flushSoon();
@@ -1514,6 +1541,7 @@ class Subscription {
     const columnsChanged = first || layout !== this.#sent.layout;
     const metrics = knows ? (join?.state ?? null) : null;
     const metricsChanged = metrics !== null && metrics !== this.#sent.metrics;
+    const viewChanged = this.#view !== this.#sent.view;
     const windowChanged =
       first ||
       start !== this.#sent.start ||
@@ -1524,6 +1552,7 @@ class Subscription {
     );
     if (
       !windowChanged &&
+      !viewChanged &&
       upserts.length === 0 &&
       status === this.#sent.status &&
       !partsChanged &&
@@ -1536,6 +1565,7 @@ class Subscription {
       return;
     }
     this.#sent = {
+      view: this.#view,
       total,
       start,
       ids,
@@ -1551,6 +1581,7 @@ class Subscription {
     this.#sentRows ||= ids.length > 0;
     this.#onMessage({
       seq: this.#seq,
+      view: this.#view,
       total,
       columns: columnsChanged ? [...layout] : null,
       window: windowChanged ? { start, ids } : null,

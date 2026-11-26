@@ -1,7 +1,8 @@
 //! The bench mode of `bench/harness.sh` (ARCHITECTURE 3.8), in builds with the `bench` feature
 //! only. `TWIGO_BENCH` names the directory the webview's driver writes into: `write` stores one
-//! JSON file, and `idle` hides the window, says so in `idle.json`, and quits after `IDLE`, the
-//! time the harness samples idle CPU in.
+//! JSON file, `setup` hands the driver what `TWIGO_BENCH_SESSIONS` holds, and `idle` hides the
+//! window, says so in `<name>.json`, and after `IDLE`, the time the harness samples idle CPU in,
+//! quits or shows the window again.
 //!
 //! A run leaves the desktop alone: the window has 40 pt on screen, at the left edge
 //! (`tauri.bench.conf.json`), behind other windows, and the app asks for no focus. WebKit paints
@@ -23,7 +24,7 @@ struct Dir(PathBuf);
 
 pub fn plugin<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("twigo-bench")
-        .invoke_handler(tauri::generate_handler![write, idle])
+        .invoke_handler(tauri::generate_handler![write, idle, setup])
         .setup(|app, _| {
             #[cfg(target_os = "macos")]
             {
@@ -37,7 +38,8 @@ pub fn plugin<R: Runtime>() -> TauriPlugin<R> {
                 CapabilityBuilder::new("bench")
                     .window("main")
                     .permission("twigo-bench:allow-write")
-                    .permission("twigo-bench:allow-idle"),
+                    .permission("twigo-bench:allow-idle")
+                    .permission("twigo-bench:allow-setup"),
             )?;
             Ok(())
         })
@@ -104,7 +106,11 @@ fn allow_app_nap(platform: &tauri::webview::PlatformWebview, allowed: bool) {
 }
 
 fn store(dir: &Dir, name: &str, value: &serde_json::Value) -> Result<(), String> {
-    if name.is_empty() || !name.bytes().all(|b| b.is_ascii_lowercase() || b == b'-') {
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    {
         return Err(format!("{name:?} is not a bench file name"));
     }
     let partial = dir.0.join(format!(".{name}.json"));
@@ -118,11 +124,34 @@ fn write(name: String, value: serde_json::Value, dir: State<'_, Dir>) -> Result<
     store(&dir, &name, &value)
 }
 
+/// Shows the hidden window as launch did, ordered front and never made key, which tao does for
+/// an unfocused window ([`window.rs`](https://github.com/tauri-apps/tao/blob/tao-v0.37.2/src/platform_impl/macos/window.rs#L605-L612)),
+/// and sets the page up as at its start.
+#[cfg(target_os = "macos")]
+fn show_behind(platform: tauri::webview::PlatformWebview) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    let window = platform.ns_window().cast::<AnyObject>();
+    unsafe {
+        let _: () = msg_send![&*window, orderFront: std::ptr::null::<AnyObject>()];
+    }
+    paint_when_covered(platform);
+}
+
+#[tauri::command]
+fn setup() -> Result<serde_json::Value, String> {
+    let text = std::env::var("TWIGO_BENCH_SESSIONS")
+        .map_err(|_| "a bench run needs TWIGO_BENCH_SESSIONS, which bench/harness.sh sets")?;
+    serde_json::from_str(&text).map_err(|e| format!("TWIGO_BENCH_SESSIONS is not JSON: {e}"))
+}
+
 #[tauri::command]
 fn idle<R: Runtime>(
     app: AppHandle<R>,
     window: WebviewWindow<R>,
     dir: State<'_, Dir>,
+    name: String,
+    quit: bool,
 ) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     window
@@ -134,10 +163,23 @@ fn idle<R: Runtime>(
         .map_err(|e| e.to_string())?
         .as_millis();
     let marker = serde_json::json!({ "atMs": at_ms, "seconds": IDLE.as_secs() });
-    store(&dir, "idle", &marker)?;
+    store(&dir, &name, &marker)?;
     std::thread::spawn(move || {
         std::thread::sleep(IDLE);
-        app.exit(0);
+        if quit {
+            app.exit(0);
+        } else {
+            #[cfg(target_os = "macos")]
+            let shown = window.with_webview(show_behind);
+            #[cfg(not(target_os = "macos"))]
+            let shown = window.show();
+            if let Err(error) = shown {
+                #[expect(clippy::print_stderr, reason = "the bench's stderr is its interface")]
+                {
+                    eprintln!("could not show the bench window again: {error}");
+                }
+            }
+        }
     });
     Ok(())
 }
