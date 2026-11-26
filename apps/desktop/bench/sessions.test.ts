@@ -1,4 +1,4 @@
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type {
   Backend,
   Forward,
@@ -8,22 +8,31 @@ import type {
   TerminalSession,
 } from "@twigo/protocol";
 import { Probe } from "./probe";
-import { driveSessions, SESSIONS_MS, type Target } from "./sessions";
+import { driveSessions, SESSIONS_MS, type Target, WINDOW_MS } from "./sessions";
 
 const asleep = vi.hoisted(() => ({
   on: undefined as ((ms: number) => void) | undefined,
+  took: undefined as ((ms: number) => number) | undefined,
+  now: 0,
 }));
 
 vi.mock("./driver", () => ({
   sleep: (ms: number) => {
     asleep.on?.(ms);
+    asleep.now += asleep.took?.(ms) ?? ms;
     return new Promise((resolve) => setTimeout(resolve, Math.min(ms, 1)));
   },
 }));
 
+beforeEach(() => {
+  asleep.now = 1_795_000_000_000;
+  vi.spyOn(Date, "now").mockImplementation(() => asleep.now);
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
   asleep.on = undefined;
+  asleep.took = undefined;
 });
 
 const TARGET: Target = {
@@ -380,6 +389,21 @@ test("a window counts the terminal's bytes at every tick from its marker to its 
   expect(series[series.length - 1]?.[1]).toBe(
     (series[0]?.[1] ?? 0) + 140 * 100,
   );
+}, 20_000);
+
+test("a window lasts its time on the clock when the page's timers fire late", async () => {
+  const bench = fake();
+  asleep.took = (ms) => (ms === 250 ? 1000 : ms);
+  await bench.run();
+  for (const n of [1, 2, 3, 4]) {
+    const { series } = bench.written.find(
+      ([name]) => name === `watched-${String(n)}`,
+    )?.[1] as { series: [number, number][] };
+    const first = series[0]?.[0] ?? 0;
+    const last = series[series.length - 1]?.[0] ?? 0;
+    expect(last - first).toBeGreaterThanOrEqual(WINDOW_MS);
+    expect(last - first).toBeLessThan(WINDOW_MS + 1000);
+  }
 }, 20_000);
 
 test("the first list is the whole of it, counted by its lines and not by its bytes", async () => {

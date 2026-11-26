@@ -397,12 +397,15 @@ async function windows(
     was = via;
     const n = String(index + 1);
     await write(`watch-${n}`, { via, atMs: Date.now() });
+    // Ends by the clock: WebKit stretches a visually idle page's timers to 1 s, which made a window
+    // of counted ticks last up to 132 s.
+    const end = Date.now() + WINDOW_MS;
     const series: [number, number][] = [];
-    for (let waited = 0; waited < WINDOW_MS; waited += TICK_MS) {
-      series.push([Date.now(), terminal.bytes]);
+    for (let at = Date.now(); ; at = Date.now()) {
+      series.push([at, terminal.bytes]);
+      if (at >= end) break;
       await sleep(TICK_MS);
     }
-    series.push([Date.now(), terminal.bytes]);
     running("the terminal", terminal);
     await write(`watched-${n}`, { via, series });
   }
