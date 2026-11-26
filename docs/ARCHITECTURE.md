@@ -2074,13 +2074,17 @@ A view that keeps something of the item says so over it: the YAML tab keeps a he
 
 ```ts
 interface CommandDescriptor {
-  id: string; // "k8s.resource.delete", "segla.cluster.create"
+  id: string; // "k8s.resource.delete", "workbench.action.quickOpen"
   title: string;
-  category: string; // palette group: "Kubernetes", "View", "Segla"
-  icon?: string;
+  category: string; // palette group: "Kubernetes", "View"
+  icon?: LucideIcon;
   enablement?: string; // when-expression, evaluated against context keys
-  args?: JSONSchema; // typed arguments: palette prompts for missing ones
-  handler: "frontend" | "backend" | { extension: string };
+  requires?: { when: string; reason: string }[]; // each says why it cannot run while it fails
+  danger?: boolean; // destroys what it acts on
+  sends?: "write" | "exec"; // the class of request it asks the gate for
+}
+interface Command extends CommandDescriptor {
+  run(args: unknown, lookup: Lookup): void | Promise<void>;
 }
 ```
 
@@ -2117,9 +2121,11 @@ interface CommandDescriptor {
   - `editor/title`
   - `panel/title`, `panel/empty` (the panel's strip and what an empty panel offers, 4.1)
   - `edit/toolbar`, `edit/changed`, `edit/conflicts`, `edit/immutable`, `edit/diff`, `edit/answer` (the YAML editor's toolbar and the bars of what an apply answered, 4.3, 6.5)
+  - `edit/server`, `edit/preview` (the bars of the server's diff and of a ready preview)
+  - `helm/marked`, `helm/revision`, `helm/revisions`, `helm/text` (a release's marked bar, a revision's menu, the comparisons of History and the bar over a text, 4.3)
   - `space/context`
-  - `statusBar`
-  - `explorer/kind`
+  - `menubar/file`, `menubar/edit`, `menubar/view`, `menubar/go`, `menubar/window`, `menubar/help` (the native menu bar)
+  - `statusBar`, `explorer/kind` (declared; nothing is in them yet)
 
   The native macOS menu is generated from the registry, replacing legacy `menu.ts`'s hand-written list.
 
@@ -2132,21 +2138,24 @@ interface CommandDescriptor {
 - **Context keys** are typed values scoped to the focused element.
   A `when` expression evaluates them, using a subset of the VS Code grammar: `==`, `!=`, `&&`, `||`, `!`, `=~`, `in`, `<`, `>`.
   Core keys:
-  - `space.id`, `space.contexts`, `space.multiContext`
-  - `context.name`, `context.readOnly`, `context.mode`, `context.unlocked`, `context.provider`
+  - `space.id`, `space.contexts`, `space.multiContext`, `space.count`
+  - `context.name`, `context.readOnly`, `context.mode`, `context.unlocked`
   - `listFocus`, `treeFocus` (a tree, which is also a list: left and right close and open), `editorFocus`, `inputFocus`
   - `pageFocus`: the focus is in the details or an object editor while their Overview view is shown, which the bare keys of 5.2 and the filter's `/` and Escape read
   - `object.uri`: the URI of the editor whose Overview holds the focus, the list editor's for the details, which the page's own commands act on, and unset while another view is shown
   - `object.filtered`: that page's filter holds text
   - `object.subject`: the object an object editor shows, as `resource/details` names it, once discovery has named its resource; the commands of a resource take it as their subject where they are given none, and the details set none, their verbs acting on the list's selected row
   - `inQuickOpen`, `quickOpenToSide` (the open provider opens rows to the side), `quickOpenCanPickMany` (it takes ticked rows)
-  - `resource.group`, `resource.kind`, `resource.namespaced`, `resource.namespace`, `resource.scalable` (discovery lists its `scale` subresource)
+  - `resource.group`, `resource.kind`, `resource.namespaced`, `resource.scalable` (discovery lists its `scale` subresource), `resource.logs`, `resource.shell`, `resource.forward` (its kind has logs, a shell or ports to forward)
   - `resource.selected`: a command of a resource has an object to act on, the list's selected row, or an object editor's once discovery names its resource, and false in a list inside an Overview
   - `resource.cordoned`, `resource.suspended`, `resource.ended`: what the selected row's cells say, or an object editor's printed cells (`header.printed`) once its Overview has come, so a menu offers Uncordon only on a cordoned node, Resume only on a suspended Job or CronJob, and neither Suspend nor Resume on a Job that ended
   - `resource.noContainerRuns`: on the scope of the details and of an object editor, true only while the object's Overview lists containers and none of them runs, on every view (4.6)
   - `list.uri`: the list editor's URI on its scope, so a command on rows acts on that list's selected row or marks, and on nothing where no list is named (4.4)
-  - `selection.count`
-  - `editor.open`, `editor.dirty`, `editor.type`
+  - `editor.open`, `editor.type`
+  - `detailsOpen`, `listMarked`, `panelVisible`, `panelMaximized`, `shellEnvironment`, `operationCountingDown`
+  - `logsFocus`, `logLines`, `forwardsFocus`, `terminalFocus`: the focus is in a logs tab, its lines, the Port forwards view or a terminal
+  - `edit.object`, `edit.new`, `edit.dirty`, `edit.answered`, `edit.conflicts`, `edit.keepable`, `edit.ready`, `edit.unshown`, `edit.policyLocked`, `edit.applicable`, `edit.recreate`: the YAML editor's text and the answer of its dry run, which its toolbar and bars read (4.3, 6.5)
+  - `helm.page`, `helm.tab`, `helm.revision`, `helm.previous`, `helm.marked`, `helm.noCommand` and the `helm.can*` keys: a release page's view, its revisions and marked rows, and what it can reveal or hide (4.3)
   - `panelHasEditor`: the panel holds an editor, which Maximize Panel Size needs (4.1)
   - `logsReopenable`: the active space has a closed logs tab to bring back, for Reopen Logs (4.3)
   - `capability.<verb>.<resource>[/<subresource>]`, the resource by kubectl's name (`capability.create.jobs.batch`), and `resource.capability.<verb>[/<subresource>]` for the list's own resource, which a command of every resource, as delete, cannot name.
@@ -2190,7 +2199,7 @@ interface CommandDescriptor {
   On macOS ⌃N and ⌃P move the cursor down and up too, as VS Code binds them under the same `inQuickOpen` ([`quickOpenSelectNext` and `quickOpenSelectPrevious`](https://github.com/microsoft/vscode/blob/1.144.0/src/vs/workbench/browser/actions/quickAccessActions.ts#L245-L279)); the footer names ↑ and ↓.
   Space is the same under `inQuickOpen && quickOpenCanPickMany`, where the open provider takes ticked rows: what is picked is never a name that holds a space, so Space ticks the row under the cursor and types nothing, while the space that ends the `ns ` prefix is still typed, since the input resolves to the provider with no prefix until it is.
 - **The keybindings editor** shows conflicts and the source of every binding.
-- **Keymaps** ship as contributions: Default (VS Code-like) and k9s (vim movement, `:` mode on bare `:` in `listFocus`).
+- **Keymaps** are to ship as contributions (5.4): Default (VS Code-like) and k9s (`:` mode on bare `:` in `listFocus`); none is built yet, and the core's `list.*` bindings already take vim's `j`, `k` and `⇧G` (4.4).
 - **macOS native menu accelerators** come from the same table.
   The OS consumes them before the webview does, as legacy's menu already relied on.
 - **Shortcuts the webview reserves** (for example ⌘Q, ⌘H, ⌘M, and some ⌘⌥ combinations on WebKitGTK) are documented and refused in the editor.
@@ -2329,7 +2338,8 @@ A section takes over a core one only by naming its id in `replaces`, and its hea
 
 ### 5.5 Catalog and the "Create cluster" provider
 
-- **Catalog entities** (Lens's model): an ID, a name, a source, labels and tags, an icon or colour, a status (phase, reason), and a connection.
+- **Catalog entities** follow Lens's model: an ID, a name, a source, labels and tags, an icon or colour, a status (phase, reason), and a connection.
+  The core's kubeconfig source gives each context its name, colour, file, server, access, namespace and problem so far (`Context` in `twigo-ipc`); the rest comes with providers.
 - **Sources.**
   - The core ships one: kubeconfig files, as kubectl reads them, and folders the user adds (M3).
     - The files `KUBECONFIG` lists, as the login shell sets it (6.1), else `~/.kube/config`, merged by kubectl's rules: the first file to define a name wins ([research](research/state.md)).
@@ -2346,7 +2356,7 @@ A section takes over a core one only by naming its id in `replaces`, and its hea
     Each context says the file that defines it, from `~` under the home directory, and its cluster's URL with only scheme, host and port, so no credential written into the URL reaches the webview.
   - Each extension's `clusterProviders` is a further source.
   - Later: Cluster Inventory `ClusterProfile` (SIG Multicluster, alpha).
-- **Connection** is either
+- **Connection** is to be either
   - `KubeconfigRef { file, context }`, or
   - `Provider { provider, clusterId, server, caData }`, whose credentials come from the provider's `resolve-credential`.
     The token or certificate stays in Rust, is cached until 60 s before it expires, and is refreshed on 401.
@@ -2412,7 +2422,7 @@ That is why `aws`, `gke-gcloud-auth-plugin` and `kubelogin` "are not found" in L
   Twigo never calls `set_var` on its own process; that is unsafe once threads exist.
 - **The core reads `KUBECONFIG` and the proxy variables from `ShellEnv` explicitly**, in the catalog and in the connector.
   kube-rs reads them from the process environment, which on a Dock launch is launchd's.
-- **`--dump-env` and `twigo mcp` are handled in `main()` before the Tauri builder**, so the single-instance plugin does not swallow them.
+- **`--dump-env` is handled in `main()` before the Tauri builder**, so the single-instance plugin does not swallow it; `twigo mcp` is to be handled there too once the MCP shim exists (6.6).
 - **Ordering.**
   Connecting to a cluster waits for the environment.
   On a timeout or any other failure, Twigo proceeds with the process environment and shows a status-bar warning, whose popover offers "Retry" and "Show details": what the shell printed before the frame, never the environment itself.
@@ -2423,7 +2433,8 @@ That is why `aws`, `gke-gcloud-auth-plugin` and `kubelogin` "are not found" in L
 ### 6.2 Credentials (`twigo-kube`)
 
 kube-rs's built-in exec auth does not suit a GUI.
-kube-client 4.2.0 runs the plugin with a blocking `Command::output()` and no timeout, three times for each client it builds, with the terminal's stdin and stderr, so device codes disappear ([research](research/credentials.md)).
+kube-client 5.1.0 runs the plugin with a blocking `Command::output()` and no timeout, with the terminal's stdin and stderr unless the entry's `interactiveMode` is `Never`, so device codes disappear ([research](research/credentials.md)).
+Its builder calls `Auth::try_from` three times for each client, through `auth_layer` and twice through `exec_identity_pem`, and each call runs the plugin: read in `builder.rs` and `config_ext.rs` of 5.1.0, not run; the research counted three runs for each client on 4.2.0.
 Twigo therefore owns credentials, and follows client-go's rules where the plugin sees them:
 
 - **Clients.**
@@ -2488,11 +2499,11 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
 ### 6.3 Transport
 
 - TLS is rustls with ring by default, using the OS trust store when the kubeconfig has no CA.
-  An optional per-context openssl stack covers legacy clusters that rustls rejects: TLS < 1.2, X.509 v1, CN-only certificates.
+  rustls is the only stack, so a cluster that rustls rejects (TLS < 1.2, X.509 v1, CN-only certificates) cannot be reached; a per-context openssl stack would cover them, and is not built.
 - Proxies are picked as kubectl picks them, so a kubeconfig that works there works here.
   - The cluster's `proxy-url` carries every request, to loopback too; client-go accepts http, https and socks5.
   - Without it, the login shell's `HTTPS_PROXY` (or `HTTP_PROXY` for an http server) does, by the rules of Go's `golang.org/x/net/http/httpproxy`: never for `localhost` or a loopback address, and never for a server `NO_PROXY` lists, where `.x` and `*.x` match subdomains only, `x` the domain too, an entry may carry a port, and a CIDR matches servers given by IP.
-    kube-client 4.2.0 instead reads `HTTPS_PROXY` from the process environment and has no `NO_PROXY` (`kube-client/src/config/file_loader.rs`), and hyper-util's matcher follows curl's rules, which proxy loopback and read `.x`, `*.x` and ports otherwise.
+    kube-client 5.1.0 instead reads `HTTPS_PROXY` from the process environment, and `NO_PROXY` only with its `http-proxy` or `socks5` feature, which Twigo's build leaves off (`kube-client/src/config/file_loader.rs`, `no_proxy.rs`), and hyper-util's matcher follows curl's rules, which proxy loopback and read `.x`, `*.x` and ports otherwise.
   - The OS proxy settings are not read: kubectl never reads them, so they would send through a proxy what kubectl reaches directly (the owner's choice, 2026-11-01).
   - socks5 and socks5h both leave names to the proxy, as Go does.
   - An https proxy's certificate is checked against the OS trust store, and the proxy gets no client certificate.
@@ -2516,7 +2527,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   New proxy variables in the login shell rebuild every context's clients the same way.
 - Exec, attach and port-forward use kube-rs WebSockets (`v5.channel.k8s.io`, falling back to `v4`; there is no SPDY) over the HTTP/1.1 client; requests, watches and logs share the HTTP/2 connection (3.2).
   RBAC needs `create` on `pods/exec`, `pods/attach` and `pods/portforward` for WebSocket upgrades from 1.35.
-  The action is offered only after a cached access review.
+  No access review comes first: Shell and Attach need only a container that runs and Forward only a kind that has ports, and a refused upgrade comes back as the API server's own words (3.7, 4.6).
 
 ### 6.4 Read-only enforcement (`twigo-policy`)
 
@@ -2555,7 +2566,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
     - `helm`, whose release storage is Secrets, and which stays the actor of its CLI (7.2): a read by Twigo's own view as that actor would write an audit line for every page, watch and `GET` and tell the cluster's audit log that the CLI made them;
     - Twigo's MCP tools, which read inside the core only to return keys and sizes;
     - extensions, only with the named `secrets` grant;
-    - agents through the proxy, only with an approval scoped to the session and namespace, and a fresh one per call after untrusted content (6.6).
+    - agents, never yet: the gate refuses an agent's read of a Secret whatever approval it carries, a `403` with no ask (below); a scope for the session and namespace, and a fresh one per call after untrusted content, are to come with agents (6.6).
   - forward: `pods/portforward`, and GET without `Upgrade` on `pods/*/proxy` and `services/*/proxy`;
   - exec: `pods/exec`, `pods/attach`, every `nodes/*/proxy` request (it reaches the kubelet, including its exec), and any other request that carries an `Upgrade` header or uses a proxy subresource.
     A `CONNECT` counts too, and so does a path with an empty, `.` or `..` segment, which a server or a proxy in front of it may clean into another.
@@ -2567,7 +2578,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   Confirmations, typed context names and diffs belong to the commands above the layer, because at the HTTP level a scale is one PATCH and a drain is many requests.
 
 - **Actors.**
-  Each actor (the UI, an extension, an MCP client, an agent session) gets its own two kube clients, which carry its policy layer over the context's two shared hyper-util clients and the context's stream counter (3.2).
+  Each actor (the UI, a terminal, `helm`, an MCP client, an extension, an agent session) gets its own two kube clients, which carry its policy layer over the context's two shared hyper-util clients and the context's stream counter (3.2).
   The hub, commands and discovery use the UI's.
   A hyper-util client clone shares its pool, so every actor uses the same HTTP/2 connection, and the layer knows who is asking without per-call plumbing.
   Each request of an actor's clients carries `User-Agent: twigo/<version> (<actor>)`, the actor as the audit log names it, so the cluster's own audit log tells Twigo's requests, and whose they are, from another client's: neither kube nor hyper sets one (kube-client 5.1.0, hyper 1.12.0, hyper-util 0.1.21).
@@ -2594,7 +2605,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
     A relock leaves a read's answer, and a write's, which comes once the write is done, but ends one of the exec or forward class, such as a `proxy` subresource's without `Upgrade` (`GET nodes/<n>/proxy/…`, `POST pods/<p>/proxy/…`), by the rule that ends a splice (below): its context's mode now refuses its class whatever any approval says; such an answer also ends when its context names another cluster.
     The connection that carries an answer ends when the answer's process's handle drops or a relock ends the answer, whatever its client reads: hyper polls a body only while it can buffer what the body gives ([`poll_write`](https://github.com/hyperium/hyper/blob/v1.12.0/src/proto/h1/dispatch.rs#L384-L401)), so a watch whose client stopped reading would otherwise keep its stream and its upstream.
   - An upgrade is a `GET` or a `POST` that carries `Upgrade` to a pod's `exec`, `attach` or `portforward`, or to the `proxy` of a pod, a service or a node, in the core group.
-    It takes a session of the context's budget (3.2), goes on the actor's HTTP/1.1 client with an empty body, and on a `101` is spliced with `hyper::upgrade::on`, which is all kube's own `connect` does ([`connect`](https://github.com/kube-rs/kube/blob/5.0.0/kube-client/src/client/mod.rs#L240-L275)).
+    It takes a session of the context's budget (3.2), goes on the actor's HTTP/1.1 client with an empty body, and on a `101` is spliced with `hyper::upgrade::on`, as kube's own `connect` does once it has read the answer ([`connect`](https://github.com/kube-rs/kube/blob/5.1.0/kube-client/src/client/mod.rs#L237-L275)).
     Any other answer passes through, holds the session until its body ends, and ends with what ends a splice.
     The raw upgraded stream passes through whatever the protocol: WebSocket, SPDY, or SPDY over WebSocket.
     Either direction's end ends both, as kube-apiserver's own proxy does, and so do the process's handle dropping, its context naming another cluster, and a mode that now refuses its class whatever any approval says: a terminal's `kubectl exec` ends when its context turns `read-only` (within 3 ms of the relock in two runs of `crates/twigo-core/tests/proxy_live.rs` on kind 1.37, 2026-11-10), while `guarded` ends none.
@@ -2908,7 +2919,7 @@ Their plans read the objects and what the garbage collector takes with them (eve
     The key is all that keeps them out: WebKit gives them the page's message handler, and Tauri cannot tell their requests from the window's on Linux, nor from the app's on either platform.
   - The M0 spike showed on WebKitGTK and macOS that such a frame invokes nothing, and CI repeats the probe on every Tauri and wry update and weekly ([isolation spike](spikes/tauri-isolation.md)).
   - No frame gets `allow-same-origin`, and the host relays only data, from messages whose `event.source` is that extension's frame.
-  - The page's CSP lists `twigo-ext:` in `frame-src`; Windows serves custom schemes as `http://<scheme>.localhost` (`https://` with `useHttpsScheme`) and needs that form.
+  - The page's CSP has no `frame-src` yet: tier-2 frames need `twigo-ext:` there, and Windows serves custom schemes as `http://<scheme>.localhost` (`https://` with `useHttpsScheme`) and needs that form.
 - **Releases.**
   - Signed updater artifacts (minisign, new key).
   - macOS notarization; Linux AppImage, deb and rpm.
