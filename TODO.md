@@ -64,7 +64,7 @@ Findings that belong to no step yet.
     A fix that also opens on `click` must not toggle twice on an engine that sends a pointer event and a click for one press; what WebView2's accessibility press sends is not verified.
 - The visible window ([bench](docs/bench.md#the-visible-window)):
   - The cells that count a printed duration cost about one point of one core: the bench's Visible CPU read 9.18 % at the median of five runs of `db4b4724` with the churn of `aa7e9866` and 8.10 % of three runs of the same build with their ticking stopped, WebContent 4.78 % against 4.05 % (`bench/harness.sh`, kind 1.37 with 5,000 pods, 2026-11-17); the row is shown and not judged, and nothing cheaper was tried.
-  - A metrics poll is a batch every 15 s while a CPU or memory column is drawn: it renders the grid once, flashes nothing and selects nothing again, and renders each row of the window as any batch does.
+  - A metrics poll is a batch every 15 s while a CPU or memory column is drawn and a figure of a row in the window changed: it renders the grid once, flashes nothing and selects nothing again, and renders again only the rows whose figures changed; a poll that changes no figure in the window sends no batch.
 - Applying an edit (`twigo_core::actions::apply`, ARCHITECTURE 6.5):
   - A window reloaded during a recreate's wait stops it with the object gone and nothing created, which the audit log records but the page cannot show.
 - Modes (`twigo_policy`, ARCHITECTURE 6.4):
