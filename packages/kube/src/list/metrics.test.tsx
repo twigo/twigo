@@ -12,6 +12,7 @@ import { Changes } from "@twigo/workbench";
 import {
   mountKube,
   openList,
+  scriptedBackend,
   settle,
   withScreenSize,
 } from "../../test/workbench";
@@ -108,30 +109,12 @@ function spied(backend: Backend) {
 const last = <T,>(items: readonly T[]) => items[items.length - 1];
 
 function scripted() {
-  const mock = createMockBackend("ready");
-  let send: ((batch: ListBatch) => void) | undefined;
-  let view = 0;
-  const backend: Backend = {
-    invoke: (command, request) => {
-      if (command === "list_set_view") {
-        view = (request as RequestOf<"list_set_view">).view;
-      }
-      return command.startsWith("list_")
-        ? Promise.resolve(null as never)
-        : mock.invoke(command, request);
-    },
-    subscribe(command, request, onMessage) {
-      if (command !== "list_subscribe")
-        return mock.subscribe(command, request, onMessage);
-      send = onMessage;
-      return Promise.resolve(1 as never);
-    },
-  };
+  const { backend, send } = scriptedBackend();
   return {
     backend,
     send: async (batch: ListBatch) => {
       act(() => {
-        send?.({ ...batch, view });
+        send(batch);
       });
       await settle(1);
     },

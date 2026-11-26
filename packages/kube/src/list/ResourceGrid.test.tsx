@@ -8,12 +8,13 @@ import {
 } from "@testing-library/react";
 import { useCallback } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { Backend, ListBatch, RequestOf, Row } from "@twigo/protocol";
+import type { ListBatch, RequestOf, Row } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import {
   hoverIcons,
   mountKube,
   openList,
+  scriptedBackend,
   settle,
   withScreenSize,
 } from "../../test/workbench";
@@ -325,32 +326,6 @@ test("a sort changes the view on the subscription the list has and closes nothin
     count(subscribe.mock.calls, "list_subscribe"),
   );
 });
-
-function scriptedBackend() {
-  const mock = createMockBackend("ready");
-  let send: ((batch: ListBatch) => void) | undefined;
-  let view = 0;
-  const backend: Backend = {
-    invoke: (command, request) => {
-      if (command === "list_set_view") {
-        view = (request as RequestOf<"list_set_view">).view;
-      }
-      return command.startsWith("list_")
-        ? Promise.resolve(null as never)
-        : mock.invoke(command, request);
-    },
-    subscribe(command, request, onMessage) {
-      if (command !== "list_subscribe")
-        return mock.subscribe(command, request, onMessage);
-      send = onMessage;
-      return Promise.resolve(1 as never);
-    },
-  };
-  return {
-    backend,
-    send: (batch: ListBatch) => send?.({ ...batch, view }),
-  };
-}
 
 const IDS = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"];
 

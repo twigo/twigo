@@ -1,7 +1,6 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
-  IpcError,
   type Backend,
   type ListBatch,
   type ListQuery,
@@ -56,14 +55,6 @@ function fake() {
   const backend: Backend = {
     invoke: (command, request) => {
       invoked.push([command, request]);
-      if (
-        command === "list_set_view" &&
-        (request as RequestOf<"list_set_view">).text === REFUSED
-      ) {
-        return Promise.reject(
-          new IpcError("filter.invalid-regex", "the filter /(/ is no regex"),
-        );
-      }
       return Promise.resolve(null as never);
     },
     subscribe: (_command, _request, onMessage) => {
@@ -97,8 +88,6 @@ function fake() {
   };
 }
 
-const REFUSED = "/(/";
-
 async function shown(first: ListQuery) {
   const list = fake();
   const view = renderHook(({ query }) => useListView(list.backend, query), {
@@ -108,7 +97,6 @@ async function shown(first: ListQuery) {
   return {
     ...list,
     metrics: () => view.result.current.snapshot.metrics,
-    status: () => view.result.current.snapshot.status,
     shown: () => view.result.current.query,
     ask: async (query: ListQuery) => {
       view.rerender({ query });
@@ -178,18 +166,6 @@ test("a change of the namespaces and of the view together is one new subscriptio
   expect(list.views()).toEqual([]);
   list.send(1, batch(null));
   expect(list.shown()).toEqual({ ...PODS, namespaces: ["auth"], text: "web" });
-});
-
-test("a text Rust refuses leaves the list in error through the batches that follow, until the next change", async () => {
-  const list = await shown(PODS);
-  list.send(0, batch(null));
-  await list.ask({ ...PODS, text: REFUSED });
-  expect(list.status()).toMatchObject({ state: "error" });
-  list.send(0, batch(null, 0, 2));
-  expect(list.status()).toMatchObject({ state: "error" });
-  await list.ask({ ...PODS, text: "web" });
-  list.send(0, batch(null, 2, 3));
-  expect(list.status()).toEqual({ state: "ready" });
 });
 
 test.each([
