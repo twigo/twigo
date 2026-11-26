@@ -287,6 +287,7 @@ async fn run(
         if let Some(metrics) = &metrics {
             view.set_api(metrics.api());
         }
+        let reshaped = asked.is_some();
         let all = match asked.take() {
             Some((number, shape)) => {
                 first_order = FirstOrder::default();
@@ -306,6 +307,9 @@ async fn run(
                 view.resolved();
             }
             metrics.want(view.wants(reading));
+            if reshaped {
+                metrics.ask_again();
+            }
             let (answered, update) = metrics.read();
             settled = answered;
             view.samples(update);
