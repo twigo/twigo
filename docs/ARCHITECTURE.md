@@ -2662,8 +2662,8 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
 | delete, scale, rollout restart, cordon, drain, evict, Helm rollback/uninstall | ✓ with friction by blast radius (below) | typed confirmation (the context name) | ✗                                                                                                   |
 
 - **Where the mode comes from**, highest first:
-  1. a policy file entry, which the UI cannot change or unlock; of several that match, the strictest;
-  2. no source lists the context now: `read-only`, since clients built before it went may still run and nothing says what it lets through;
+  1. no source lists the context now: `read-only`, since clients built before it went may still run and nothing says what it lets through, not even a policy file entry, which speaks of the name;
+  2. a policy file entry, which the UI cannot change or unlock; of several that match, the strictest;
   3. the person's choice for the context, which wins both ways: where it is less strict than the strictest lock below, its source names that lock as set aside (`user` with `overrides`);
   4. the strictest of the locks, each of which can only tighten, and of equal ones the first listed:
      - kubeconfig metadata, `twigo.readOnly` there and anything but `false`: `read-only`, while `false` says nothing;
@@ -2706,7 +2706,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   The gate reads the wall clock, as timers stop while the machine sleeps, and nothing stores an unlock, so a restart relocks.
   An unlock holds only while the context's fingerprint stays, so one given on a cluster never reaches another its name moves to, and a new choice or type ends it.
 - **Clients keep to what they were built for.**
-  Clients of a context that now names another cluster still reach the old one until their owner re-opens, so their gate reads them as `read-only` from the moment the fingerprint changes, whatever the new one's mode is.
+  Clients of a context that now names another cluster still reach the old one until their owner re-opens, so their gate reads them as `read-only` from the moment the fingerprint changes, whatever the new one's mode is, the policy file's included.
 - **Every blocked request** returns a typed `permissions` error with the mode and its source, and the UI shows which rule blocked it.
 - **The audit log** is `audit.jsonl` in the app-data directory, mode 0600, a JSON line per event, which its `event` names:
   - `request`: a request the gate sends, just above the socket, or stops, with the actor, the context, its mode, the request's class and why it was stopped; a retry below the gate is noted again.
