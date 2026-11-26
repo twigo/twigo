@@ -112,6 +112,35 @@ test("a batch replaces the window and reports the cells it changed", async () =>
   expect(view.getSnapshot().changed.size).toBe(0);
 });
 
+test("the rows a batch does not upsert are the objects they were, so a grid draws only the ones that changed", async () => {
+  const fake = fakeBackend();
+  const view = new ListView(fake.backend, QUERY);
+  fake.resolve(7);
+  await vi.runAllTimersAsync();
+
+  fake.send(
+    batch(1, {
+      columns: [{ name: "Name", kind: "string", priority: 0 }],
+      window: { start: 0, ids: ["a", "b"] },
+      upserts: [row("a", "a", 1), row("b", "b", 1)],
+    }),
+  );
+  const before = view.getSnapshot().rows;
+
+  fake.send(batch(2, { upserts: [row("b", "b", 2)] }));
+  const after = view.getSnapshot().rows;
+  expect(after.get("a")).toBe(before.get("a"));
+  expect(after.get("b")).not.toBe(before.get("b"));
+
+  fake.send(
+    batch(3, {
+      window: { start: 1, ids: ["b", "c"] },
+      upserts: [row("c", "c", 1)],
+    }),
+  );
+  expect(view.getSnapshot().rows.get("b")).toBe(after.get("b"));
+});
+
 test("a batch without counts keeps the previous ones", async () => {
   const fake = fakeBackend();
   const view = new ListView(fake.backend, QUERY);

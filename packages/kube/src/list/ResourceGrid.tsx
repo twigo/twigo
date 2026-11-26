@@ -4,6 +4,7 @@ import {
   useLayoutEffect,
   useMemo,
   useState,
+  useSyncExternalStore,
   type ComponentProps,
 } from "react";
 import { Columns3 } from "lucide-react";
@@ -26,6 +27,7 @@ import {
   GUTTERS_WIDTH,
   StatusDot,
   useWidth,
+  type GridColumn,
   type GridItem,
 } from "@twigo/ui";
 import {
@@ -40,6 +42,7 @@ import {
   columnRule,
   HEALTH,
   healthValues,
+  problemColumn,
   problemOf,
   rowFinished,
   rowTone,
@@ -121,7 +124,6 @@ function Grid({
     capabilities,
   } = services;
   useChanges(spaces.changes);
-  useChanges(presets.changes);
   useChanges(states.changes);
   useChanges(selection.changes);
   useChanges(menus.changes);
@@ -129,8 +131,10 @@ function Grid({
   useChanges(measures.changes);
   useChanges(capabilities.changes);
   const { gvr } = input;
-  const preset = presets.get(gvr);
-  const countBy = statusColumn(gvr);
+  const preset = useSyncExternalStore(presets.changes.subscribe, () =>
+    presets.get(gvr),
+  );
+  const countBy = useMemo(() => statusColumn(gvr), [gvr]);
   const text = states.text(uri) ?? input.text ?? "";
   const health = states.health(uri);
   const picked = health === null ? undefined : (health?.health ?? input.health);
@@ -199,32 +203,50 @@ function Grid({
   const grouping =
     shown?.groupBy && snapshot.groups.length > 0 ? shown.groupBy : undefined;
 
-  const every = snapshot.columns.map((column, index) => ({
-    name: column.name,
-    index,
-    rule: columnRule(gvr, column),
-    priority: column.priority,
-  }));
-  const chosen = every.filter(
-    (column) =>
-      column.name === "Name" ||
-      (column.name !== grouping?.column &&
-        !column.rule.problem &&
-        (preset.columns[column.name] ?? column.priority === 0)),
+  const every = useMemo(
+    () =>
+      snapshot.columns.map((column, index) => ({
+        name: column.name,
+        index,
+        rule: columnRule(gvr, column),
+        priority: column.priority,
+      })),
+    [gvr, snapshot.columns],
+  );
+  const grouped = grouping?.column;
+  const { columns: chosenByName, widths: savedWidths } = preset;
+  const chosen = useMemo(
+    () =>
+      every.filter(
+        (column) =>
+          column.name === "Name" ||
+          (column.name !== grouped &&
+            !column.rule.problem &&
+            (chosenByName[column.name] ?? column.priority === 0)),
+      ),
+    [every, grouped, chosenByName],
   );
   const sorted = shown?.sort;
-  const fitted = fitGrid({
-    chosen,
-    widths: preset.widths,
-    room: width > 0 ? width - GUTTERS_WIDTH : Infinity,
-    metrics: snapshot.metrics,
-    sort: sorted,
-  });
+  const fitted = useMemo(
+    () =>
+      fitGrid({
+        chosen,
+        widths: savedWidths,
+        room: width > 0 ? width - GUTTERS_WIDTH : Infinity,
+        metrics: snapshot.metrics,
+        sort: sorted,
+      }),
+    [chosen, savedWidths, width, snapshot.metrics, sorted],
+  );
   const { columns, byName, mergedRoom, widened } = fitted;
-  const gridColumns = fitted.gridColumns.map((column) => ({
-    ...column,
-    coverable: byName.get(column.id)?.rule.coverable,
-  }));
+  const gridColumns = useMemo(
+    () =>
+      fitted.gridColumns.map((column) => ({
+        ...column,
+        coverable: byName.get(column.id)?.rule.coverable,
+      })),
+    [fitted, byName],
+  );
   // While a new subscription has no columns yet, what was drawn stays drawn.
   const [drawnBefore, setDrawnBefore] = useState<readonly string[]>();
   const drawnNow = every.length > 0 ? [...byName.keys()] : undefined;
@@ -259,10 +281,38 @@ function Grid({
       ),
     [grouping, snapshot.groups, snapshot.total],
   );
-  const decide = decideRows(
-    (row) => rowTone(gvr, countBy, snapshot.columns, row),
-    (row) => rowFinished(gvr, countBy, snapshot.columns, row),
-    columns,
+  const decide = useMemo(
+    () =>
+      decideRows(
+        (row) => rowTone(gvr, countBy, snapshot.columns, row),
+        (row) => rowFinished(gvr, countBy, snapshot.columns, row),
+        columns,
+      ),
+    [gvr, countBy, snapshot.columns, columns],
+  );
+  const problemAt = useMemo(
+    () => problemColumn(gvr, snapshot.columns),
+    [gvr, snapshot.columns],
+  );
+  const cell = useCallback(
+    (row: Row, column: GridColumn) => {
+      const shownColumn = byName.get(column.id);
+      if (!shownColumn) return undefined;
+      const { tone, alarmed, finished } = decide(row);
+      return (
+        <CellView
+          row={row}
+          column={shownColumn}
+          tone={tone}
+          alarmed={alarmed}
+          finished={finished}
+          problem={
+            shownColumn.rule.health ? problemOf(problemAt, row) : undefined
+          }
+        />
+      );
+    },
+    [byName, decide, problemAt],
   );
   const item = (index: number): GridItem<Row, RowGroup> | undefined => {
     const slot = items.at(index);
@@ -375,7 +425,7 @@ function Grid({
         setGrid(null);
       };
     },
-    [register, grids, uri],
+    [register, grids, uri, setGrid],
   );
   const problem = REFUSED.has(snapshot.status.state);
   // The problem takes the grid's place, and with it the focus it held, which
@@ -469,25 +519,7 @@ function Grid({
       item={item}
       indexOf={indexOf}
       onRange={onRange}
-      cell={(row, column) => {
-        const shownColumn = byName.get(column.id);
-        if (!shownColumn) return undefined;
-        const { tone, alarmed, finished } = decide(row);
-        return (
-          <CellView
-            row={row}
-            column={shownColumn}
-            tone={tone}
-            alarmed={alarmed}
-            finished={finished}
-            problem={
-              shownColumn.rule.health
-                ? problemOf(gvr, snapshot.columns, row)
-                : undefined
-            }
-          />
-        );
-      }}
+      cell={cell}
       group={(group) => (
         <GroupHeader
           group={group}

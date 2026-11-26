@@ -1,11 +1,13 @@
 import { expect, test } from "vitest";
-import type { Column } from "@twigo/protocol";
+import { HELM_RELEASES, type Column } from "@twigo/protocol";
 import {
   byHealth,
   cellTone,
   columnRule,
   healthValues,
   IN_FLIGHT,
+  problemColumn,
+  problemOf,
   rowFinished,
   rowTone,
   statusColumn,
@@ -340,4 +342,22 @@ test("a hovered row's icons may lie over any column but a Name, a Ready or a Sta
   expect(coverable(PODS, "CPU", "cpu")).toBe(true);
   expect(coverable(PODS, "Node")).toBe(true);
   expect(coverable(statefulSets, "Containers")).toBe(true);
+});
+
+test("a resource's Problem column is where its columns say, and a row has a problem only where that cell holds a code", () => {
+  const columns = [column("Name"), column("Status"), column("Problem")];
+  const row = (cell: string | null) => ({
+    id: "r",
+    created: null,
+    received: "2026-11-16T12:00:00.000Z",
+    generated: null,
+    cells: ["alpha", "unreadable", cell],
+  });
+  const at = problemColumn(HELM_RELEASES, columns);
+  expect(at).toBe(2);
+  expect(problemOf(at, row("helm.truncated"))).toBe("helm.truncated");
+  expect(problemOf(at, row(""))).toBeUndefined();
+  expect(problemOf(at, row(null))).toBeUndefined();
+  expect(problemColumn(PODS, columns)).toBe(-1);
+  expect(problemOf(-1, row("helm.truncated"))).toBeUndefined();
 });

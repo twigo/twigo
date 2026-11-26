@@ -341,15 +341,15 @@ export function rowTone(
   return status === undefined ? undefined : cellTone(gvr, health, status);
 }
 
-/** The code in a row's column that says why its object cannot be read, or why a request for it failed; none for a row with neither. */
-export function problemOf(
-  gvr: Gvr,
-  columns: readonly Column[],
-  row: Row,
-): string | undefined {
-  const at = columns.findIndex(
+/** Where a resource's column that says why an object cannot be read, or why a request for it failed, sits among its columns; -1 where it has none. */
+export function problemColumn(gvr: Gvr, columns: readonly Column[]): number {
+  return columns.findIndex(
     (column) => BY_RESOURCE[key(gvr, column.name)]?.problem === true,
   );
+}
+
+/** The code in a row's column at `at`, `problemColumn`'s; none for a row with neither. */
+export function problemOf(at: number, row: Row): string | undefined {
   const cell = at < 0 ? undefined : row.cells[at];
   return typeof cell === "string" && cell !== "" ? cell : undefined;
 }
