@@ -12,6 +12,12 @@
 //! The rows come from a [`Source`]: a hub subscription, or rows made from
 //! one, such as a release list's.
 //!
+//! The view part of the query, the text, the sort, the counts, the groups and
+//! the values, changes in place ([`Batcher::set_view`]): the view reorders,
+//! counts and groups the rows it holds, and asks its source for every row
+//! again only when the text changes, since it holds just the rows that the
+//! text keeps. The batch that reflects a change carries its number.
+//!
 //! A list of pods or nodes whose context serves metrics also joins them
 //! (ARCHITECTURE 3.6): it asks the poller for the namespaces of its window at
 //! each flush, and for nothing before its first window, while its metric
@@ -34,15 +40,16 @@ use twigo_panic::contain;
 use crate::hub::{Shown, Subscription};
 use crate::metrics::{FIRST_ANSWER, INTERVAL, Opening, Reader};
 use crate::table::Row;
-use crate::view::{QueryView, Spec};
+use crate::view::{QueryView, Shape, Spec};
 
 pub const FLUSH: Duration = Duration::from_millis(50);
 
 /// What a list reads of the rows it shows.
 pub trait Source: Send + 'static {
     /// What changed in the rows that show since the last call, and the state
-    /// and the parts that say which these are ([`Subscription::drain_shown`]).
-    fn drain_shown(&mut self) -> Shown<Row>;
+    /// and the parts that say which these are ([`Subscription::drain_shown`]);
+    /// with `all`, every row that shows as a [`crate::hub::Delta::Reset`] does.
+    fn drain_shown(&mut self, all: bool) -> Shown<Row>;
 
     /// The rows are those of the namespaces the person may list, which all
     /// namespaces came to ([`Subscription::resolved`]).
@@ -50,8 +57,12 @@ pub trait Source: Send + 'static {
 }
 
 impl Source for Subscription<Row> {
-    fn drain_shown(&mut self) -> Shown<Row> {
-        Subscription::drain_shown(self)
+    fn drain_shown(&mut self, all: bool) -> Shown<Row> {
+        if all {
+            self.drain_all_shown()
+        } else {
+            Subscription::drain_shown(self)
+        }
     }
 
     fn resolved(&self) -> bool {
@@ -76,6 +87,7 @@ struct Control {
 struct Pending {
     window: Option<Window>,
     acked: Option<u32>,
+    view: Option<(u32, Shape)>,
 }
 
 #[derive(Clone, Copy)]
@@ -115,6 +127,14 @@ impl Batcher {
             end,
             metrics,
         });
+        self.control.wake.notify_one();
+    }
+
+    /// Changes the view part of the query to `shape`, which batches reflect from the next one
+    /// on, each saying `view`. Changes that come while a batch waits for its ack go out
+    /// together with the last of them.
+    pub fn set_view(&self, view: u32, shape: Shape) {
+        self.control.pending.lock().expect("batcher lock").view = Some((view, shape));
         self.control.wake.notify_one();
     }
 
@@ -158,9 +178,9 @@ async fn serve(
     control: Arc<Control>,
     mut send: impl FnMut(ListBatch) -> bool,
 ) {
-    let (mut seq, mut total) = (0, 0);
+    let (mut seq, mut view, mut total) = (0, 0, 0);
     let mut tell = |batch: ListBatch| {
-        (seq, total) = (batch.seq, batch.total);
+        (seq, view, total) = (batch.seq, batch.view, batch.total);
         send(batch)
     };
     if contain(item, run(source, spec, opening, control, &mut tell))
@@ -171,6 +191,7 @@ async fn serve(
     }
     send(ListBatch {
         seq: seq + 1,
+        view,
         total,
         columns: None,
         window: None,
@@ -200,6 +221,7 @@ async fn run(
     let mut windowed = false;
     let mut range: Option<(u32, u32)> = None;
     let mut moved = false;
+    let mut asked: Option<(u32, Shape)> = None;
     let mut reading = false;
     let mut unanswered: Option<Instant> = None;
     let mut first_order = FirstOrder::default();
@@ -215,8 +237,15 @@ async fn run(
                 false
             }
         };
-        let Pending { window, acked } =
-            std::mem::take(&mut *control.pending.lock().expect("batcher lock"));
+        let Pending {
+            window,
+            acked,
+            view: reshaped,
+        } = std::mem::take(&mut *control.pending.lock().expect("batcher lock"));
+        if reshaped.is_some() {
+            asked = reshaped;
+            moved = true;
+        }
         if let Some(Window {
             start,
             end,
@@ -243,15 +272,24 @@ async fn run(
             metrics = Some(reader);
             opening = None;
         }
+        if let Some(metrics) = &metrics {
+            view.set_api(metrics.api());
+        }
+        let all = match asked.take() {
+            Some((number, shape)) => {
+                first_order = FirstOrder::default();
+                view.reshape(number, shape)
+            }
+            None => false,
+        };
         let Shown {
             delta,
             status,
             parts,
-        } = source.drain_shown();
+        } = source.drain_shown(all);
         view.apply(delta);
         let mut settled = true;
         if let Some(metrics) = &mut metrics {
-            view.set_api(metrics.api());
             if source.resolved() {
                 view.resolved();
             }
@@ -288,7 +326,9 @@ mod tests {
 
     use tokio::sync::mpsc;
     use tokio::time::{Instant, sleep};
-    use twigo_ipc::{ErrorCode, Gvr, ListQuery, Part, PartState, Parts, ViewState};
+    use twigo_ipc::{
+        ColumnValues, ErrorCode, Grouping, Gvr, ListQuery, Part, PartState, Parts, Sort, ViewState,
+    };
     use twigo_kube::client::{Budgets, Clients};
 
     use super::*;
@@ -320,6 +360,14 @@ mod tests {
         fake: Fake,
         namespaces: &[&str],
     ) -> (Fake, (Hub, Arc<Clients>), Subscription<Row>, Spec) {
+        subscribed_as(fake, namespaces, RowFormat::Metadata).await
+    }
+
+    async fn subscribed_as(
+        fake: Fake,
+        namespaces: &[&str],
+        format: RowFormat,
+    ) -> (Fake, (Hub, Arc<Clients>), Subscription<Row>, Spec) {
         let namespaces: Vec<String> = namespaces.iter().map(|&name| name.to_owned()).collect();
         let (hub, clients) = fake.hub(Budgets::default());
         let subscription = hub
@@ -331,7 +379,7 @@ mod tests {
                     resource: "pods".to_owned(),
                     namespaced: true,
                 },
-                format: RowFormat::Metadata,
+                format,
                 namespaces: namespaces.clone(),
                 selectors: Selectors::default(),
             })
@@ -596,6 +644,303 @@ mod tests {
         let (at, batch) = rig.next().await;
         assert_eq!(at, acked, "at once, not on the next tick");
         assert_eq!(batch.window.unwrap().start, 1);
+    }
+
+    fn names(batch: &ListBatch) -> Vec<&str> {
+        batch
+            .window
+            .as_ref()
+            .expect("a window")
+            .ids
+            .iter()
+            .map(|id| id.0.rsplit('/').next().unwrap())
+            .collect()
+    }
+
+    fn by_name(descending: bool) -> Shape {
+        Shape::of(|view| {
+            view.sort = Some(Sort {
+                column: "Name".to_owned(),
+                descending,
+            });
+        })
+    }
+
+    async fn tabled(pods: &[(&str, &str)]) -> Rig {
+        let fake = Fake::default();
+        let mut namespaces: Vec<&str> = Vec::new();
+        for &(namespace, pod) in pods {
+            fake.add("pods", Some(namespace), pod);
+            if !namespaces.contains(&namespace) {
+                namespaces.push(namespace);
+            }
+        }
+        unwindowed_over(subscribed_as(fake, &namespaces, RowFormat::Table).await)
+    }
+
+    async fn of_four() -> (Rig, ListBatch) {
+        let mut rig = tabled(&[("a", "p1"), ("a", "p2"), ("a", "p3"), ("a", "p4")]).await;
+        rig.batcher.set_window(0, 100, false);
+        let (_, mut last) = rig.until_total(4).await;
+        loop {
+            sleep(FLUSH * 4).await;
+            let Ok((_, batch)) = rig.batches.try_recv() else {
+                return (rig, last);
+            };
+            rig.batcher.ack(batch.seq);
+            last = batch;
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_sort_in_place_reorders_the_window_and_sends_one_batch_naming_its_view() {
+        let (mut rig, first) = of_four().await;
+        assert_eq!(first.view, 0);
+
+        let asked = Instant::now();
+        rig.batcher.set_view(1, by_name(true));
+        let (at, sorted) = rig.next().await;
+        assert_eq!(at, asked, "at once, not on the next tick");
+        assert_eq!(sorted.seq, first.seq + 1);
+        assert_eq!(sorted.view, 1);
+        assert_eq!(names(&sorted), ["p4", "p3", "p2", "p1"]);
+        assert!(sorted.upserts.is_empty(), "the webview holds these rows");
+        assert!(sorted.columns.is_none());
+        rig.batcher.ack(sorted.seq);
+        sleep(FLUSH * 5).await;
+        assert!(rig.batches.try_recv().is_err(), "one batch answers it");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_view_that_changes_nothing_still_answers_with_its_number() {
+        let (mut rig, first) = of_four().await;
+        let asked = Instant::now();
+        rig.batcher.set_view(1, by_name(false));
+        let (at, same) = rig.next().await;
+        assert_eq!(at, asked, "at once, though nothing it holds changed");
+        assert_eq!((same.view, same.seq), (1, first.seq + 1));
+        assert!(same.window.is_none() && same.upserts.is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_text_that_changes_in_place_finds_the_rows_the_old_one_dropped() {
+        let (mut rig, _) = of_four().await;
+        rig.batcher
+            .set_view(1, Shape::of(|view| view.text = Some("p1".to_owned())));
+        let (_, filtered) = rig.next().await;
+        assert_eq!((filtered.view, filtered.total), (1, 1));
+        assert_eq!(names(&filtered), ["p1"]);
+        rig.batcher.ack(filtered.seq);
+
+        rig.fake.add("pods", Some("a"), "p5");
+        rig.fake.delete("pods", Some("a"), "p3");
+        rig.until_total(1).await;
+        rig.batcher
+            .set_view(2, Shape::of(|view| view.text = Some("p".to_owned())));
+        let (_, widened) = rig.next().await;
+        assert_eq!((widened.view, widened.total), (2, 4));
+        assert_eq!(names(&widened), ["p1", "p2", "p4", "p5"]);
+        assert_eq!(
+            widened.upserts.len(),
+            3,
+            "the rows the webview lacks, not p1 again"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_regex_in_place_is_a_filter() {
+        let (mut rig, _) = of_four().await;
+        rig.batcher.set_view(
+            1,
+            Shape::of(|view| view.text = Some("/^p[24]$/".to_owned())),
+        );
+        let (_, filtered) = rig.next().await;
+        assert_eq!(names(&filtered), ["p2", "p4"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_count_a_grouping_and_values_in_place_count_group_and_keep_the_rows() {
+        let fake = Fake::default();
+        for (namespace, pod) in [
+            ("a", "p1"),
+            ("a", "p2"),
+            ("b", "p3"),
+            ("b", "p4"),
+            ("b", "p5"),
+        ] {
+            fake.add("pods", Some(namespace), pod);
+        }
+        let mut rig = unwindowed_over(subscribed_as(fake, &["a", "b"], RowFormat::Table).await);
+        rig.batcher.set_window(0, 100, false);
+        let (_, plain) = rig.until_total(5).await;
+        assert!(plain.counts.is_none() && plain.groups.is_none());
+
+        rig.batcher.set_view(
+            1,
+            Shape::of(|view| view.count_by = Some("Namespace".to_owned())),
+        );
+        let (_, counted) = rig.next().await;
+        rig.batcher.ack(counted.seq);
+        assert_eq!(counted.view, 1);
+        let counts = counted.counts.expect("the counts");
+        assert_eq!(
+            counts
+                .iter()
+                .map(|c| (c.value.as_str(), c.count))
+                .collect::<Vec<_>>(),
+            [("b", 3), ("a", 2)]
+        );
+        assert!(counted.window.is_none(), "no row moved");
+
+        rig.batcher.set_view(
+            2,
+            Shape::of(|view| {
+                view.count_by = Some("Namespace".to_owned());
+                view.group_by = Some(Grouping {
+                    column: "Namespace".to_owned(),
+                    collapsed: vec!["a".to_owned()],
+                });
+            }),
+        );
+        let (_, grouped) = rig.next().await;
+        rig.batcher.ack(grouped.seq);
+        assert_eq!((grouped.view, grouped.total), (2, 5));
+        let groups = grouped.groups.clone().expect("the groups");
+        assert_eq!(
+            groups
+                .iter()
+                .map(|g| (g.value.as_str(), g.rows))
+                .collect::<Vec<_>>(),
+            [("a", 2), ("b", 3)]
+        );
+        assert_eq!(names(&grouped), ["p3", "p4", "p5"], "a is collapsed");
+
+        rig.batcher.set_view(
+            3,
+            Shape::of(|view| {
+                view.count_by = Some("Namespace".to_owned());
+                view.group_by = Some(Grouping {
+                    column: "Namespace".to_owned(),
+                    collapsed: Vec::new(),
+                });
+            }),
+        );
+        let (_, opened) = rig.next().await;
+        rig.batcher.ack(opened.seq);
+        assert_eq!(names(&opened), ["p1", "p2", "p3", "p4", "p5"]);
+        assert!(opened.groups.is_none(), "the groups did not change");
+
+        rig.batcher.set_view(
+            4,
+            Shape::of(|view| {
+                view.count_by = Some("Namespace".to_owned());
+                view.values = Some(ColumnValues {
+                    column: "Namespace".to_owned(),
+                    values: vec!["a".to_owned()],
+                });
+            }),
+        );
+        let (_, kept) = rig.next().await;
+        assert_eq!((kept.view, kept.total), (4, 2));
+        assert_eq!(names(&kept), ["p1", "p2"]);
+        assert_eq!(
+            kept.counts.map(|counts| counts.len()),
+            None,
+            "the counts count before the values drop rows, so they did not change"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_column_choice_in_place_changes_what_the_text_reads() {
+        let fake = Fake::default();
+        fake.add("pods", Some("a"), "p1");
+        fake.add("pods", Some("b"), "p2");
+        let mut rig = unwindowed_over(subscribed_as(fake, &["a", "b"], RowFormat::Table).await);
+        rig.batcher.set_window(0, 100, false);
+        rig.until_total(2).await;
+        let text = Some("b".to_owned());
+        rig.batcher
+            .set_view(1, Shape::of(|view| view.text.clone_from(&text)));
+        let (_, read) = rig.next().await;
+        rig.batcher.ack(read.seq);
+        assert_eq!(
+            names(&read),
+            ["p2"],
+            "Namespace is shown, so the filter reads it"
+        );
+
+        rig.batcher.set_view(
+            2,
+            Shape::of(|view| {
+                view.text.clone_from(&text);
+                view.columns = Some([("Namespace".to_owned(), false)].into());
+            }),
+        );
+        let (_, hidden) = rig.next().await;
+        assert_eq!((hidden.view, hidden.total), (2, 0), "Namespace is hidden");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn view_changes_while_a_batch_is_unacknowledged_go_out_together_with_the_ack() {
+        let (mut rig, _) = of_four().await;
+        rig.fake.add("pods", Some("a"), "p5");
+        let (_, unacked) = rig.next().await;
+        rig.batcher
+            .set_view(1, Shape::of(|view| view.text = Some("p5".to_owned())));
+        rig.batcher.set_view(2, by_name(true));
+        sleep(FLUSH * 3).await;
+        assert!(rig.batches.try_recv().is_err(), "it waits for the ack");
+        let acked = Instant::now();
+        rig.batcher.ack(unacked.seq);
+        let (at, answer) = rig.next().await;
+        assert_eq!(at, acked, "at once, not on the next tick");
+        assert_eq!((answer.seq, answer.view), (unacked.seq + 1, 2));
+        assert_eq!(names(&answer), ["p5", "p4", "p3", "p2", "p1"]);
+        rig.batcher.ack(answer.seq);
+        sleep(FLUSH * 5).await;
+        assert!(
+            rig.batches.try_recv().is_err(),
+            "the first change never went out"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_view_change_and_a_window_change_in_one_round_are_one_batch() {
+        let (mut rig, first) = of_four().await;
+        rig.batcher.set_window(1, 3, false);
+        rig.batcher.set_view(1, by_name(true));
+        let (_, answer) = rig.next().await;
+        assert_eq!((answer.seq, answer.view), (first.seq + 1, 1));
+        let window = answer.window.as_ref().expect("a window");
+        assert_eq!(window.start, 1);
+        assert_eq!(names(&answer), ["p3", "p2"], "the middle of the new order");
+        rig.batcher.ack(answer.seq);
+        sleep(FLUSH * 5).await;
+        assert!(rig.batches.try_recv().is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_view_change_before_the_first_window_answers_the_first_batch() {
+        let mut rig = tabled(&[("a", "p1")]).await;
+        rig.fake.add("pods", Some("a"), "p2");
+        rig.batcher.set_view(1, by_name(true));
+        sleep(FLUSH * 3).await;
+        assert!(rig.batches.try_recv().is_err(), "nothing before a window");
+        rig.batcher.set_window(0, 100, false);
+        let (_, first) = rig.next().await;
+        assert_eq!((first.seq, first.view), (1, 1));
+        assert_eq!(names(&first), ["p2", "p1"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_regex_that_changes_the_text_of_a_list_with_no_rows_left_does_not_wait_for_a_change()
+    {
+        let (mut rig, _) = of_four().await;
+        rig.batcher
+            .set_view(1, Shape::of(|view| view.text = Some("zzz".to_owned())));
+        let (_, none) = rig.next().await;
+        assert_eq!((none.view, none.total), (1, 0));
+        assert_eq!(none.window.map(|window| window.ids.len()), Some(0));
     }
 
     #[tokio::test(start_paused = true)]

@@ -33,6 +33,7 @@ function row(id: string, ...cells: Row["cells"]): Row {
 function batch(seq: number, rest: Partial<ListBatch> = {}): ListBatch {
   return {
     seq,
+    view: 0,
     total: 2,
     columns: null,
     window: null,
@@ -281,6 +282,93 @@ test("a batch that tells a list that metrics are absent fails the view, since Ru
   const { status, metrics } = view.getSnapshot();
   expect(status.state === "error" && status.error.kind).toBe("internal");
   expect(metrics).toBe("ready");
+});
+
+const view = (text: string | null, sort: ListQuery["sort"] = null) => ({
+  text,
+  columns: null,
+  sort,
+  countBy: null,
+  groupBy: null,
+  values: null,
+});
+
+test("a view change is numbered and sent once the id is known, before the window, and the same view again sends nothing", async () => {
+  const fake = fakeBackend();
+  const list = new ListView(fake.backend, QUERY);
+  list.setWindow(0, 40);
+  list.setView(view("a"));
+  list.setView(view("ab"));
+  list.setView(view("ab"));
+  expect(fake.calls).toEqual([]);
+  fake.resolve(7);
+  await vi.runAllTimersAsync();
+  expect(fake.calls).toEqual([
+    ["list_set_view", { id: 7, view: 2, ...view("ab") }],
+    ["list_set_window", { id: 7, start: 0, end: 40, metrics: false }],
+  ]);
+  list.setView(view("ab", { column: "Name", descending: true }));
+  list.setView(view("ab", { column: "Name", descending: true }));
+  expect(fake.calls.slice(2)).toEqual([
+    [
+      "list_set_view",
+      { id: 7, view: 3, ...view("ab", { column: "Name", descending: true }) },
+    ],
+  ]);
+});
+
+test("the query the rows answer is the one of the view the latest batch names, and older ones are forgotten", async () => {
+  const fake = fakeBackend();
+  const list = new ListView(fake.backend, QUERY);
+  fake.resolve(7);
+  await vi.runAllTimersAsync();
+  list.setView(view("a"));
+  list.setView(view("ab"));
+  list.setView(view("abc"));
+  fake.send(batch(1));
+  expect(list.queryOf(list.getSnapshot().view)).toEqual(QUERY);
+  fake.send(batch(2, { view: 1 }));
+  expect(list.queryOf(list.getSnapshot().view)).toEqual({
+    ...QUERY,
+    ...view("a"),
+  });
+  fake.send(batch(3, { view: 3 }));
+  expect(list.queryOf(list.getSnapshot().view)).toEqual({
+    ...QUERY,
+    ...view("abc"),
+  });
+  expect(list.queryOf(1)).toBeUndefined();
+  expect(list.queryOf(2)).toBeUndefined();
+});
+
+test("a view Rust refuses keeps the list in error until another is asked, and a refusal of an older view is ignored", async () => {
+  const fake = fakeBackend();
+  const refusing = new Set(["/(/"]);
+  const invoke = fake.backend.invoke.bind(fake.backend);
+  fake.backend.invoke = (command: string, request: unknown) => {
+    const text = (request as { text?: string | null }).text;
+    return command === "list_set_view" && text && refusing.has(text)
+      ? Promise.reject(new IpcError("filter.invalid-regex", "no regex"))
+      : invoke(command as never, request as never);
+  };
+  const list = new ListView(fake.backend, QUERY);
+  fake.resolve(7);
+  await vi.runAllTimersAsync();
+  list.setView(view("/(/"));
+  await vi.runAllTimersAsync();
+  expect(list.getSnapshot().status).toMatchObject({ state: "error" });
+  fake.send(batch(1));
+  expect(list.getSnapshot().status).toMatchObject({ state: "error" });
+  list.setView(view("a"));
+  fake.send(batch(2, { view: 2 }));
+  expect(list.getSnapshot().status).toEqual({ state: "ready" });
+
+  refusing.add("b");
+  list.setView(view("b"));
+  list.setView(view("c"));
+  await vi.runAllTimersAsync();
+  fake.send(batch(3, { view: 4 }));
+  expect(list.getSnapshot().status).toEqual({ state: "ready" });
 });
 
 test("a failed subscribe shows the error state", async () => {

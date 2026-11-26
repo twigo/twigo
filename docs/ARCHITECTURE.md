@@ -536,6 +536,9 @@ A subscription carries a `ListQuery { space, gvr, namespaced, namespaces, labelS
 The field selector goes to the server with the list's requests, as a node's pods need; `owners` keeps the rows whose controller reference names one of its uids, an empty set none, after the labels and before the text and the counts, as a workload's pods are its ReplicaSets'.
 `namespaced` comes from discovery, which the webview holds already, so a list subscribes once its space's resources are known: Rust needs the scope for the request's path and for the Namespace column, which a cluster-scoped kind never has.
 The webview then sends `setWindow(start, end)` as the user scrolls, covering the visible rows plus about two screens of overscan.
+The view part of the query, `text`, `columns`, `sort`, `countBy`, `groupBy` and `values`, changes in place: the webview sends `setView` with the new fields and a number it counts up from 1, and each batch says in `view` the number of the last change the list had taken when it built the batch, 0 before any.
+The webview keeps the rows on screen until the first batch that names its change, as the first batch of the new order.
+Anything else in the query, the space, the resource, the namespaces, the selectors and the owners, is a new subscription.
 
 - Rust keeps an incremental ordered index per query view, indexset's two-level B-tree with a Fenwick tree over its nodes: a change finds its place in O(log n) and shifts at most a node of 1,024 entries, and one that fills or empties a node rebuilds the Fenwick tree, O(n/1,024).
   - Cells carry their column type, but many core columns are formatted strings: Pod Ready `1/2`, Restarts `3 (5m ago)`, Age.
@@ -546,6 +549,10 @@ The webview then sends `setWindow(start, end)` as the user scrolls, covering the
     Empty cells come first, then numbers, ratios and text; rows with equal keys follow their ids, ascending in either direction.
   - A CPU or Memory cell is an integer of nanocores or bytes, empty for a row without a sample, which sorts last in both directions; no text filter, count, group or value reads it (3.6).
   - A sort, a count, a group or values for a column the list lacks do nothing, and no sort sorts by Name.
+- A change of the view part is made of the rows the view holds, without a new subscription: a sort re-keys its entries and orders its index anew, a count, a group or values place the held rows again, and a collapsed group changes only which rows the window reads.
+  A text is the exception: the view holds only the rows its text keeps, so a text that changes asks its source for every row again, as a relist does.
+  The change goes out at once as a window's does, or with the ack of the batch in flight; changes that come while a batch waits are made together and the batch names the last.
+  A batch is sent for a change that moves nothing, so the webview always hears its number.
 - Each reader of a row store has a feed of the keys changed since it last read, coalesced, and a key added since then and deleted again leaves it, so it holds no more keys than the reader held and the store holds, however long the reader waits.
   A flush drains it, updates the index row by row and computes what changed **inside the window**; a relist, new columns, new upstreams or a part that starts or stops showing send every row again.
 - Text filter on the columns the table shows, Name always among them: a substring in any case of ASCII letters; `!` before it keeps the rows without one; `/…/` is a case-insensitive regex, and `!/…/` its negation.
@@ -590,9 +597,9 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
   - a delete wins;
   - add followed by delete sends nothing;
   - add followed by modify is sent as add.
-- One task per subscription flushes on a tokio interval (`MissedTickBehavior::Skip`) that each batch restarts, so 50 ms after its last batch, or sooner when the window changes.
+- One task per subscription flushes on a tokio interval (`MissedTickBehavior::Skip`) that each batch restarts, so 50 ms after its last batch, or sooner when the window or the view changes.
   The interval waits while a batch is unacknowledged, so a hidden window wakes nothing, and an ack later than the tick flushes at once.
-  A window that changes while a batch waits for its ack goes out with the ack, not on the next tick.
+  A window or a view (3.4) that changes while a batch waits for its ack goes out with the ack, not on the next tick.
 - **Credit-based flow control.**
   - Channels have no backpressure, so the frontend acknowledges every `seq`.
   - Rust keeps at most one batch unacknowledged and keeps coalescing while it waits.
@@ -691,11 +698,12 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     A list of all namespaces sorted so asks for the cluster in one request as well (decision 69) and its namespaces as the fallback: the cluster covers the namespaces' and the pods' readers only while it answers, so when it is forbidden or unavailable they are listed themselves and say their own state.
     A list of chosen namespaces never asks for the cluster, nor does a list of all namespaces that the hub resolved to the namespaces the person may list (3.2): a person who may not list the pods cluster-wide is taken to be refused their metrics there too, so the request would only repeat every 15 s to be refused.
   - A list's first batch has what the poller already holds.
-    A list that joins a scope another reads, as a new query's subscription does while the old one is still open (4.4), has the scope's samples and state in its first batch, with no request.
+    A list that joins a scope another reads, as a new subscription does while the old one is still open (4.4), has the scope's samples and state in its first batch, with no request.
     A list sorted by CPU or Memory whose first window says it reads metrics holds the first batch that shows its rows until each of its scopes has answered or failed once, so that its first order is the true one, and for 2 s at most, a bound of its own beside the poll's interval.
     One cluster's list is far inside it (above), but a list of chosen namespaces, or of all namespaces when the cluster's request is refused, needs every namespace's answer, four at a time, so a slow server reaches it as well as one that does not answer: on the fake with every request taking 250 ms, an assumed latency of a remote cluster and not a measured one, 40 namespaces answered by 2.75 s, and the batch left at 2 s with a value for 28 of its 40 rows (`a_list_of_many_namespaces_whose_answers_are_slow_reaches_the_bound_and_the_order_settles`, paused time, 2026-11-13).
     When the bound passes the batch goes out as it is, the rows that have an answer with their values and the others with none, and the order settles as the answers come.
     A list not sorted by a metric never waits for the poller, nor does one sorted by a metric while its window says it does not read metrics.
+    A sort changed in place to one holds the first batch of the new order the same way, with the rows on screen and their changes held back until it comes, since the new order is not the true one before the scopes of the whole list have answered.
   - An answer is parsed into nanocores and bytes per container, and samples are compared by value, ignoring the order of containers and the request's time, so a reader hears only the keys whose values changed, appeared or went.
     A pod's value is the sum over its containers, as kubectl sums them, joined to its row by namespace and name in Rust, and dropped with the row and with its uid.
     A row that enters the filters, as a pod does that turns CrashLoopBackOff under a text filter, takes the sample the poller already holds, since the poller tells only what changes, unless the sample was taken before the row was created: the API carries no uid, so that one is of another pod by the name.
@@ -1297,7 +1305,8 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   The list says with its window that it reads them while its editor is on screen, behind no other tab and under no maximized panel, and the document is visible, and either it does not know yet which columns of its resource are measures, from its own columns or from a list of the resource opened earlier in the session in the same space, since one space's cluster may serve the Metrics API and another's not, so that a list sorted by one is held from its first rows, or it draws one or is sorted by one; a resource whose columns came with none says it reads nothing, and a list too narrow for its metric columns draws none and reads none unless it is sorted by one.
   While a new subscription has no columns yet, the list keeps the metric columns it last drew, so a narrow list does not read them meanwhile.
   A list inside an Overview follows the same rule and counts every column as drawn until its width is measured, which comes after its first window, so that one sorted by a measure is held from its first rows; once measured it reads only the measures that its width leaves drawn, or that it is sorted by.
-  A new query, from a sort, a filter or a change of namespaces, opens its subscription before the old one closes, and the old one stays on screen and open until the new one's first batch, so a scope the old one read keeps its reader and its samples.
+  A sort, a filter, a grouping or a choice of columns changes the view of the subscription the list has, and the rows on screen stay until the first batch that names the change (3.4), so nothing opens or closes.
+  A change of namespaces, or of what the list reads otherwise, opens a new subscription before the old one closes, and the old one stays on screen and open until the new one's first batch, so a scope the old one read keeps its reader and its samples.
   A first click on their header sorts the largest first, as [`kubectl top --sort-by`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/kubectl/pkg/metricsutil/metrics_sorter.go#L71-L83) orders, and the second ascends.
   A header whose Metrics API does not answer, or may not be read, carries a quiet mark with the reason in its tooltip, and its cells stay dashes.
 

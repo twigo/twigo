@@ -26,8 +26,10 @@ use tokio::sync::mpsc;
 use twigo_cache::batcher::Batcher;
 use twigo_cache::hub::{Connect, Delta, Hub, Query, Resource, RowFormat};
 use twigo_cache::request::Selectors;
-use twigo_cache::view::{QueryView, Spec};
-use twigo_ipc::{Cell, Gvr, ListBatch, ListQuery, Parts, Row, RowId, Sort, ViewState};
+use twigo_cache::view::{QueryView, Shape, Spec};
+use twigo_ipc::{
+    Cell, Gvr, ListBatch, ListQuery, Parts, Row, RowId, SetView, Sort, SubscriptionId, ViewState,
+};
 use twigo_kube::client::{Clients, Gate, Options};
 
 const PODS: u32 = 5_000;
@@ -137,6 +139,28 @@ impl Live {
         }
     }
 
+    async fn windows(&mut self, all: &[(String, Cell)], windows: &[(u32, u32)], changes: usize) {
+        for &(start, end) in windows {
+            let expected = &all[start as usize..end as usize];
+            self.batcher.set_window(start, end, false);
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+            loop {
+                self.follow(Duration::from_millis(500)).await;
+                let shown = self.mirror.shown();
+                if self.mirror.start == start && shown == expected {
+                    break;
+                }
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "the window at {start} after {changes} changes: {:?}, a fresh list: {:?}",
+                    &shown[..shown.len().min(5)],
+                    &expected[..5]
+                );
+            }
+            assert_eq!(self.mirror.total, PODS);
+        }
+    }
+
     async fn until(&mut self, what: &str, done: impl Fn(&Mirror) -> bool) {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(600);
         while !done(&self.mirror) {
@@ -149,12 +173,12 @@ impl Live {
     }
 }
 
-/// Every row a list of its own, started fresh, shows, in order.
-async fn fresh(clients: &Arc<Clients>, context: &str) -> Vec<(String, Cell)> {
+/// Every row a list of `query` of its own, started fresh, shows, in order.
+async fn fresh(clients: &Arc<Clients>, context: &str, query: &ListQuery) -> Vec<(String, Cell)> {
     let hub = Hub::new(connect(clients));
     let mut rows = hub.rows(hub_query(context)).await.unwrap();
     let listed = rows.whole().await.expect("a fresh list");
-    let mut view = QueryView::new(Spec::new(context, &query(context)).unwrap());
+    let mut view = QueryView::new(Spec::new(context, query).unwrap());
     view.set_window(0, PODS);
     view.apply(Delta::Reset {
         rows: listed,
@@ -295,7 +319,7 @@ async fn under_churn(path: &std::ffi::OsStr, context: &str, clients: &Arc<Client
     let changes = lines.len();
     assert!(changes > 1_000, "only {changes} changes");
 
-    let all = fresh(clients, context).await;
+    let all = fresh(clients, context, &query(context)).await;
     assert_eq!(all.len() as u32, PODS);
     let unchanged = all
         .iter()
@@ -307,23 +331,36 @@ async fn under_churn(path: &std::ffi::OsStr, context: &str, clients: &Arc<Client
         (unchanged - WINDOW / 2, unchanged + WINDOW / 2),
         (PODS - WINDOW, PODS),
     ];
-    for (start, end) in windows {
-        let expected = &all[start as usize..end as usize];
-        live.batcher.set_window(start, end, false);
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-        loop {
-            live.follow(Duration::from_millis(500)).await;
-            let shown = live.mirror.shown();
-            if live.mirror.start == start && shown == expected {
-                break;
-            }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "the window at {start} after {changes} changes: {:?}, a fresh list: {:?}",
-                &shown[..shown.len().min(5)],
-                &expected[..5]
-            );
-        }
-        assert_eq!(live.mirror.total, PODS);
-    }
+    live.windows(&all, &windows, changes).await;
+
+    let by_name = ListQuery {
+        sort: Some(Sort {
+            column: "Name".to_owned(),
+            descending: true,
+        }),
+        ..query(context)
+    };
+    let sorted = fresh(clients, context, &by_name).await;
+    let shape = Shape::new(&SetView {
+        id: SubscriptionId(0),
+        view: 1,
+        text: by_name.text.clone(),
+        columns: by_name.columns.clone(),
+        sort: by_name.sort.clone(),
+        count_by: by_name.count_by.clone(),
+        group_by: by_name.group_by.clone(),
+        values: by_name.values.clone(),
+    })
+    .unwrap();
+    live.batcher.set_view(1, shape);
+    live.windows(
+        &sorted,
+        &[
+            (0, WINDOW),
+            (PODS / 2, PODS / 2 + WINDOW),
+            (PODS - WINDOW, PODS),
+        ],
+        changes,
+    )
+    .await;
 }

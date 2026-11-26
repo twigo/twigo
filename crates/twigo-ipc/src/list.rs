@@ -110,6 +110,28 @@ pub struct SetWindow {
     pub metrics: bool,
 }
 
+/// Changes the view of a list in place: the fields of [`ListQuery`] that
+/// choose which of the list's rows show, in which order and how they are
+/// counted and grouped. A change of anything else in a query, the space, the
+/// resource, the namespaces, the selectors or the owners, is a new
+/// subscription.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SetView {
+    pub id: SubscriptionId,
+    /// The number of this view, which the webview counts up from 1: the
+    /// query the list subscribed with is view 0. The first batch that
+    /// reflects this view carries it in [`ListBatch::view`], so the webview
+    /// knows which rows answer which query.
+    pub view: u32,
+    pub text: Option<String>,
+    pub columns: Option<BTreeMap<String, bool>>,
+    pub sort: Option<Sort>,
+    pub count_by: Option<String>,
+    pub group_by: Option<Grouping>,
+    pub values: Option<ColumnValues>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct Ack {
     pub id: SubscriptionId,
@@ -121,6 +143,11 @@ pub struct Ack {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct ListBatch {
     pub seq: u32,
+    /// The number of the view this batch reflects: that of the last
+    /// [`SetView`] the list had taken when it built the batch, 0 before any.
+    /// Several changes that arrive while a batch waits for its ack are taken
+    /// together, so a batch may skip the numbers between.
+    pub view: u32,
     /// Rows matching the query, in or out of the window, those of collapsed
     /// groups included.
     pub total: u32,

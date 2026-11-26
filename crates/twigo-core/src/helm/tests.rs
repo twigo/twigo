@@ -9,9 +9,10 @@ use tokio::sync::mpsc;
 use twigo_cache::batcher::Batcher;
 use twigo_cache::fake::Fake;
 use twigo_cache::hub::Hub;
+use twigo_cache::view::Shape;
 use twigo_ipc::{
     Cell, Column, ColumnKind, ErrorCode, ListBatch, Part, PartState, Parts, ReleaseListQuery, Row,
-    RowId, Sort, ViewState,
+    RowId, SetView, Sort, SubscriptionId, ViewState,
 };
 use twigo_kube::client::{Budgets, Clients};
 
@@ -361,6 +362,42 @@ async fn the_query_view_sorts_and_filters_releases() {
     filtered.text = Some("failed".to_owned());
     let mut rig = Rig::new(fake, filtered).await;
     rig.shows(&["web 7 failed -"]).await;
+}
+
+fn viewed(view: u32, text: Option<&str>, sort: Option<(&str, bool)>) -> Shape {
+    Shape::new(&SetView {
+        id: SubscriptionId(0),
+        view,
+        text: text.map(str::to_owned),
+        columns: None,
+        sort: sort.map(|(column, descending)| Sort {
+            column: column.to_owned(),
+            descending,
+        }),
+        count_by: None,
+        group_by: None,
+        values: None,
+    })
+    .unwrap()
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_query_view_of_releases_changes_in_place() {
+    let fake = Fake::default();
+    three(&fake);
+    let mut rig = Rig::new(fake, query(&["a"])).await;
+    rig.shows(&["api 1 deployed -", "db 3 deployed -", "web 7 failed -"])
+        .await;
+
+    rig.list
+        .set_view(1, viewed(1, None, Some(("Revision", true))));
+    rig.shows(&["web 7 failed -", "db 3 deployed -", "api 1 deployed -"])
+        .await;
+    rig.list.set_view(2, viewed(2, Some("failed"), None));
+    rig.shows(&["web 7 failed -"]).await;
+    rig.list.set_view(3, viewed(3, None, None));
+    rig.shows(&["api 1 deployed -", "db 3 deployed -", "web 7 failed -"])
+        .await;
 }
 
 #[tokio::test(start_paused = true)]

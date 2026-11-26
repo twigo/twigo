@@ -1,4 +1,11 @@
-import type { Backend, Cell, Column, ListBatch, RowId } from "@twigo/protocol";
+import type {
+  Backend,
+  Cell,
+  Column,
+  ListBatch,
+  RequestOf,
+  RowId,
+} from "@twigo/protocol";
 
 /** A cell a batch changed, with what it now reads. */
 export interface CellChange {
@@ -19,12 +26,30 @@ export class ListProbe {
   total = 0;
   start = 0;
   ids: readonly RowId[] = [];
+  /** The view the latest batch reflects. */
+  view = 0;
   readonly #cells = new Map<RowId, readonly Cell[]>();
   readonly #listeners = new Set<BatchListener>();
+  readonly #views = new Set<(view: number) => void>();
 
   listen(listener: BatchListener): () => void {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
+  }
+
+  /** The number of the next view change sent for this list. */
+  nextView(): Promise<number> {
+    return new Promise((resolve) => {
+      const sent = (view: number) => {
+        this.#views.delete(sent);
+        resolve(view);
+      };
+      this.#views.add(sent);
+    });
+  }
+
+  asked(view: number): void {
+    for (const sent of [...this.#views]) sent(view);
   }
 
   /** The row's index in the whole sorted list, or -1 outside the window. */
@@ -38,6 +63,7 @@ export class ListProbe {
   }
 
   record(at: number, batch: ListBatch): void {
+    this.view = batch.view;
     this.total = batch.total;
     if (batch.columns) this.columns = batch.columns;
     if (batch.window) {
@@ -61,24 +87,33 @@ export class ListProbe {
 
 /** A backend that passes everything through and records each list subscription's batches. */
 export class Probe {
-  readonly lists: ListProbe[] = [];
   readonly backend: Backend;
+  readonly #lists = new Map<number, ListProbe>();
   readonly #opened = new Set<(list: ListProbe) => void>();
 
   constructor(inner: Backend) {
     this.backend = {
-      invoke: (command, request) => inner.invoke(command, request),
+      invoke: (command, request) => {
+        if (command === "list_set_view") {
+          const { id, view } = request as RequestOf<"list_set_view">;
+          this.#lists.get(id)?.asked(view);
+        }
+        return inner.invoke(command, request);
+      },
       subscribe: (command, request, onMessage) => {
         if (command !== "list_subscribe") {
           return inner.subscribe(command, request, onMessage);
         }
         const list = new ListProbe();
-        this.lists.push(list);
         for (const opened of this.#opened) opened(list);
-        return inner.subscribe(command, request, (message) => {
+        const pending = inner.subscribe(command, request, (message) => {
           list.record(performance.now(), message as ListBatch);
           onMessage(message);
         });
+        void pending.then((id) => {
+          if (typeof id === "number") this.#lists.set(id, list);
+        });
+        return pending;
       },
     };
   }

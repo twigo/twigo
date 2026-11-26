@@ -13,8 +13,9 @@ use crate::{
     ObjectBatch, OpenIssue, OpenLogs, OpenObject, OpenRelease, OpenShell, OperationEvent, Plan,
     PlanId, PlanRequest, ReleaseBatch, ReleaseListQuery, Report, ResumeForward, SaveReport,
     SchemaQuery, SetLogLevel, SetLogSource, SetLogView, SetLogWindow, SetParts, SetReleaseView,
-    SetWindow, ShellAck, ShellContainers, ShellEnvironment, ShellInput, ShellMessage, ShellPod,
-    ShellResize, Space, StartForward, StateEntry, StateSnapshot, SubscriptionId, TerminalSession,
+    SetView, SetWindow, ShellAck, ShellContainers, ShellEnvironment, ShellInput, ShellMessage,
+    ShellPod, ShellResize, Space, StartForward, StateEntry, StateSnapshot, SubscriptionId,
+    TerminalSession,
 };
 
 pub trait Command {
@@ -190,6 +191,18 @@ pub struct ListSetWindow;
 impl Command for ListSetWindow {
     const NAME: &'static str = "list_set_window";
     type Request = SetWindow;
+    type Response = ();
+    type Message = ();
+}
+
+/// Changes the text, the columns' choices, the sort, the counts, the groups
+/// and the values of a list's query without a new subscription: the next
+/// batch that reflects the change carries its `view`.
+pub struct ListSetView;
+
+impl Command for ListSetView {
+    const NAME: &'static str = "list_set_view";
+    type Request = SetView;
     type Response = ();
     type Message = ();
 }

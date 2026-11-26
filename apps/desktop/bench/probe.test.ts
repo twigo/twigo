@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
-import type { Cell, Column, ListBatch, Row } from "@twigo/protocol";
-import { type CellChange, ListProbe } from "./probe";
+import type { Backend, Cell, Column, ListBatch, Row } from "@twigo/protocol";
+import { type CellChange, ListProbe, Probe } from "./probe";
 
 const COLUMNS: Column[] = [
   { name: "Name", kind: "string", priority: 0 },
@@ -21,6 +21,7 @@ function row(id: string, cells: Cell[]): Row {
 function batch(rest: Partial<ListBatch>): ListBatch {
   return {
     seq: 1,
+    view: 0,
     total: 3,
     columns: null,
     window: null,
@@ -139,4 +140,49 @@ test("a listener stops hearing batches once removed", () => {
   stop();
   probe.record(30, batch({}));
   expect(heard).toEqual([20]);
+});
+
+test("a batch sets the view the list reflects", () => {
+  const probe = opened();
+  expect(probe.view).toBe(0);
+  probe.record(20, batch({ view: 3 }));
+  expect(probe.view).toBe(3);
+});
+
+test("the next view change sent for a list resolves with its number, and another list's does not", async () => {
+  let opened = 0;
+  const inner: Backend = {
+    invoke: () => Promise.resolve(null as never),
+    subscribe: () => Promise.resolve(++opened as never),
+  };
+  const probe = new Probe(inner);
+  const next = probe.next();
+  const one = probe.backend.subscribe(
+    "list_subscribe",
+    {} as never,
+    () => undefined,
+  );
+  const list = await next;
+  const two = probe.backend.subscribe(
+    "list_subscribe",
+    {} as never,
+    () => undefined,
+  );
+  const [a, b] = [await one, await two];
+  const heard: number[] = [];
+  void list.nextView().then((view) => heard.push(view));
+  const shape = {
+    text: null,
+    columns: null,
+    sort: null,
+    countBy: null,
+    groupBy: null,
+    values: null,
+  };
+  await probe.backend.invoke("list_set_view", { id: b, view: 9, ...shape });
+  await Promise.resolve();
+  expect(heard).toEqual([]);
+  await probe.backend.invoke("list_set_view", { id: a, view: 4, ...shape });
+  await Promise.resolve();
+  expect(heard).toEqual([4]);
 });

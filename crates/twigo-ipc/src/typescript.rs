@@ -10,13 +10,13 @@ use crate::command::{
     ContextSignInCancel, ContextsWatch, DiagnosticsLog, ExecReviewGet, ExecTrust, ForwardPortsGet,
     ForwardRemove, ForwardResume, ForwardStart, ForwardStop, ForwardsWatch, HelmCompare,
     HelmListSubscribe, HelmReleaseAck, HelmReleaseClose, HelmReleaseOpen, HelmReleaseSetView,
-    KeyboardLayoutWatch, KubeconfigOfferAnswerSend, KubeconfigOffersWatch, ListAck, ListSetWindow,
-    ListSubscribe, ListUnsubscribe, LogLevelSet, LogReveal, LogsAck, LogsClose, LogsDownload,
-    LogsOpen, LogsSetSource, LogsSetView, LogsSetWindow, NamespacesList, ObjectAck, ObjectClose,
-    ObjectOpen, ObjectSetParts, ObjectValues, ProblemsWatch, ReportOpenIssue, ReportProblem,
-    ReportSave, ResourcesWatch, SchemaGet, ShellAcknowledge, ShellClose, ShellContainersGet,
-    ShellEnvironmentRetry, ShellEnvironmentWatch, ShellOpen, ShellSendInput, ShellSetSize,
-    SpaceOpen, SpacesList, StateLoad, StateSet, TerminalCreate, UrlOpen,
+    KeyboardLayoutWatch, KubeconfigOfferAnswerSend, KubeconfigOffersWatch, ListAck, ListSetView,
+    ListSetWindow, ListSubscribe, ListUnsubscribe, LogLevelSet, LogReveal, LogsAck, LogsClose,
+    LogsDownload, LogsOpen, LogsSetSource, LogsSetView, LogsSetWindow, NamespacesList, ObjectAck,
+    ObjectClose, ObjectOpen, ObjectSetParts, ObjectValues, ProblemsWatch, ReportOpenIssue,
+    ReportProblem, ReportSave, ResourcesWatch, SchemaGet, ShellAcknowledge, ShellClose,
+    ShellContainersGet, ShellEnvironmentRetry, ShellEnvironmentWatch, ShellOpen, ShellSendInput,
+    ShellSetSize, SpaceOpen, SpacesList, StateLoad, StateSet, TerminalCreate, UrlOpen,
 };
 use crate::{ErrorCode, ShellEvent};
 
@@ -43,6 +43,7 @@ pub fn typescript() -> String {
     module.command::<ClusterVersionGet>();
     module.command::<ListSubscribe>();
     module.command::<ListSetWindow>();
+    module.command::<ListSetView>();
     module.command::<ListAck>();
     module.command::<ListUnsubscribe>();
     module.command::<ObjectOpen>();

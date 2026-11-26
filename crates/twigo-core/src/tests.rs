@@ -7,7 +7,7 @@ use tokio::sync::watch;
 use twigo_env::{Failure, Reason, ShellEnv, Status};
 
 use super::*;
-use twigo_ipc::{BlockReason, Environment, ErrorKind, Mode, ModeSource, ViewState};
+use twigo_ipc::{BlockReason, Environment, ErrorKind, Mode, ModeSource, Sort, ViewState};
 
 fn env(kubeconfig: &Path) -> Arc<ShellEnv> {
     Arc::new(ShellEnv::from_iter([(
@@ -484,6 +484,78 @@ async fn a_window_reaches_only_its_own_lists_and_a_reload_drops_them() {
         core.lists.keep(ticket, late).unwrap_err().kind,
         ErrorKind::Unavailable,
         "asked for before the reload, answered after"
+    );
+}
+
+fn view_of(id: SubscriptionId, view: u32, text: Option<&str>) -> SetView {
+    SetView {
+        id,
+        view,
+        text: text.map(str::to_owned),
+        columns: None,
+        sort: Some(Sort {
+            column: "Name".to_owned(),
+            descending: true,
+        }),
+        count_by: None,
+        group_by: None,
+        values: None,
+    }
+}
+
+#[tokio::test]
+async fn a_view_change_reaches_its_own_list_and_a_regex_that_does_not_parse_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = Core::new(
+        dir.path(),
+        &dir.path().join("cache"),
+        &dir.path().join("policy.json"),
+    );
+    let space = core.state.open_space("kind-test").id;
+    let (sender, mut batches) = tokio::sync::mpsc::unbounded_channel();
+    let id = core
+        .list_subscribe("main", pods(&space), move |batch| {
+            sender.send(batch).is_ok()
+        })
+        .await
+        .unwrap();
+    core.list_set_window(
+        "main",
+        SetWindow {
+            id,
+            start: 0,
+            end: 40,
+            metrics: false,
+        },
+    )
+    .unwrap();
+    let first = tokio::time::timeout(Duration::from_secs(5), batches.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.view, 0);
+    core.list_ack("main", Ack { id, seq: first.seq }).unwrap();
+
+    assert_eq!(
+        core.list_set_view("other", view_of(id, 1, None))
+            .unwrap_err()
+            .kind,
+        ErrorKind::NotFound,
+        "a window reaches only its own lists"
+    );
+    let refused = core.list_set_view("main", view_of(id, 1, Some("/(/")));
+    assert_eq!(refused.unwrap_err().kind, ErrorKind::InvalidInput);
+
+    core.list_set_view("main", view_of(id, 2, Some("web")))
+        .unwrap();
+    let second = tokio::time::timeout(Duration::from_secs(5), batches.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (second.seq, second.view),
+        (first.seq + 1, 2),
+        "the refused change numbered nothing"
     );
 }
 

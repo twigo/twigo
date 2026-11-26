@@ -322,6 +322,22 @@ async fn the_first_batch_has_the_columns_and_so_has_one_of_a_list_opened_again_a
     );
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_list_with_metric_columns_builds_its_rows_once() {
+    let mut list = Metered::start(cluster(true).await, None).await;
+    sleep(Duration::from_secs(1)).await;
+    crate::view::take_inserts();
+    list.batcher().set_window(0, 6, true);
+    let opened = first(&mut list).await;
+    assert!(has_metric_columns(&opened), "{:?}", opened.columns);
+    assert_eq!(opened.total, 6);
+    assert_eq!(
+        crate::view::take_inserts(),
+        6,
+        "each of the six rows is built once, with the columns"
+    );
+}
+
 async fn refused_list(window: u32, watched: Duration) -> Metered {
     let fake = cluster(true).await;
     for namespace in ["a", "b"] {
@@ -839,6 +855,74 @@ async fn sorted_by_a_metric_every_namespace_of_the_list_is_polled_until_the_sort
         "the sort changed, so b is out of the window"
     );
     assert_eq!(polls(&list.fake, "a"), a + 2);
+}
+
+fn by_cpu(descending: bool) -> Shape {
+    Shape::of(|view| {
+        view.sort = Some(Sort {
+            column: "CPU".to_owned(),
+            descending,
+        });
+    })
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_sort_by_a_metric_in_place_asks_for_every_namespace_until_the_sort_changes_back() {
+    let mut list = Metered::start(cluster(true).await, None).await;
+    list.batcher().set_window(0, 3, true);
+    list.watch(Duration::from_secs(1)).await;
+    assert_eq!(polls(&list.fake, "a"), 1);
+    assert_eq!(polls(&list.fake, "b"), 0, "the window shows only a");
+
+    list.batcher().set_view(1, by_cpu(true));
+    let batches = list.watch(Duration::from_secs(1)).await;
+    assert_eq!(
+        polls(&list.fake, "b"),
+        1,
+        "the whole list is read at once, as a list opened sorted by it is"
+    );
+    let sorted = batches
+        .iter()
+        .find(|batch| batch.view == 1)
+        .expect("a batch answers the view");
+    assert_eq!(
+        window_ids(sorted)[..3],
+        ["kind-test/b/q3", "kind-test/a/p3", "kind-test/b/q2"],
+        "in the order of the values, which the namespace b is read for"
+    );
+    list.watch(Duration::from_secs(2 * 15)).await;
+    assert_eq!(polls(&list.fake, "b"), 3);
+
+    list.batcher().set_view(2, Shape::of(|_| ()));
+    list.watch(Duration::from_secs(1)).await;
+    let (a, b) = (polls(&list.fake, "a"), polls(&list.fake, "b"));
+    list.watch(Duration::from_secs(2 * 15)).await;
+    assert_eq!(polls(&list.fake, "b"), b, "b is out of the window again");
+    assert_eq!(polls(&list.fake, "a"), a + 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_sort_by_a_metric_in_place_holds_its_first_order_for_the_scopes_it_newly_reads() {
+    let fake = cluster(true).await;
+    fake.state().metrics_takes = Duration::from_millis(250);
+    let mut list = Metered::start(fake, None).await;
+    list.batcher().set_window(0, 3, true);
+    list.watch(Duration::from_secs(5)).await;
+
+    let asked = Instant::now();
+    list.batcher().set_view(1, by_cpu(true));
+    let (at, answer) = loop {
+        let (at, batch) = first_at(&mut list).await;
+        if batch.view == 1 {
+            break (at, batch);
+        }
+    };
+    assert!(
+        at - asked >= Duration::from_millis(250),
+        "b answers after 250 ms: {:?}",
+        at - asked
+    );
+    assert_eq!(window_ids(&answer)[..3], BY_CPU[..3], "the true order");
 }
 
 #[tokio::test(start_paused = true)]

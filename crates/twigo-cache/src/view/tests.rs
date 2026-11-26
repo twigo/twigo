@@ -106,7 +106,37 @@ impl Rig {
         &mut self,
         held: impl Fn(&str, &str) -> Option<Arc<Sample>>,
     ) -> Option<ListBatch> {
-        let delta = match self.store.drain(&self.feed) {
+        self.flush_from(false, held)
+    }
+
+    fn reshape(&mut self, view: u32, query: &ListQuery) -> Option<ListBatch> {
+        let shape = Shape::new(&SetView {
+            id: ipc::SubscriptionId(0),
+            view,
+            text: query.text.clone(),
+            columns: query.columns.clone(),
+            sort: query.sort.clone(),
+            count_by: query.count_by.clone(),
+            group_by: query.group_by.clone(),
+            values: query.values.clone(),
+        })
+        .unwrap();
+        let all = self.view.reshape(view, shape);
+        self.flush_from(all, |_, _| None)
+    }
+
+    fn flush_from(
+        &mut self,
+        all: bool,
+        held: impl Fn(&str, &str) -> Option<Arc<Sample>>,
+    ) -> Option<ListBatch> {
+        let drained = self.store.drain(&self.feed);
+        let drained = if all {
+            self.store.reread(&self.feed)
+        } else {
+            drained
+        };
+        let delta = match drained {
             Drained::Reset { items, columns } => Delta::Reset {
                 rows: items,
                 columns,
@@ -765,6 +795,107 @@ struct Expected {
     groups: Option<Vec<RowGroup>>,
 }
 
+fn pods_rig(query: &ListQuery) -> Rig {
+    let mut rig = Rig::new(query);
+    for (namespace, name, status) in [
+        ("a", "web-1", "Running"),
+        ("a", "web-2", "Error"),
+        ("b", "web-3", "Running"),
+        ("b", "web-4", "Running"),
+    ] {
+        rig.store.upsert(pod(namespace, name, status, "0"));
+    }
+    rig.flush().unwrap();
+    rig
+}
+
+#[test]
+fn a_sort_or_a_collapsed_group_in_place_places_no_row_again() {
+    let mut rig = pods_rig(&query());
+    take_inserts();
+
+    let mut sorted = query();
+    sorted.sort = Some(Sort {
+        column: "Name".to_owned(),
+        descending: true,
+    });
+    let batch = rig.reshape(1, &sorted).unwrap();
+    assert_eq!(
+        ids(&batch),
+        [
+            "kind-test/b/web-4",
+            "kind-test/b/web-3",
+            "kind-test/a/web-2",
+            "kind-test/a/web-1"
+        ]
+    );
+    assert_eq!(batch.view, 1);
+    assert!(batch.upserts.is_empty(), "the webview has these rows");
+    assert_eq!(take_inserts(), 0, "the index is ordered anew");
+
+    sorted.group_by = grouping("Status", &[]);
+    rig.reshape(2, &sorted).unwrap();
+    take_inserts();
+    sorted.group_by = grouping("Status", &["Running"]);
+    let batch = rig.reshape(3, &sorted).unwrap();
+    assert_eq!(ids(&batch), ["kind-test/a/web-2"]);
+    assert_eq!(batch.total, 4, "the collapsed rows still count");
+    assert_eq!(
+        take_inserts(),
+        0,
+        "a collapsed group only changes the window"
+    );
+}
+
+#[test]
+fn a_count_a_group_or_values_in_place_place_each_row_once() {
+    let mut rig = pods_rig(&query());
+    take_inserts();
+    let mut counted = query();
+    counted.count_by = Some("Status".to_owned());
+    let batch = rig.reshape(1, &counted).unwrap();
+    assert_eq!(
+        counts(&batch.counts.unwrap()),
+        [("Running", 3), ("Error", 1)]
+    );
+    assert_eq!(take_inserts(), 4);
+
+    counted.values = Some(ColumnValues {
+        column: "Status".to_owned(),
+        values: vec!["Error".to_owned()],
+    });
+    let batch = rig.reshape(2, &counted).unwrap();
+    assert_eq!(ids(&batch), ["kind-test/a/web-2"]);
+    assert_eq!(batch.total, 1);
+    assert_eq!(take_inserts(), 4);
+}
+
+#[test]
+fn only_a_change_of_the_text_asks_for_the_rows_again() {
+    let mut rig = pods_rig(&query());
+    for (what, change, again) in [
+        (
+            "a sort",
+            (|view| {
+                view.sort = Some(ipc::Sort {
+                    column: "Name".to_owned(),
+                    descending: false,
+                })
+            }) as fn(&mut SetView),
+            false,
+        ),
+        (
+            "a count",
+            |view| view.count_by = Some("Status".to_owned()),
+            false,
+        ),
+        ("a text", |view| view.text = Some("web".to_owned()), true),
+        ("no text", |_| (), true),
+    ] {
+        assert_eq!(rig.view.reshape(1, Shape::of(change)), again, "{what}");
+    }
+}
+
 fn naive(rows: &HashMap<String, Row>, query: &ListQuery) -> Expected {
     fn sorted(counts: HashMap<String, u32>) -> Vec<ValueCount> {
         let mut counts: Vec<ValueCount> = counts
@@ -791,7 +922,7 @@ fn naive(rows: &HashMap<String, Row>, query: &ListQuery) -> Expected {
             continue;
         }
         let texts = layout.text.iter().map(|&at| layout.text(row, at));
-        if spec.text.as_ref().is_some_and(|t| !t.keeps(texts)) {
+        if spec.shape.text.as_ref().is_some_and(|t| !t.keeps(texts)) {
             continue;
         }
         let count = layout.count.map(|at| layout.text(row, at).into_owned());
@@ -892,43 +1023,53 @@ impl Mirror {
     }
 }
 
+fn random_shape(random: &mut fastrand::Rng, query: &mut ListQuery) {
+    const COLLAPSIBLE: [&str; 7] = ["Running", "Error", "", "a", "3", "1/1", "none"];
+    const TEXTS: [&str; 5] = ["web", "!db", "/^api-\\d$/", "!/1$/", "RUN"];
+    query.sort = random.bool().then(|| Sort {
+        column: ["Name", "Namespace", "Status", "Restarts", "Age", "Ready"][random.usize(..6)]
+            .to_owned(),
+        descending: random.bool(),
+    });
+    query.text = random
+        .bool()
+        .then(|| TEXTS[random.usize(..TEXTS.len())].to_owned());
+    query.count_by = random.bool().then(|| "Status".to_owned());
+    query.group_by = random.bool().then(|| Grouping {
+        column: ["Status", "Namespace", "Restarts", "Ready", "Phase"][random.usize(..5)].to_owned(),
+        collapsed: COLLAPSIBLE
+            .iter()
+            .filter(|_| random.bool())
+            .map(|value| (*value).to_owned())
+            .collect(),
+    });
+    query.values = random.bool().then(|| ColumnValues {
+        column: "Status".to_owned(),
+        values: vec!["Running".to_owned(), "Error".to_owned()],
+    });
+}
+
 /// Random changes to `names` pods in two namespaces, `rounds` flushes of
 /// up to `burst` changes each, every flush checked against a full sort and
 /// against what the webview holds.
-fn random_change_sets(seeds: std::ops::Range<u64>, names: usize, rounds: usize, burst: usize) {
+fn random_change_sets(
+    seeds: std::ops::Range<u64>,
+    names: usize,
+    rounds: usize,
+    burst: usize,
+    reshaping: bool,
+) {
     const STATUSES: [&str; 5] = ["Running", "Pending", "Error", "CrashLoopBackOff", ""];
-    const COLLAPSIBLE: [&str; 7] = ["Running", "Error", "", "a", "3", "1/1", "none"];
     const RESTARTS: [&str; 5] = ["0", "3", "3 (5m ago)", "12 (1h ago)", "1 (45s ago)"];
-    const TEXTS: [&str; 5] = ["web", "!db", "/^api-\\d$/", "!/1$/", "RUN"];
     for seed in seeds {
         let mut random = fastrand::Rng::with_seed(seed);
         let mut query = query();
-        query.sort = random.bool().then(|| Sort {
-            column: ["Name", "Namespace", "Status", "Restarts", "Age", "Ready"][random.usize(..6)]
-                .to_owned(),
-            descending: random.bool(),
-        });
-        query.text = random
-            .bool()
-            .then(|| TEXTS[random.usize(..TEXTS.len())].to_owned());
-        query.count_by = random.bool().then(|| "Status".to_owned());
-        query.group_by = random.bool().then(|| Grouping {
-            column: ["Status", "Namespace", "Restarts", "Ready", "Phase"][random.usize(..5)]
-                .to_owned(),
-            collapsed: COLLAPSIBLE
-                .iter()
-                .filter(|_| random.bool())
-                .map(|value| (*value).to_owned())
-                .collect(),
-        });
-        query.values = random.bool().then(|| ColumnValues {
-            column: "Status".to_owned(),
-            values: vec!["Running".to_owned(), "Error".to_owned()],
-        });
+        random_shape(&mut random, &mut query);
         query.label_selector = random.bool().then(|| "app notin (db)".to_owned());
         let mut rig = Rig::new(&query);
         let mut mirror = Mirror::default();
         let mut rows: HashMap<String, Row> = HashMap::new();
+        let mut view = 0;
         for _ in 0..rounds {
             for _ in 0..random.usize(1..burst) {
                 let name = format!(
@@ -954,11 +1095,19 @@ fn random_change_sets(seeds: std::ops::Range<u64>, names: usize, rounds: usize, 
                 rig.store.upsert(row.clone());
                 rows.insert(key, row);
             }
+            if reshaping && random.u8(..4) == 0 {
+                random_shape(&mut random, &mut query);
+                view += 1;
+                if let Some(batch) = rig.reshape(view, &query) {
+                    mirror.apply(batch);
+                }
+            }
             let start = random.u32(..30);
             rig.view.set_window(start, start + random.u32(..40));
             if let Some(batch) = rig.flush() {
                 mirror.apply(batch);
             }
+            assert_eq!(rig.view.sent.view, view, "seed {seed}");
             let expected = naive(&rows, &query);
             let (start, end) = rig.view.window;
             let window: Vec<&str> = expected
@@ -1003,12 +1152,17 @@ fn random_change_sets(seeds: std::ops::Range<u64>, names: usize, rounds: usize, 
 
 #[test]
 fn the_index_matches_a_full_sort_over_random_change_sets() {
-    random_change_sets(0..200, 40, 30, 40);
+    random_change_sets(0..200, 40, 30, 40, false);
+}
+
+#[test]
+fn a_view_changed_in_place_matches_a_full_sort_over_random_change_sets() {
+    random_change_sets(0..300, 40, 30, 40, true);
 }
 
 #[test]
 fn the_index_holds_across_nodes_of_a_thousand_rows() {
-    random_change_sets(0..3, 2_000, 10, 2_500);
+    random_change_sets(0..3, 2_000, 10, 2_500, false);
 }
 
 fn served() -> Api {
