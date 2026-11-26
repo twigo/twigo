@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { Backend, ListBatch, ListQuery } from "@twigo/protocol";
+import type { Backend, ListBatch, RequestOf } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import {
   hoverIcons,
@@ -290,32 +290,27 @@ test("under StrictMode the list subscribes once and shows rows", async () => {
   expect(screen.getAllByRole("gridcell").length).toBeGreaterThan(10);
 });
 
-test("a new query's subscription opens before the old one closes, and unmounting leaves none open", async () => {
+test("a sort changes the view on the subscription the list has and closes nothing, and unmounting leaves none open", async () => {
   const backend = createMockBackend("ready");
   const subscribe = vi.spyOn(backend, "subscribe");
   const invoke = vi.spyOn(backend, "invoke");
   await openList(backend);
-  const closed = () =>
-    invoke.mock.calls.flatMap(([command], at) =>
-      command === "list_unsubscribe" ? [at] : [],
-    );
-  const before = closed().length;
-  fireEvent.click(within(header("Ready")).getByRole("button"));
-  await settle();
-  const sorted = subscribe.mock.calls.findIndex(
-    ([command, query]) =>
-      command === "list_subscribe" && (query as ListQuery).sort !== null,
-  );
-  const closes = closed().slice(before);
-  expect(sorted).toBeGreaterThan(-1);
-  expect(closes).toHaveLength(1);
-  expect(subscribe.mock.invocationCallOrder[sorted]).toBeLessThan(
-    invoke.mock.invocationCallOrder[closes[0] ?? 0] ?? 0,
-  );
-  cleanup();
-  await settle(1);
   const count = (calls: readonly (readonly unknown[])[], name: string) =>
     calls.filter(([command]) => command === name).length;
+  const subscribed = count(subscribe.mock.calls, "list_subscribe");
+  const closed = count(invoke.mock.calls, "list_unsubscribe");
+  fireEvent.click(within(header("Ready")).getByRole("button"));
+  await settle();
+  expect(count(subscribe.mock.calls, "list_subscribe")).toBe(subscribed);
+  expect(count(invoke.mock.calls, "list_unsubscribe")).toBe(closed);
+  const views = invoke.mock.calls.flatMap(([command, request]) =>
+    command === "list_set_view" ? [request as RequestOf<"list_set_view">] : [],
+  );
+  expect(views).toHaveLength(1);
+  expect(views[0]).toMatchObject({ view: 1, sort: { column: "Ready" } });
+  expect(header("Ready").getAttribute("aria-sort")).not.toBe("none");
+  cleanup();
+  await settle(1);
   expect(count(invoke.mock.calls, "list_unsubscribe")).toBe(
     count(subscribe.mock.calls, "list_subscribe"),
   );
@@ -324,11 +319,16 @@ test("a new query's subscription opens before the old one closes, and unmounting
 function scriptedBackend() {
   const mock = createMockBackend("ready");
   let send: ((batch: ListBatch) => void) | undefined;
+  let view = 0;
   const backend: Backend = {
-    invoke: (command, request) =>
-      command.startsWith("list_")
+    invoke: (command, request) => {
+      if (command === "list_set_view") {
+        view = (request as RequestOf<"list_set_view">).view;
+      }
+      return command.startsWith("list_")
         ? Promise.resolve(null as never)
-        : mock.invoke(command, request),
+        : mock.invoke(command, request);
+    },
     subscribe(command, request, onMessage) {
       if (command !== "list_subscribe")
         return mock.subscribe(command, request, onMessage);
@@ -336,7 +336,10 @@ function scriptedBackend() {
       return Promise.resolve(1 as never);
     },
   };
-  return { backend, send: (batch: ListBatch) => send?.(batch) };
+  return {
+    backend,
+    send: (batch: ListBatch) => send?.({ ...batch, view }),
+  };
 }
 
 const IDS = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"];

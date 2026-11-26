@@ -149,7 +149,7 @@ function Grid({
     owners: null,
     text: text === "" ? null : text,
     // Without a text the choices change no rows, so they stay out of the
-    // query and a column toggle does not resubscribe, and the filter never
+    // query and a column toggle does not change the view, and the filter never
     // reads a column of a measure's kind, so once a list of the kind has
     // said which those are, their choices stay out too.
     columns: text !== "" && Object.keys(choices).length > 0 ? choices : null,
