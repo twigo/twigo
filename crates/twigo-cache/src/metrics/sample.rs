@@ -101,19 +101,23 @@ struct Item<'a> {
     #[serde(borrow)]
     metadata: Metadata<'a>,
     #[serde(borrow, default)]
-    timestamp: Option<Cow<'a, str>>,
+    timestamp: Option<Text<'a>>,
     #[serde(borrow, default, deserialize_with = "by_name")]
     containers: Vec<Named<'a>>,
     #[serde(borrow, default)]
     usage: Option<Usage<'a>>,
 }
 
+/// Borrowed from the body: an `Option<Cow<str>>` is read into a `String`, whatever its `borrow`.
+#[derive(Deserialize)]
+struct Text<'a>(#[serde(borrow)] Cow<'a, str>);
+
 #[derive(Deserialize)]
 struct Metadata<'a> {
     #[serde(borrow)]
     name: Cow<'a, str>,
     #[serde(borrow, default)]
-    namespace: Option<Cow<'a, str>>,
+    namespace: Option<Text<'a>>,
 }
 
 #[derive(Deserialize)]
@@ -154,8 +158,8 @@ fn container_usage<'de, D: Deserializer<'de>>(
 impl Item<'_> {
     fn sampled(&self) -> Option<Timestamp> {
         self.timestamp
-            .as_deref()
-            .and_then(|timestamp| timestamp.parse().ok())
+            .as_ref()
+            .and_then(|timestamp| timestamp.0.parse().ok())
     }
 
     /// The sample of an item, or `held` where it is the same, and none for an item the server
@@ -252,7 +256,7 @@ impl<'de> Visitor<'de> for Parser<'_> {
         let mut samples = Samples::default();
         while let Some(item) = seq.next_element::<Item<'de>>()? {
             let namespace = match self.kind {
-                Kind::Pods => item.metadata.namespace.as_deref().unwrap_or_default(),
+                Kind::Pods => item.metadata.namespace.as_ref().map_or("", |text| &text.0),
                 Kind::Nodes => "",
             };
             let names = self.previous.and_then(|previous| previous.0.get(namespace));
@@ -626,6 +630,26 @@ mod tests {
             after(&first, &unparsed).is_empty(),
             "an item that does not parse is no sample, kept or not"
         );
+    }
+
+    #[test]
+    fn a_namespace_or_a_time_that_the_server_escapes_is_read_all_the_same() {
+        let list = br#"{"items":[{
+            "metadata": { "name": "p", "namespace": "\u0061" },
+            "timestamp": "2026-11-13T16:00:00\u005a",
+            "containers": [{ "name": "c", "usage": { "cpu": "1m", "memory": "1Mi" } }]
+        }, {
+            "metadata": { "name": "q", "namespace": null },
+            "timestamp": null,
+            "containers": [{ "name": "c", "usage": { "cpu": "1m", "memory": "1Mi" } }]
+        }]}"#;
+        let samples = parse(list, Kind::Pods, None).unwrap();
+        let sample = samples.get("a", "p").unwrap();
+        assert_eq!(
+            sample.sampled,
+            Some("2026-11-13T16:00:00Z".parse().unwrap())
+        );
+        assert_eq!(samples.get("", "q").unwrap().sampled, None);
     }
 
     #[test]
