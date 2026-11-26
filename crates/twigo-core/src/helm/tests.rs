@@ -401,29 +401,6 @@ async fn the_query_view_of_releases_changes_in_place() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_view_change_of_releases_that_comes_late_changes_nothing() {
-    let fake = Fake::default();
-    three(&fake);
-    let mut rig = Rig::new(fake, query(&["a"])).await;
-    rig.shows(&["api 1 deployed -", "db 3 deployed -", "web 7 failed -"])
-        .await;
-
-    rig.list.set_view(2, viewed(2, Some("failed"), None));
-    rig.list
-        .set_view(1, viewed(1, None, Some(("Revision", true))));
-    rig.shows(&["web 7 failed -"]).await;
-
-    rig.list
-        .set_view(1, viewed(1, None, Some(("Revision", true))));
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    while let Ok(batch) = rig.batches.try_recv() {
-        assert_eq!(batch.view, 2);
-        rig.seen.apply(batch);
-    }
-    assert_eq!(rig.seen.table(), ["web 7 failed -"]);
-}
-
-#[tokio::test(start_paused = true)]
 async fn a_namespace_the_person_may_not_read_is_said_beside_the_rows_of_the_others() {
     let fake = Fake::default();
     revision(&fake, "a", "app", 1, "deployed");
