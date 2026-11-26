@@ -1,4 +1,4 @@
-import type { ListBatch, Sort } from "@twigo/protocol";
+import type { Sort } from "@twigo/protocol";
 import type { Workbench } from "@twigo/workbench";
 import type { ListProbe, Probe } from "./probe";
 
@@ -203,23 +203,6 @@ function within<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
   });
 }
 
-function nextBatch(
-  list: ListProbe,
-  matches: (batch: ListBatch) => boolean,
-  what: string,
-): Promise<number> {
-  let stop: () => void = () => undefined;
-  const matched = new Promise<number>((resolve) => {
-    stop = list.listen((at, batch) => {
-      if (matches(batch)) {
-        stop();
-        resolve(at);
-      }
-    });
-  });
-  return within(matched, WAIT_MS, what).finally(stop);
-}
-
 /** The editor area mounts after its space opens, and until then no editor can open. */
 async function openEditor(workbench: Workbench, uri: string): Promise<number> {
   const deadline = performance.now() + WAIT_MS;
@@ -297,7 +280,33 @@ async function top(): Promise<void> {
   }, "rows at the top");
 }
 
-async function sorts(probe: Probe): Promise<Results["sort"]> {
+/**
+ * Resolves with the list's first rows once a batch that reflects `view` has
+ * them at the top of its window: the view change a click asked for, answered
+ * on the subscription the list has.
+ */
+export function answer(
+  list: ListProbe,
+  view: number,
+  what: string,
+): Promise<string[]> {
+  const rows = () => (list.view >= view ? topRows(list) : undefined);
+  const now = rows();
+  if (now) return Promise.resolve(now);
+  let stop: () => void = () => undefined;
+  const matched = new Promise<string[]>((resolve) => {
+    stop = list.listen(() => {
+      const first = rows();
+      if (first) {
+        stop();
+        resolve(first);
+      }
+    });
+  });
+  return within(matched, WAIT_MS, what).finally(stop);
+}
+
+async function sorts(list: ListProbe): Promise<Results["sort"]> {
   await top();
   const samples: Results["sort"] = [];
   for (const { column, descending } of SORTS) {
@@ -306,20 +315,11 @@ async function sorts(probe: Probe): Promise<Results["sort"]> {
     const table = grid();
     const button = header(table, column);
     const before = shownRows(table, TOP_ROWS);
-    const opened = probe.next();
+    const asked = list.nextView();
     const clicked = performance.now();
     button.click();
-    const list = await within(opened, WAIT_MS, `list sorted by ${sorted}`);
-    let expected: string[] = [];
-    await nextBatch(
-      list,
-      () => {
-        const first = topRows(list);
-        if (first) expected = first;
-        return first !== undefined;
-      },
-      `first rows sorted by ${sorted}`,
-    );
+    const view = await within(asked, WAIT_MS, `view sorted by ${sorted}`);
+    const expected = await answer(list, view, `first rows sorted by ${sorted}`);
     if (same(expected, before)) {
       throw new Error(
         `sorting by ${sorted} leaves the first rows as they were`,
@@ -430,8 +430,8 @@ export async function drive(
   await sleep(1000);
   const refreshMs = await refresh();
   const scrolled = await scroll();
-  const sorted = await sorts(probe);
-  const list = probe.lists[probe.lists.length - 1] ?? first.list;
+  const { list } = first;
+  const sorted = await sorts(list);
   await top();
   const changed = await changes(list, steady);
   await visible();
