@@ -123,6 +123,12 @@ pub struct GateClass {
     pub cold_gate_ns: f64,
 }
 
+impl GateClass {
+    fn dearest_figure(&self) -> f64 {
+        self.gate_ns.max(self.cold_gate_ns)
+    }
+}
+
 /// What the sessions' rows are built from, or why they cannot be: a step of the run that failed
 /// leaves its files missing, and the judged rows are reported all the same.
 pub struct Inputs {
@@ -334,10 +340,12 @@ pub struct GateShare {
     pub polls: u64,
     pub seconds: f64,
     pub core_ms: f64,
-    /// What the dearest request but a patch costs the gate in `gate_cost`, the higher of its cold
+    /// What the dearest class but a patch costs the gate in `gate_cost`, the higher of its cold
     /// and its hot figure.
     pub cost_ns: f64,
-    /// The same request's figure in a hot loop.
+    /// The same class's figure with the caches evicted before the call.
+    pub cold_ns: f64,
+    /// The same class's figure in a hot loop.
     pub hot_ns: f64,
     /// Percent of the core's CPU time.
     pub estimate: f64,
@@ -348,14 +356,11 @@ fn gate_share(
     apiserver: &(String, String),
     gate: &GateCost,
 ) -> Result<GateShare, String> {
-    let priced = || gate.classes.iter().filter(|class| class.method != "PATCH");
-    let cost_ns = priced()
-        .map(|class| class.gate_ns.max(class.cold_gate_ns))
-        .reduce(f64::max)
-        .ok_or("gate-cost.json has no class but a patch")?;
-    let hot_ns = priced()
-        .map(|class| class.gate_ns)
-        .reduce(f64::max)
+    let priced = gate
+        .classes
+        .iter()
+        .filter(|class| class.method != "PATCH")
+        .max_by(|a, b| a.dearest_figure().total_cmp(&b.dearest_figure()))
         .ok_or("gate-cost.json has no class but a patch")?;
     let counted = counted(&apiserver.1, |l| l.get("verb") != Some(&"PATCH"))
         .saturating_sub(counted(&apiserver.0, |l| l.get("verb") != Some(&"PATCH")));
@@ -367,9 +372,10 @@ fn gate_share(
         polls,
         seconds,
         core_ms: core_ns / 1e6,
-        cost_ns,
-        hot_ns,
-        estimate: (counted + polls) as f64 * cost_ns / core_ns * 100.0,
+        cost_ns: priced.dearest_figure(),
+        cold_ns: priced.cold_gate_ns,
+        hot_ns: priced.gate_ns,
+        estimate: (counted + polls) as f64 * priced.dearest_figure() / core_ns * 100.0,
     })
 }
 
@@ -548,8 +554,14 @@ fn gate_row(share: &GateShare) -> Row {
         GATE,
         Some(format!("about {}", percent(share.estimate))),
         format!(
-            "an estimate, not a bound: the {} requests that were not patches which the API server counted in {:.0} s, whoever sent them, and the {} polls of the metrics API that it does not count, each at {:.0} ns, the dearest class's cost in gate_cost with the caches evicted before the call ({:.0} ns in a hot loop; both layers, a guarded context, the UI), over the core's {:.0} ms of CPU; the churn's patches are the only ones, and the app sends none (docs/bench.md)",
-            share.counted, share.seconds, share.polls, share.cost_ns, share.hot_ns, share.core_ms,
+            "an estimate, not a bound: the {} requests that were not patches which the API server counted in {:.0} s, whoever sent them, and the {} polls of the metrics API that it does not count, each at {:.0} ns, the higher of the two figures of the dearest class in gate_cost ({:.0} ns with the caches evicted before the call, {:.0} ns in a hot loop; both layers, a guarded context, the UI), over the core's {:.0} ms of CPU; the churn's patches are the only ones, and the app sends none (docs/bench.md)",
+            share.counted,
+            share.seconds,
+            share.polls,
+            share.cost_ns,
+            share.cold_ns,
+            share.hot_ns,
+            share.core_ms,
         ),
     )
 }
@@ -776,6 +788,21 @@ mod tests {
         assert!((share.estimate - 38.0 * 1500.0 / 600e6 * 100.0).abs() < 1e-12);
         assert_eq!(percent(share.estimate), "9.5e-3 %");
         assert_eq!(percent(1.5), "1.50 %");
+    }
+
+    #[test]
+    fn the_hot_figure_beside_the_cost_is_the_priced_classs_and_not_the_highest_of_any() {
+        let mut gate = gate();
+        gate.cost.classes = vec![class("GET", 300.0, 1500.0), class("GET", 450.0, 1200.0)];
+        let share = gate_share(&gate.steady, &gate.apiserver, &gate.cost).unwrap();
+        assert_eq!((share.cost_ns, share.hot_ns), (1500.0, 300.0));
+        let row = gate_row(&share);
+        assert!(
+            row.measured
+                .contains("1500 ns with the caches evicted before the call, 300 ns in a hot loop"),
+            "{}",
+            row.measured
+        );
     }
 
     #[test]
