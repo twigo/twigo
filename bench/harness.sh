@@ -95,6 +95,8 @@ image=$(k get node "$node" -o jsonpath='{.status.images[*].names[*]}' |
 [ -n "$image" ] || { echo "$node holds no docker.io/kindest/local-path-helper image" >&2; exit 1; }
 forward_pod=$(k -n kube-system get pods -l k8s-app=kube-dns -o jsonpath='{.items[0].metadata.name}')
 sessions_kubeconfig=$kubeconfig
+# A run that was killed, or whose clean-up timed out, leaves the namespace behind.
+k delete namespace "$SESSIONS_NAMESPACE" --ignore-not-found --timeout=120s >&2
 k create namespace "$SESSIONS_NAMESPACE" >&2
 for _ in $(seq 1 60); do
   k -n "$SESSIONS_NAMESPACE" get serviceaccount default >/dev/null 2>&1 && break
@@ -140,9 +142,11 @@ memory=$(($(sysctl -n hw.memsize) / 1073741824))
 cpu=$(sysctl -n machdep.cpu.brand_string)
 os_version=$(sw_vers -productVersion)
 date=$(date -u +%Y-%m-%dT%H:%MZ)
+client=$("$kubectl_path" version --client -o json | jq -r .clientVersion.gitVersion)
 jq -n --arg date "$date" --arg machine "$cpu, $memory GB" --arg os "macOS $os_version" \
-  --arg commit "$commit" --arg build release \
-  '{date: $date, machine: $machine, os: $os, commit: $commit, build: $build}' >"$out/run.json"
+  --arg commit "$commit" --arg build release --arg kubectl "$client" \
+  '{date: $date, machine: $machine, os: $os, commit: $commit, build: $build, kubectl: $kubectl}' \
+  >"$out/run.json"
 
 "$tool" churn --kubeconfig "$kubeconfig" --rate "$RATE" --log "$out/churn.jsonl" \
   >"$out/churn.json" 2>"$out/churn.log" &

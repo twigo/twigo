@@ -7,11 +7,12 @@ The harness measures the six budgets of [ARCHITECTURE 3.8](ARCHITECTURE.md#38-pe
   The app asks for no focus and its window stays behind others, so the desktop stays in use; WebKit counts the window active at the start all the same, so the bench keeps the page from napping once another app is activated ([the window](#the-window)).
   Without an argument it creates a kind 1.37 cluster with kwok and 5,000 pods (`bench/cluster.sh up bench`, `bench/pods.sh`) and deletes it at the end; given a kubeconfig, it uses that cluster, which must hold the `bench/bench` Deployment at 5,000 pods.
 - Output: the report table on stdout; `report.json` and every file it is built from in `$TWIGO_BENCH_DIR/harness`.
+  The table's first line names the machine, macOS, the build, the commit and the version of the `kubectl` the terminal runs (`kubectl version --client`), which the proxy rows depend on.
 - Code: `bench/harness.sh`; `bench/harness`, the `twigo-bench` tool with `churn`, `launch`, `sample` and `report`; `crates/twigo-policy/examples/gate_cost.rs`; `apps/desktop/bench`, the webview's entry and driver; `apps/desktop/src-tauri/src/bench.rs`, the app's bench commands.
 
 ## A run
 
-1. Before the build, the harness makes the namespace `bench-sessions` with the pod `shell` on kind's node ([the sessions](#the-sessions)).
+1. Before the build, the harness makes the namespace `bench-sessions` with the pod `shell` on kind's node ([the sessions](#the-sessions)), deleting one that an earlier run left behind first.
    Then `cargo build --release -p twigo-bench`, `cargo run --release -p twigo-policy --example gate_cost`, which writes `gate-cost.json` while nothing else runs, and `pnpm tauri build --no-bundle --features bench --config src-tauri/tauri.bench.conf.json`: a release build, since a debug core's CPU and memory say nothing about the budgets.
 2. `twigo-bench churn` starts against the cluster at 100 changes/s and runs until the app is done.
    The harness waits for its first logged change, and stops with the churn's error whenever it exits early.

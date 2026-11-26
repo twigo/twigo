@@ -106,6 +106,8 @@ pub struct Run {
     pub os: String,
     pub commit: String,
     pub build: String,
+    /// The version of the program the terminal ran, which the proxy rows depend on.
+    pub kubectl: Option<String>,
 }
 
 pub struct Inputs {
@@ -498,11 +500,15 @@ pub fn build(inputs: Inputs) -> Report {
 pub fn table(report: &Report) -> String {
     let mut out = String::new();
     let run = &report.run;
-    let _ = writeln!(
+    let _ = write!(
         out,
         "{}, {}, {}, {} build, {}",
         run.date, run.machine, run.os, run.build, run.commit
     );
+    if let Some(kubectl) = &run.kubectl {
+        let _ = write!(out, ", kubectl {kubectl}");
+    }
+    let _ = writeln!(out);
     if let Some(churn) = &report.churn {
         let _ = writeln!(
             out,
@@ -600,6 +606,7 @@ mod tests {
                 os: "macOS 27.0".into(),
                 commit: "abc".into(),
                 build: "release".into(),
+                kubectl: Some("v1.34.1".into()),
             },
             webview: Webview {
                 rows: 5000,
@@ -933,6 +940,11 @@ mod tests {
     fn a_run_without_the_sessions_reports_and_judges_the_rows_it_has() {
         let dir = run_dir_before_the_sessions(1_000_000);
         let report = build(Inputs::read(dir.path()).unwrap());
+        assert_eq!(report.run.kubectl, None);
+        assert!(
+            table(&report)
+                .starts_with("2026-11-01, Apple M4 Max, macOS 27.0, release build, abc\n")
+        );
         assert_eq!(report.rows.len(), 18);
         assert!(report.failed().is_empty());
         assert_eq!(report.rows[9].status, Status::Pass);
@@ -959,5 +971,11 @@ mod tests {
         let table = table(&report);
         assert_eq!(table.lines().filter(|l| l.starts_with("| ")).count(), 20);
         assert!(table.contains("| First paint after the space connects | 400 ms | < 1 s | pass |"));
+        assert!(
+            table.starts_with(
+                "2026-11-01, Apple M4 Max, macOS 27.0, release build, abc, kubectl v1.34.1\n"
+            ),
+            "{table}"
+        );
     }
 }
