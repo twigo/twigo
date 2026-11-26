@@ -33,7 +33,6 @@ export interface Opened {
 const LEAD_MS = 30_000;
 /** Longer than the harness's settling and sampling of one window. */
 export const WINDOW_MS = 35_000;
-/** How often a window counts what the terminal has received. */
 const TICK_MS = 250;
 /**
  * Longer than what the harness does once the watch has stopped: its settling, its five memory

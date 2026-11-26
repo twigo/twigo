@@ -227,7 +227,6 @@ wait_for() {
   done
 }
 
-# A sample of the app, which fails once the app has quit.
 take() {
   "$tool" sample "$app" >"$out/$1" || fail "the app could not be sampled for $1, it has quit"
 }

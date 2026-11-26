@@ -98,7 +98,6 @@ const TAIL = 4000;
 export class ShellProbe {
   state: ShellEvent = { state: "connecting" };
   bytes = 0;
-  /** The line feeds among them. */
   lines = 0;
   /** When the last of it came, in `performance.now()` milliseconds. */
   lastAt = 0;
