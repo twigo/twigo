@@ -1,5 +1,6 @@
-//! The report of ARCHITECTURE 3.8's six metrics at 5k pods, from what the app's bench mode, the
-//! process sampler and the churn generator wrote into one directory.
+//! The report of ARCHITECTURE 3.8's six metrics at 5k pods and of what M2's sessions add, from
+//! what the app's bench mode, the process sampler, the churn generator and the gate's cost wrote
+//! into one directory.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -10,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::churn::Summary as Churn;
 use crate::process::{Process, Sample};
+use crate::sessions::{self, Baseline};
 use crate::stats::{Spread, percentile};
 
 const FIRST_PAINT_MS: f64 = 1000.0;
@@ -106,15 +108,19 @@ pub struct Inputs {
     pub hidden: Option<Hidden>,
     pub churn: Option<Churn>,
     pub log: Vec<Logged>,
+    pub sessions: sessions::Inputs,
 }
 
-fn read<T: DeserializeOwned>(dir: &Path, name: &str) -> Result<T, String> {
+pub(crate) fn read<T: DeserializeOwned>(dir: &Path, name: &str) -> Result<T, String> {
     let path = dir.join(name);
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-fn read_optional<T: DeserializeOwned>(dir: &Path, name: &str) -> Result<Option<T>, String> {
+pub(crate) fn read_optional<T: DeserializeOwned>(
+    dir: &Path,
+    name: &str,
+) -> Result<Option<T>, String> {
     if dir.join(name).exists() {
         read(dir, name).map(Some)
     } else {
@@ -157,6 +163,7 @@ impl Inputs {
             hidden: read_optional(dir, "hidden.json")?,
             churn: read_optional(dir, "churn.json")?,
             log: read_log(dir)?,
+            sessions: sessions::Inputs::read(dir)?,
         })
     }
 }
@@ -270,7 +277,7 @@ fn spread_text(spread: &Spread) -> String {
     )
 }
 
-pub fn build(inputs: Inputs) -> Report {
+pub fn build(inputs: Inputs) -> Result<Report, String> {
     let Inputs {
         run,
         webview,
@@ -280,6 +287,7 @@ pub fn build(inputs: Inputs) -> Report {
         hidden,
         churn,
         log,
+        sessions,
     } = inputs;
     let mut rows = Vec::new();
 
@@ -458,7 +466,13 @@ pub fn build(inputs: Inputs) -> Report {
         ),
     });
 
-    Report { run, rows, churn }
+    let baseline = Baseline {
+        core_mb: core,
+        webview_mb: webkit_rss,
+    };
+    rows.extend(sessions::rows(&sessions, &baseline)?);
+
+    Ok(Report { run, rows, churn })
 }
 
 pub fn table(report: &Report) -> String {
@@ -605,6 +619,7 @@ mod tests {
                 visibility: "hidden".into(),
             }),
             churn: None,
+            sessions: sessions::fixture::inputs(300, 200),
             log: vec![
                 logged("bench-a", 1, 980.0),
                 logged("bench-a", 2, 1_040.0),
@@ -617,6 +632,10 @@ mod tests {
         }
     }
 
+    fn built(inputs: Inputs) -> Report {
+        build(inputs).unwrap()
+    }
+
     fn statuses(report: &Report) -> Vec<(&str, &Status)> {
         report
             .rows
@@ -627,7 +646,7 @@ mod tests {
 
     #[test]
     fn every_metric_has_a_row_and_is_judged() {
-        let report = build(inputs(20.0, 16.7, 1_000_000));
+        let report = built(inputs(20.0, 16.7, 1_000_000));
         assert_eq!(
             statuses(&report),
             [
@@ -644,6 +663,23 @@ mod tests {
                     &Status::Shown
                 ),
                 ("Idle CPU, 100 changes/s, window hidden", &Status::Pass),
+                ("Core RSS, sessions open", &Status::Shown),
+                ("  Webview memory, sessions open", &Status::Shown),
+                (
+                    "Visible CPU, sessions open, window on screen",
+                    &Status::Shown
+                ),
+                ("Idle CPU, sessions open, window hidden", &Status::Shown),
+                (
+                    "Terminal watch through the policy proxy: core CPU",
+                    &Status::Shown
+                ),
+                ("  The same watch straight to the cluster", &Status::Shown),
+                ("  The policy proxy's share", &Status::Shown),
+                (
+                    "Gate, share of the core's CPU, steady phase",
+                    &Status::Shown
+                ),
             ]
         );
         assert_eq!(report.rows[0].value.as_deref(), Some("400 ms"));
@@ -659,7 +695,7 @@ mod tests {
         let (latencies, unjoined) = change_latencies(&inputs.webview.changes.painted, &inputs.log);
         assert_eq!(latencies, [20.0, 60.0, 10.0]);
         assert_eq!(unjoined, 1, "a patch that failed sets no count");
-        let report = build(inputs);
+        let report = built(inputs);
         assert!(
             report.rows[1]
                 .measured
@@ -677,7 +713,7 @@ mod tests {
         slow.log[1].sent = 0.0;
         slow.log[2].sent = 0.0;
         assert_eq!(
-            build(slow).failed(),
+            built(slow).failed(),
             [
                 "First paint after the space connects",
                 "Change → painted cell, p95",
@@ -692,7 +728,7 @@ mod tests {
     fn no_paint_to_join_fails_the_change_row() {
         let mut none = inputs(20.0, 16.7, 0);
         none.log.clear();
-        let report = build(none);
+        let report = built(none);
         assert_eq!(report.rows[1].status, Status::Fail);
         assert!(report.rows[1].measured.contains("no samples"));
     }
@@ -721,7 +757,7 @@ mod tests {
                 s
             })
             .collect();
-        let report = build(all);
+        let report = built(all);
         assert_eq!(report.rows[4].value.as_deref(), Some("200 MB"));
         assert_eq!(report.rows[5].value.as_deref(), Some("200 MB"));
         assert_eq!(report.rows[6].value.as_deref(), Some("400 MB"));
@@ -756,18 +792,18 @@ mod tests {
 
     #[test]
     fn webview_memory_is_judged_by_resident_size_and_not_by_footprint() {
-        assert!(build(with_webcontent(250, 900)).failed().is_empty());
+        assert!(built(with_webcontent(250, 900)).failed().is_empty());
         assert_eq!(
-            build(with_webcontent(350, 100)).failed(),
+            built(with_webcontent(350, 100)).failed(),
             ["Webview memory with the pod list open"]
         );
     }
 
     #[test]
     fn idle_cpu_is_judged_at_two_percent() {
-        assert!(build(inputs(20.0, 16.7, 150_000_000)).failed().is_empty());
+        assert!(built(inputs(20.0, 16.7, 150_000_000)).failed().is_empty());
         assert_eq!(
-            build(inputs(20.0, 16.7, 250_000_000)).failed(),
+            built(inputs(20.0, 16.7, 250_000_000)).failed(),
             ["Idle CPU, 100 changes/s, window hidden"]
         );
     }
@@ -779,7 +815,7 @@ mod tests {
             sample(0.0, 0, vec![]),
             sample(10_000.0, 9_000_000_000, vec![]),
         );
-        let report = build(all);
+        let report = built(all);
         assert!(report.failed().is_empty());
         assert_eq!(report.rows[8].value.as_deref(), Some("90.00 %"));
     }
@@ -797,9 +833,9 @@ mod tests {
 
     #[test]
     fn the_table_lists_every_row() {
-        let report = build(inputs(30.0, 16.7, 0));
+        let report = built(inputs(30.0, 16.7, 0));
         let table = table(&report);
-        assert_eq!(table.lines().filter(|l| l.starts_with("| ")).count(), 12);
+        assert_eq!(table.lines().filter(|l| l.starts_with("| ")).count(), 20);
         assert!(table.contains("| First paint after the space connects | 400 ms | < 1 s | pass |"));
     }
 }
