@@ -131,7 +131,8 @@ How each is opened, as a person opens it, through the app's own commands and its
   `k8s.terminal.new`, and the run fails unless `terminal_create` answers the proxy's kind.
   Its shell is the login shell, which reads no startup file of the person's: the harness gives the app an empty `ZDOTDIR`, which the terminal hands its zsh, so what it prints and runs is the same on every Mac.
   The driver types into it with `shell_input`, the command the terminal sends for the keys a person types, and the harness has checked for `kubectl` on `PATH` and gives the driver its path.
-  The terminal runs `kubectl get pods -A -w`, and the first list of every pod has to come through, else the run fails with the end of what the terminal printed.
+  The terminal runs `kubectl get pods -A -w`, and the first list of every pod has to come through whole, counted by its lines (a row for each of the list's pods, the command's echo and the table's header), else the run fails with the end of what the terminal printed.
+  Counted by bytes, at 60 a row, the wait ended at 302 KB of a list of 525 KB, and the marker of the fourth window came at 481 KB in run 0 and 459 KB in run 3 of 2026-11-26, 44 and 66 KB before the list's end.
 
 The pod list goes back on screen in the editor area once the sessions are open, so the window shows the list and the terminal, and the visible row is measured with both.
 That the list keeps the order the earlier phases left, sorted by Restarts descending, once it is opened again was not looked at.

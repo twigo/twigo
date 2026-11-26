@@ -98,6 +98,8 @@ const TAIL = 4000;
 export class ShellProbe {
   state: ShellEvent = { state: "connecting" };
   bytes = 0;
+  /** The line feeds among them. */
+  lines = 0;
   /** When the last of it came, in `performance.now()` milliseconds. */
   lastAt = 0;
   tail = "";
@@ -112,6 +114,7 @@ export class ShellProbe {
     }
     const bytes = new Uint8Array(message);
     this.bytes += bytes.length;
+    for (const byte of bytes) if (byte === 10) this.lines += 1;
     this.lastAt = at;
     this.tail = (
       this.tail + this.#decoder.decode(bytes, { stream: true })

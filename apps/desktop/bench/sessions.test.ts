@@ -37,6 +37,10 @@ const TERMINAL = 7;
 const SHELL = 5;
 const encoder = new TextEncoder();
 
+function listed(rows: number, width = 104): string {
+  return `command\r\nHEADER\r\n${`${"p".repeat(width)}\r\n`.repeat(rows)}`;
+}
+
 const forward: Forward = {
   id: 1,
   target: {
@@ -67,6 +71,7 @@ interface Options {
   asks?: boolean;
   friction?: { kind: "confirm" } | { kind: "typed"; text: string };
   failing?: string;
+  printed?: number;
   prompt?: boolean;
   target?: Target;
 }
@@ -77,6 +82,7 @@ function fake({
   asks = true,
   friction = { kind: "confirm" },
   failing,
+  printed = ROWS,
   prompt = true,
   target = TARGET,
 }: Options = {}) {
@@ -113,7 +119,7 @@ function fake({
           const text = new TextDecoder().decode(Uint8Array.from(data));
           typed.push(text);
           if (text.includes("get pods")) {
-            const output = failing ?? "x".repeat(ROWS * 60);
+            const output = failing ?? listed(printed);
             senders.get(id)?.(encoder.encode(output).buffer);
           } else if (text.includes("printf") && prompt) {
             senders.get(id)?.(encoder.encode("at-prompt-42\r\n$ ").buffer);
@@ -328,6 +334,19 @@ test("a watch that never shows the pods fails with the end of what the terminal 
   const bench = fake({ failing: "zsh: command not found: kubectl\r\n" });
   await expect(bench.run()).rejects.toThrow(
     /first rows of the watch through the proxy within 90000 ms; the terminal's last output: "zsh: command not found: kubectl/,
+  );
+});
+
+test("the first list is the whole of it, counted by its lines and not by its bytes", async () => {
+  let now = 0;
+  vi.spyOn(performance, "now").mockImplementation(() => (now += 1000));
+  const half = fake({ failing: listed(ROWS / 2, 300) });
+  await expect(half.run()).rejects.toThrow(
+    /first rows of the watch through the proxy within 90000 ms/,
+  );
+  const short = fake({ failing: listed(ROWS - 1) });
+  await expect(short.run()).rejects.toThrow(
+    /first rows of the watch through the proxy within 90000 ms/,
   );
 });
 

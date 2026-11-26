@@ -213,6 +213,14 @@ test("a session's state is what its last event said, and its output is counted a
   expect(shell.tail.startsWith("a")).toBe(true);
 });
 
+test("a session's output is counted in lines, whatever the chunks cut", () => {
+  const shell = new ShellProbe(3);
+  shell.record(1, bytes("one\r\ntw"));
+  shell.record(2, bytes("o\r\n\r\nthree"));
+  expect(shell.lines).toBe(3);
+  expect(shell.bytes).toBe(17);
+});
+
 test("a character that a chunk cuts in two is decoded whole in the output's end", () => {
   const shell = new ShellProbe(3);
   const [first, second] = [

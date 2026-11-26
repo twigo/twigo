@@ -45,8 +45,8 @@ const PODS = { group: "", version: "v1", resource: "pods" };
 const POLL_MS = 50;
 const ASK_MS = 10_000;
 const OPEN_MS = 30_000;
-/** The least a pod's row takes in the first list of `kubectl get pods -A -w`. */
-const ROW_BYTES = 60;
+/** What comes before the first list's rows in the terminal: the echoed command's line and the table's header. */
+const LINES_BEFORE_ROWS = 2;
 const FIRST_ROWS_MS = 90_000;
 const QUIET_MS = 1000;
 /** Its output differs from what the terminal echoes of it, so only a shell that runs it prints this. */
@@ -284,10 +284,11 @@ export async function watching(
     via === "proxy"
       ? `${kubectl} get pods -A -w`
       : `${kubectl} --kubeconfig ${quote(target.kubeconfig)} get pods -A -w`;
-  const before = terminal.bytes;
+  const before = terminal.lines;
   await type(probe, terminal, `${command}\r`);
   await poll(
-    () => (terminal.bytes - before >= rows * ROW_BYTES ? true : undefined),
+    () =>
+      terminal.lines - before >= rows + LINES_BEFORE_ROWS ? true : undefined,
     `first rows of the watch ${via === "proxy" ? "through the proxy" : "straight to the cluster"}`,
     FIRST_ROWS_MS,
   ).catch((error: unknown) => {
