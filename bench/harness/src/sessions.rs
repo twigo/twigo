@@ -838,7 +838,10 @@ mod tests {
             put(&format!("sessions-memory-{n}.json"), at(0.0));
         }
         put("sessions-visible-start.json", at(0.0));
-        put("sessions-visible-end.json", at(20_000.0));
+        put(
+            "sessions-visible-end.json",
+            serde_json::to_value(sample(20_000.0, 4_000_000_000, 0)).unwrap(),
+        );
         for n in 1..=windows {
             let via = if n % 2 == 1 { "proxy" } else { "direct" };
             put(
@@ -887,6 +890,15 @@ mod tests {
         assert_eq!(inputs.windows[0].received, 2000.0);
         assert_eq!(inputs.windows[0].seconds, 20.0);
         assert!(inputs.hidden.is_none());
+    }
+
+    #[test]
+    fn the_visible_row_is_read_from_the_files_of_the_sample_and_not_from_a_windows() {
+        let rows = unmeasured(&run_dir(4, 4));
+        assert_eq!(
+            value(&rows, "Visible CPU, sessions open, window on screen"),
+            "20.00 %"
+        );
     }
 
     #[test]
