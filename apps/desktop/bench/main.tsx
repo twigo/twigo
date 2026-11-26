@@ -120,6 +120,12 @@ async function hide(name: string, hidden: string, quit: boolean) {
   if (!quit) await becomes("visible");
 }
 
+/** `failure` stops the harness; `sessions-failure` only leaves the sessions' rows unmeasured. */
+function failed(name: "failure" | "sessions-failure") {
+  return (error: unknown) =>
+    write(name, { message: toIpcError(error).message });
+}
+
 async function run(container: HTMLElement) {
   const target = await invoke<Target>("plugin:twigo-bench|setup");
   const probe = new Probe(tauriBackend);
@@ -154,10 +160,8 @@ async function run(container: HTMLElement) {
       target,
       write,
     }),
-  );
+  ).catch(failed("sessions-failure"));
 }
 
-await run(root).catch((error: unknown) =>
-  write("failure", { message: toIpcError(error).message }),
-);
+await run(root).catch(failed("failure"));
 await hide("idle-sessions", "hidden-sessions", true);

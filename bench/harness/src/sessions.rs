@@ -153,7 +153,7 @@ pub struct GateInputs {
     pub cost: GateCost,
 }
 
-/// Why the run stopped (`failure.json`), written by the driver or the harness.
+/// Why the sessions stopped (`sessions-failure.json`), written by the driver or the harness.
 #[derive(Deserialize)]
 struct Failure {
     message: String,
@@ -174,7 +174,7 @@ fn text(dir: &Path, name: &str) -> Result<String, String> {
 
 impl Inputs {
     pub fn read(dir: &Path) -> Self {
-        let stopped = read_optional::<Failure>(dir, "failure.json")
+        let stopped = read_optional::<Failure>(dir, "sessions-failure.json")
             .map(|failure| failure.map(|failure| failure.message))
             .unwrap_or_else(Some);
         Inputs {
@@ -976,7 +976,7 @@ mod tests {
     fn a_step_that_failed_leaves_every_sessions_row_saying_so() {
         let dir = run_dir(2, 1);
         std::fs::write(
-            dir.path().join("failure.json"),
+            dir.path().join("sessions-failure.json"),
             r#"{"message":"local port 8080 must be free"}"#,
         )
         .unwrap();

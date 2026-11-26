@@ -160,14 +160,17 @@ churn_alive() {
   fi
 }
 
-# Past the idle sample the judged rows are measured, and a failure of the sessions' part is kept in
-# failure.json and reported with them, where before it stopped the run (`tolerate`).
+# The driver writes failure.json when a phase the report judges failed, which stops the run whenever
+# it comes, and sessions-failure.json when a step of the sessions did. Past the idle sample the judged
+# rows are measured, so a failure of the sessions' part is kept in sessions-failure.json and reported
+# with them, where before it stopped the run (`tolerate`).
 tolerate=
 
 fail() {
   echo "$1" >&2
   if [ -n "$tolerate" ]; then
-    [ -e "$out/failure.json" ] || jq -n --arg message "$1" '{message: $message}' >"$out/failure.json"
+    [ -e "$out/sessions-failure.json" ] ||
+      jq -n --arg message "$1" '{message: $message}' >"$out/sessions-failure.json"
     return 1
   fi
   exit 1
@@ -176,6 +179,11 @@ fail() {
 no_failure() {
   if [ -e "$out/failure.json" ]; then
     cat "$out/failure.json" >&2
+    echo >&2
+    exit 1
+  fi
+  if [ -e "$out/sessions-failure.json" ]; then
+    cat "$out/sessions-failure.json" >&2
     echo >&2
     if [ -n "$tolerate" ]; then return 1; fi
     exit 1
@@ -310,7 +318,7 @@ sessions_phase() {
 tolerate=1
 sessions_phase || true
 tolerate=
-if [ -e "$out/failure.json" ]; then
+if [ -e "$out/sessions-failure.json" ]; then
   kill "$app" 2>/dev/null || true
   wait "$app" 2>/dev/null || true
 elif ! wait "$app"; then
