@@ -8,8 +8,9 @@
 //!   that its WebKit processes are told apart from those of the terminal it was started from.
 //! - `twigo-bench sample <pid>` prints the memory and CPU time of the app and of the WebKit
 //!   processes it is responsible for (macOS).
-//! - `twigo-bench report <dir>` prints the table of the six metrics, writes `report.json`, and
-//!   fails when a judged metric misses its target; none measured on the mock is judged.
+//! - `twigo-bench report <dir>` prints the table of the six metrics and the rows of M2's
+//!   sessions, writes `report.json`, and fails when a judged metric misses its target; none
+//!   measured on the mock is judged.
 #![expect(
     clippy::print_stderr,
     clippy::print_stdout,
@@ -19,6 +20,7 @@
 mod churn;
 mod process;
 mod report;
+mod sessions;
 mod stats;
 
 use std::path::{Path, PathBuf};

@@ -2,9 +2,16 @@ import type {
   Backend,
   Cell,
   Column,
+  Forward,
+  ForwardEvent,
+  ForwardStarted,
   ListBatch,
   RequestOf,
   RowId,
+  ShellEvent,
+  ShellMessage,
+  SubscriptionId,
+  TerminalSession,
 } from "@twigo/protocol";
 
 /** A cell a batch changed, with what it now reads. */
@@ -85,9 +92,42 @@ export class ListProbe {
   }
 }
 
-/** A backend that passes everything through and records each list subscription's batches. */
+const TAIL = 4000;
+
+/** What one session's channel carried: its state, how much output and when, and the end of it. */
+export class ShellProbe {
+  state: ShellEvent = { state: "connecting" };
+  bytes = 0;
+  lines = 0;
+  /** When the last of it came, in `performance.now()` milliseconds. */
+  lastAt = 0;
+  tail = "";
+  readonly #decoder = new TextDecoder();
+
+  constructor(readonly id: SubscriptionId) {}
+
+  record(at: number, message: ShellMessage): void {
+    if ("state" in message) {
+      this.state = message;
+      return;
+    }
+    const bytes = new Uint8Array(message);
+    this.bytes += bytes.length;
+    for (const byte of bytes) if (byte === 10) this.lines += 1;
+    this.lastAt = at;
+    this.tail = (
+      this.tail + this.#decoder.decode(bytes, { stream: true })
+    ).slice(-TAIL);
+  }
+}
+
+/** A backend that passes everything through and records each list subscription's batches, each session's output and the forwards' states. */
 export class Probe {
   readonly backend: Backend;
+  terminal: TerminalSession | undefined;
+  forwardStarted: ForwardStarted | undefined;
+  readonly shells: ShellProbe[] = [];
+  readonly forwards = new Map<Forward["id"], Forward>();
   readonly #lists = new Map<number, ListProbe>();
   readonly #opened = new Set<(list: ListProbe) => void>();
 
@@ -98,9 +138,36 @@ export class Probe {
           const { id, view } = request as RequestOf<"list_set_view">;
           this.#lists.get(id)?.asked(view);
         }
-        return inner.invoke(command, request);
+        const answer = inner.invoke(command, request);
+        if (command === "terminal_create") {
+          void answer.then((created) => {
+            this.terminal = created as TerminalSession;
+          });
+        } else if (command === "forward_start") {
+          void answer.then((started) => {
+            this.forwardStarted = started as ForwardStarted;
+          });
+        }
+        return answer;
       },
       subscribe: (command, request, onMessage) => {
+        if (command === "shell_open") {
+          const shell = new ShellProbe((request as RequestOf<"shell_open">).id);
+          this.shells.push(shell);
+          return inner.subscribe(command, request, (message) => {
+            shell.record(performance.now(), message as ShellMessage);
+            onMessage(message);
+          });
+        }
+        if (command === "forwards_watch") {
+          return inner.subscribe(command, request, (message) => {
+            const event = message as ForwardEvent;
+            if (event.event === "changed") {
+              this.forwards.set(event.forward.id, event.forward);
+            } else this.forwards.delete(event.id);
+            onMessage(message);
+          });
+        }
         if (command !== "list_subscribe") {
           return inner.subscribe(command, request, onMessage);
         }

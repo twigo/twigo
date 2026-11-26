@@ -27,6 +27,7 @@ mach2.workspace = true
 
 [dev-dependencies]
 futures.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = ["process", "test-util"] }
 twigo-cache.workspace = true
 twigo-ipc.workspace = true

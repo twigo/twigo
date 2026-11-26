@@ -871,8 +871,9 @@ It builds the app's bench mode in release, runs a churn generator at 100 changes
   Their physical footprint and the GPU process are shown apart and never judged: footprint leaves out pages WebKit reused and counts graphics that resident size does not, so it swings between runs ([bench](bench.md#on-the-rust-path)).
 - **Idle CPU** is the CPU time of the app and those WebKit processes over 30 s with the window hidden, as a share of one core.
 - **Visible CPU** is the same over 20 s with the window on screen, while the driver sleeps; it is shown and never judged, since it swings too much to tell a regression from noise ([bench](bench.md#the-visible-window)).
+- **M2's sessions**, a shell in a pod, a port-forward and a terminal, add rows that are shown and never judged: core RSS, webview memory and CPU with the window on screen and hidden, sampled once the terminal's watch has stopped; the core's CPU while the terminal's `kubectl get pods -A -w` runs through the policy proxy and straight to the cluster, the difference being the proxy's; and the gate's share of the core's CPU, an estimate ([bench](bench.md#the-sessions)).
 
-The report judges every metric but those three, and fails the run on a missed target.
+The report judges the six metrics above and fails the run on a missed target; the footprint, the GPU process, Visible CPU and the rows of the sessions are shown beside them and never judged.
 CI does not run the harness yet: it needs an unlocked GUI session, since WebKit paints nothing behind a locked screen, and Linux needs the sampler's WebKitGTK branch.
 
 Of the cases that broke other clients, two are replayed by tests outside the bench: an API-server restart during a watch (`crates/twigo-cache/tests/restart_live.rs`) and 25 contexts whose exec plugins never answer, of which only the opened space's runs (`twenty_five_plugins_that_never_answer_run_only_for_the_space_opened` in `crates/twigo-core/src/tests.rs`).

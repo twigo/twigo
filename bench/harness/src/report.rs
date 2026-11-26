@@ -1,5 +1,6 @@
-//! The report of ARCHITECTURE 3.8's six metrics at 5k pods, from what the app's bench mode, the
-//! process sampler and the churn generator wrote into one directory.
+//! The report of ARCHITECTURE 3.8's six metrics at 5k pods and of what M2's sessions add, from
+//! what the app's bench mode, the process sampler, the churn generator and the gate's cost wrote
+//! into one directory.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -10,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::churn::Summary as Churn;
 use crate::process::{Process, Sample};
+use crate::sessions::{self, Baseline};
 use crate::stats::{Spread, percentile};
 
 const FIRST_PAINT_MS: f64 = 1000.0;
@@ -87,6 +89,15 @@ pub struct Hidden {
     pub visibility: String,
 }
 
+/// When `idle` hid the window (`idle.json`) and for how long, before the app showed it again or
+/// quit.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Away {
+    pub at_ms: f64,
+    pub seconds: f64,
+}
+
 /// The run, from `bench/harness.sh`.
 #[derive(Deserialize, Serialize)]
 pub struct Run {
@@ -95,6 +106,8 @@ pub struct Run {
     pub os: String,
     pub commit: String,
     pub build: String,
+    /// The version of the program the terminal ran, which the proxy rows depend on.
+    pub kubectl: Option<String>,
 }
 
 pub struct Inputs {
@@ -103,18 +116,22 @@ pub struct Inputs {
     pub memory: Vec<Sample>,
     pub visible: (Sample, Sample),
     pub idle: (Sample, Sample),
+    pub away: Away,
     pub hidden: Option<Hidden>,
     pub churn: Option<Churn>,
     pub log: Vec<Logged>,
+    pub sessions: sessions::Inputs,
 }
 
-fn read<T: DeserializeOwned>(dir: &Path, name: &str) -> Result<T, String> {
-    let path = dir.join(name);
-    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
+pub(crate) fn read<T: DeserializeOwned>(dir: &Path, name: &str) -> Result<T, String> {
+    let text = std::fs::read_to_string(dir.join(name)).map_err(|e| format!("{name}: {e}"))?;
+    serde_json::from_str(&text).map_err(|e| format!("{name}: {e}"))
 }
 
-fn read_optional<T: DeserializeOwned>(dir: &Path, name: &str) -> Result<Option<T>, String> {
+pub(crate) fn read_optional<T: DeserializeOwned>(
+    dir: &Path,
+    name: &str,
+) -> Result<Option<T>, String> {
     if dir.join(name).exists() {
         read(dir, name).map(Some)
     } else {
@@ -154,9 +171,11 @@ impl Inputs {
                 read(dir, "visible-end.json")?,
             ),
             idle: (read(dir, "idle-start.json")?, read(dir, "idle-end.json")?),
+            away: read(dir, "idle.json")?,
             hidden: read_optional(dir, "hidden.json")?,
             churn: read_optional(dir, "churn.json")?,
             log: read_log(dir)?,
+            sessions: sessions::Inputs::read(dir),
         })
     }
 }
@@ -277,9 +296,11 @@ pub fn build(inputs: Inputs) -> Report {
         memory,
         visible,
         idle,
+        away,
         hidden,
         churn,
         log,
+        sessions,
     } = inputs;
     let mut rows = Vec::new();
 
@@ -445,18 +466,33 @@ pub fn build(inputs: Inputs) -> Report {
 
     let (start, end) = &idle;
     let cpu = cpu_percent(start, end);
+    let margin_s = (away.at_ms + away.seconds * 1000.0 - end.at_ms) / 1000.0;
     rows.push(Row {
         metric: "Idle CPU, 100 changes/s, window hidden".into(),
         value: Some(format!("{cpu:.2} %")),
         target: format!("< {IDLE_CPU_PERCENT:.0} %"),
-        status: Status::judged(cpu < IDLE_CPU_PERCENT),
+        status: Status::judged(cpu < IDLE_CPU_PERCENT && margin_s > 0.0),
         measured: format!(
-            "CPU time of the app and its {} WebKit processes over {:.0} s, as a share of one core; document {}; hidden, the webview acknowledges no batch, so Rust coalesces the churn and sends nothing",
+            "CPU time of the app and its {} WebKit processes over {:.0} s, as a share of one core; document {}; hidden, the webview acknowledges no batch, so Rust coalesces the churn and sends nothing; {}",
             end.webkit.len(),
             (end.at_ms - start.at_ms) / 1000.0,
             hidden.map_or("visibility not reported".into(), |h| h.visibility),
+            if margin_s > 0.0 {
+                format!("the sample ended {margin_s:.1} s before the window was shown again")
+            } else {
+                format!(
+                    "void, since the window was shown again {:.1} s before the sample ended",
+                    -margin_s
+                )
+            },
         ),
     });
+
+    let baseline = Baseline {
+        core_mb: core,
+        webview_mb: webkit_rss,
+    };
+    rows.extend(sessions::rows(&sessions, &baseline));
 
     Report { run, rows, churn }
 }
@@ -464,11 +500,15 @@ pub fn build(inputs: Inputs) -> Report {
 pub fn table(report: &Report) -> String {
     let mut out = String::new();
     let run = &report.run;
-    let _ = writeln!(
+    let _ = write!(
         out,
         "{}, {}, {}, {} build, {}",
         run.date, run.machine, run.os, run.build, run.commit
     );
+    if let Some(kubectl) = &run.kubectl {
+        let _ = write!(out, ", kubectl {kubectl}");
+    }
+    let _ = writeln!(out);
     if let Some(churn) = &report.churn {
         let _ = writeln!(
             out,
@@ -566,6 +606,7 @@ mod tests {
                 os: "macOS 27.0".into(),
                 commit: "abc".into(),
                 build: "release".into(),
+                kubectl: Some("v1.34.1".into()),
             },
             webview: Webview {
                 rows: 5000,
@@ -601,10 +642,15 @@ mod tests {
                 sample(0.0, 1_000, webkit(1_000)),
                 sample(10_000.0, 1_000 + idle_ns, webkit(1_000)),
             ),
+            away: Away {
+                at_ms: -5_000.0,
+                seconds: 45.0,
+            },
             hidden: Some(Hidden {
                 visibility: "hidden".into(),
             }),
             churn: None,
+            sessions: sessions::fixture::inputs(300, 200),
             log: vec![
                 logged("bench-a", 1, 980.0),
                 logged("bench-a", 2, 1_040.0),
@@ -644,6 +690,23 @@ mod tests {
                     &Status::Shown
                 ),
                 ("Idle CPU, 100 changes/s, window hidden", &Status::Pass),
+                ("Core RSS, sessions open", &Status::Shown),
+                ("  Webview memory, sessions open", &Status::Shown),
+                (
+                    "Visible CPU, sessions open, window on screen",
+                    &Status::Shown
+                ),
+                ("Idle CPU, sessions open, window hidden", &Status::Shown),
+                (
+                    "Terminal watch through the policy proxy: core CPU",
+                    &Status::Shown
+                ),
+                ("  The same watch straight to the cluster", &Status::Shown),
+                ("  The policy proxy's share", &Status::Shown),
+                (
+                    "Gate, share of the core's CPU, steady phase",
+                    &Status::Shown
+                ),
             ]
         );
         assert_eq!(report.rows[0].value.as_deref(), Some("400 ms"));
@@ -773,6 +836,37 @@ mod tests {
     }
 
     #[test]
+    fn an_idle_sample_that_the_window_came_back_in_is_void() {
+        let mut back = inputs(20.0, 16.7, 1_000_000);
+        back.away.at_ms = -35_001.0;
+        let report = build(back);
+        assert_eq!(report.failed(), ["Idle CPU, 100 changes/s, window hidden"]);
+        let measured = &report.rows[9].measured;
+        assert!(
+            measured.contains("void, since the window was shown again 0.0 s before"),
+            "{measured}"
+        );
+        let mut late = inputs(20.0, 16.7, 1_000_000);
+        late.away.at_ms = -40_000.0;
+        let report = build(late);
+        assert_eq!(report.failed(), ["Idle CPU, 100 changes/s, window hidden"]);
+        let measured = &report.rows[9].measured;
+        assert!(
+            measured.contains("void, since the window was shown again 5.0 s"),
+            "{measured}"
+        );
+        let mut still_hidden = inputs(20.0, 16.7, 1_000_000);
+        still_hidden.away.at_ms = -34_000.0;
+        let report = build(still_hidden);
+        assert!(report.failed().is_empty());
+        let measured = &report.rows[9].measured;
+        assert!(
+            measured.contains("the sample ended 1.0 s before the window was shown again"),
+            "{measured}"
+        );
+    }
+
+    #[test]
     fn visible_cpu_is_shown_and_never_judged() {
         let mut all = inputs(20.0, 16.7, 0);
         all.visible = (
@@ -795,11 +889,93 @@ mod tests {
         assert!((cpu_percent(&start, &end) - 1.0).abs() < 1e-9);
     }
 
+    fn run_dir_before_the_sessions(idle_ns: u64) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let put = |name: &str, value: serde_json::Value| {
+            std::fs::write(dir.path().join(name), value.to_string()).unwrap();
+        };
+        let at = |ms: f64, app_cpu: u64| serde_json::to_value(sample(ms, app_cpu, vec![])).unwrap();
+        put(
+            "run.json",
+            serde_json::json!({
+                "date": "2026-11-01", "machine": "Apple M4 Max", "os": "macOS 27.0",
+                "commit": "abc", "build": "release",
+            }),
+        );
+        put(
+            "webview.json",
+            serde_json::json!({
+                "rows": 5000, "refreshMs": 16.7, "firstPaintMs": 400.0,
+                "scroll": {
+                    "seconds": 5.0, "pxPerSecond": 4000.0,
+                    "frameMs": vec![16.7; 300], "blankFrames": 0,
+                },
+                "sort": [{ "column": "Name", "descending": false, "ms": 20.0 }],
+                "changes": {
+                    "seconds": 60.0,
+                    "painted": [{ "pod": "bench-a", "restarts": 1, "at": 1000.0 }],
+                    "offscreen": 0, "superseded": 0, "timedOut": 0,
+                },
+            }),
+        );
+        put("memory-1.json", at(0.0, 0));
+        put("visible-start.json", at(0.0, 0));
+        put("visible-end.json", at(10_000.0, 0));
+        put("idle-start.json", at(0.0, 0));
+        put("idle-end.json", at(10_000.0, idle_ns));
+        put("hidden.json", serde_json::json!({ "visibility": "hidden" }));
+        put(
+            "idle.json",
+            serde_json::json!({ "atMs": -5_000.0, "seconds": 45 }),
+        );
+        std::fs::write(
+            dir.path().join("churn.jsonl"),
+            r#"{"pod":"bench-a","restarts":1,"sent":980.0}"#,
+        )
+        .unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_run_without_the_sessions_reports_and_judges_the_rows_it_has() {
+        let dir = run_dir_before_the_sessions(1_000_000);
+        let report = build(Inputs::read(dir.path()).unwrap());
+        assert_eq!(report.run.kubectl, None);
+        assert!(
+            table(&report)
+                .starts_with("2026-11-01, Apple M4 Max, macOS 27.0, release build, abc\n")
+        );
+        assert_eq!(report.rows.len(), 18);
+        assert!(report.failed().is_empty());
+        assert_eq!(report.rows[9].status, Status::Pass);
+        for row in &report.rows[10..] {
+            assert_eq!(row.value, None, "{}", row.metric);
+            assert_eq!(row.status, Status::Shown);
+            assert!(
+                row.measured.starts_with("not measured: "),
+                "{}: {}",
+                row.metric,
+                row.measured
+            );
+        }
+        let busy = run_dir_before_the_sessions(250_000_000);
+        assert_eq!(
+            build(Inputs::read(busy.path()).unwrap()).failed(),
+            ["Idle CPU, 100 changes/s, window hidden"]
+        );
+    }
+
     #[test]
     fn the_table_lists_every_row() {
         let report = build(inputs(30.0, 16.7, 0));
         let table = table(&report);
-        assert_eq!(table.lines().filter(|l| l.starts_with("| ")).count(), 12);
+        assert_eq!(table.lines().filter(|l| l.starts_with("| ")).count(), 20);
         assert!(table.contains("| First paint after the space connects | 400 ms | < 1 s | pass |"));
+        assert!(
+            table.starts_with(
+                "2026-11-01, Apple M4 Max, macOS 27.0, release build, abc, kubectl v1.34.1\n"
+            ),
+            "{table}"
+        );
     }
 }
