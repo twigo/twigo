@@ -88,6 +88,8 @@ struct Pending {
     window: Option<Window>,
     acked: Option<u32>,
     view: Option<(u32, Shape)>,
+    /// The number of the newest view change kept, whether it waits or the task took it.
+    newest_view: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -132,9 +134,16 @@ impl Batcher {
 
     /// Changes the view part of the query to `shape`, which batches reflect from the next one
     /// on, each saying `view`. Changes that come while a batch waits for its ack go out
-    /// together with the last of them.
+    /// together with the last of them. A change numbered no higher than one already kept came
+    /// late, since commands reach the core in no set order, and is dropped.
     pub fn set_view(&self, view: u32, shape: Shape) {
-        self.control.pending.lock().expect("batcher lock").view = Some((view, shape));
+        let mut pending = self.control.pending.lock().expect("batcher lock");
+        if view <= pending.newest_view {
+            return;
+        }
+        pending.newest_view = view;
+        pending.view = Some((view, shape));
+        drop(pending);
         self.control.wake.notify_one();
     }
 
@@ -237,11 +246,14 @@ async fn run(
                 false
             }
         };
-        let Pending {
-            window,
-            acked,
-            view: reshaped,
-        } = std::mem::take(&mut *control.pending.lock().expect("batcher lock"));
+        let (window, acked, reshaped) = {
+            let mut pending = control.pending.lock().expect("batcher lock");
+            (
+                pending.window.take(),
+                pending.acked.take(),
+                pending.view.take(),
+            )
+        };
         if reshaped.is_some() {
             asked = reshaped;
             moved = true;
@@ -902,6 +914,47 @@ mod tests {
             rig.batches.try_recv().is_err(),
             "the first change never went out"
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_view_change_older_than_the_pending_one_is_dropped() {
+        let (mut rig, first) = of_four().await;
+        rig.batcher.set_view(2, by_name(true));
+        rig.batcher
+            .set_view(1, Shape::of(|view| view.text = Some("p1".to_owned())));
+        let (_, answer) = rig.next().await;
+        assert_eq!((answer.seq, answer.view), (first.seq + 1, 2));
+        assert_eq!(names(&answer), ["p4", "p3", "p2", "p1"]);
+        rig.batcher.ack(answer.seq);
+
+        rig.fake.add("pods", Some("a"), "p5");
+        let (_, later) = rig.next().await;
+        assert_eq!(later.view, 2);
+        assert_eq!(later.total, 5);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_view_change_older_than_the_one_taken_is_dropped() {
+        let (mut rig, _) = of_four().await;
+        for (view, shape) in [
+            (1, Shape::of(|view| view.text = Some("p1".to_owned()))),
+            (2, by_name(true)),
+        ] {
+            rig.batcher.set_view(view, shape);
+            let (_, answer) = rig.next().await;
+            assert_eq!(answer.view, view);
+            rig.batcher.ack(answer.seq);
+        }
+
+        rig.batcher
+            .set_view(1, Shape::of(|view| view.text = Some("p1".to_owned())));
+        sleep(FLUSH * 5).await;
+        assert!(rig.batches.try_recv().is_err(), "it answers nothing");
+
+        rig.fake.add("pods", Some("a"), "p5");
+        let (_, later) = rig.next().await;
+        assert_eq!((later.view, later.total), (2, 5));
+        assert_eq!(names(&later), ["p5", "p4", "p3", "p2", "p1"]);
     }
 
     #[tokio::test(start_paused = true)]
