@@ -388,7 +388,7 @@ fn percent(value: f64) -> String {
     }
 }
 
-const CORE: &str = "Core RSS, sessions open";
+const CORE: &str = "Core footprint, sessions open";
 const WEBVIEW: &str = "  Webview memory, sessions open";
 const VISIBLE: &str = "Visible CPU, sessions open, window on screen";
 const IDLE: &str = "Idle CPU, sessions open, window hidden";
@@ -444,12 +444,12 @@ fn session_rows(sessions: &Sessions, baseline: &Baseline) -> Vec<Row> {
     );
     let mut rows = Vec::new();
 
-    let core = median_mb(memory, |s| s.app.rss);
+    let core = median_mb(memory, |s| s.app.footprint);
     rows.push(shown(
         CORE,
         Some(format!("{core:.0} MB")),
         format!(
-            "resident size of {} under churn with the pod list and {open}; the median of {} samples; {:+.0} MB against the row with the list alone",
+            "physical footprint of {} under churn with the pod list and {open}; the median of {} samples; {:+.0} MB against the row with the list alone",
             memory[0].app.name,
             memory.len(),
             core - baseline.core_mb,
@@ -584,7 +584,10 @@ pub(crate) mod fixture {
     pub(crate) fn sample(at_ms: f64, app_cpu: u64, webkit_cpu: u64) -> Sample {
         Sample {
             at_ms,
-            app: process(700, "twigo", 150 * 1_000_000, app_cpu),
+            app: Process {
+                footprint: 50 * 1_000_000,
+                ..process(700, "twigo", 150 * 1_000_000, app_cpu)
+            },
             webkit: vec![
                 process(
                     701,
@@ -715,7 +718,7 @@ mod tests {
         let rows = rows(&inputs(300, 200), &baseline());
         assert_eq!(rows.len(), 8);
         assert!(rows.iter().all(|row| row.status == Status::Shown));
-        assert_eq!(value(&rows, "Core RSS, sessions open"), "150 MB");
+        assert_eq!(value(&rows, "Core footprint, sessions open"), "50 MB");
         assert_eq!(value(&rows, "Webview memory, sessions open"), "250 MB");
     }
 
@@ -1020,6 +1023,6 @@ mod tests {
             "{}",
             rows[7].measured
         );
-        assert_eq!(value(&rows, "Core RSS, sessions open"), "150 MB");
+        assert_eq!(value(&rows, "Core footprint, sessions open"), "50 MB");
     }
 }

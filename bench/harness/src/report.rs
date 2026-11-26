@@ -20,7 +20,7 @@ const FPS: f64 = 60.0;
 /// requestAnimationFrame jitters, so a scroll passes at 95 % of the target's frames.
 const FPS_PASS: f64 = 57.0;
 const SORT_P95_MS: f64 = 50.0;
-const CORE_RSS_MB: f64 = 150.0;
+const CORE_FOOTPRINT_MB: f64 = 70.0;
 const WEBVIEW_MB: f64 = 300.0;
 const IDLE_CPU_PERCENT: f64 = 2.0;
 const MB: f64 = 1_000_000.0;
@@ -369,16 +369,27 @@ pub fn build(inputs: Inputs) -> Report {
     });
 
     let first = &memory[0];
-    let core = median_mb(&memory, |s| s.app.rss);
+    let core = median_mb(&memory, |s| s.app.footprint);
     rows.push(Row {
-        metric: "Core RSS with the pod list open".into(),
+        metric: "Core footprint with the pod list open".into(),
         value: Some(format!("{core:.0} MB")),
-        target: format!("< {CORE_RSS_MB:.0} MB"),
-        status: Status::judged(core < CORE_RSS_MB),
+        target: format!("< {CORE_FOOTPRINT_MB:.0} MB"),
+        status: Status::judged(core < CORE_FOOTPRINT_MB),
         measured: format!(
-            "resident size of {} (pid {}) under churn with the list open, its row store, query view and batcher included, the median of {} samples",
+            "physical footprint of {} (pid {}) under churn with the list open, its row store, query view and batcher included, the median of {} samples",
             first.app.name,
             first.app.pid,
+            memory.len()
+        ),
+    });
+    let core_rss = median_mb(&memory, |s| s.app.rss);
+    rows.push(Row {
+        metric: "  Resident size".into(),
+        value: Some(format!("{core_rss:.0} MB")),
+        target: "-".into(),
+        status: Status::Shown,
+        measured: format!(
+            "the same process's resident size, the median of {} samples; it adds clean pages of the binary, the frameworks and mapped files, which macOS takes back when it wants, so it swings between runs (docs/bench.md)",
             memory.len()
         ),
     });
@@ -562,7 +573,7 @@ mod tests {
     fn sample(at_ms: f64, app_cpu: u64, webkit: Vec<Process>) -> Sample {
         Sample {
             at_ms,
-            app: process(700, "twigo", 90 * 1_000_000, 80 * 1_000_000, app_cpu),
+            app: process(700, "twigo", 90 * 1_000_000, 50 * 1_000_000, app_cpu),
             webkit,
             other_webkit: vec![process(501, "com.apple.WebKit.Networking", 1, 1, 1)],
         }
@@ -681,7 +692,8 @@ mod tests {
                 ("Change → painted cell, p95", &Status::Pass),
                 ("Scroll and sort: scroll", &Status::Pass),
                 ("Scroll and sort: sort", &Status::Pass),
-                ("Core RSS with the pod list open", &Status::Pass),
+                ("Core footprint with the pod list open", &Status::Pass),
+                ("  Resident size", &Status::Shown),
                 ("Webview memory with the pod list open", &Status::Pass),
                 ("  Physical footprint", &Status::Shown),
                 ("  GPU process", &Status::Shown),
@@ -690,7 +702,7 @@ mod tests {
                     &Status::Shown
                 ),
                 ("Idle CPU, 100 changes/s, window hidden", &Status::Pass),
-                ("Core RSS, sessions open", &Status::Shown),
+                ("Core footprint, sessions open", &Status::Shown),
                 ("  Webview memory, sessions open", &Status::Shown),
                 (
                     "Visible CPU, sessions open, window on screen",
@@ -710,10 +722,12 @@ mod tests {
             ]
         );
         assert_eq!(report.rows[0].value.as_deref(), Some("400 ms"));
-        assert_eq!(report.rows[5].value.as_deref(), Some("220 MB"));
-        assert_eq!(report.rows[6].value.as_deref(), Some("160 MB"));
-        assert_eq!(report.rows[7].value.as_deref(), Some("500 MB"));
-        assert_eq!(report.rows[9].value.as_deref(), Some("0.01 %"));
+        assert_eq!(report.rows[4].value.as_deref(), Some("50 MB"));
+        assert_eq!(report.rows[5].value.as_deref(), Some("90 MB"));
+        assert_eq!(report.rows[6].value.as_deref(), Some("220 MB"));
+        assert_eq!(report.rows[7].value.as_deref(), Some("160 MB"));
+        assert_eq!(report.rows[8].value.as_deref(), Some("500 MB"));
+        assert_eq!(report.rows[10].value.as_deref(), Some("0.01 %"));
     }
 
     #[test]
@@ -780,24 +794,24 @@ mod tests {
                         process(702, "com.apple.WebKit.GPU", 1, 10 * 1_000_000, 0),
                     ],
                 );
-                s.app.rss = core * 1_000_000;
+                s.app.footprint = core * 1_000_000;
                 s
             })
             .collect();
         let report = build(all);
         assert_eq!(report.rows[4].value.as_deref(), Some("200 MB"));
-        assert_eq!(report.rows[5].value.as_deref(), Some("200 MB"));
-        assert_eq!(report.rows[6].value.as_deref(), Some("400 MB"));
-        assert_eq!(report.rows[7].value.as_deref(), Some("10 MB"));
+        assert_eq!(report.rows[6].value.as_deref(), Some("200 MB"));
+        assert_eq!(report.rows[7].value.as_deref(), Some("400 MB"));
+        assert_eq!(report.rows[8].value.as_deref(), Some("10 MB"));
         assert!(
-            report.rows[5].measured.contains("(WebContent 200 MB)"),
-            "{}",
-            report.rows[5].measured
-        );
-        assert!(
-            report.rows[6].measured.contains("(WebContent 400 MB)"),
+            report.rows[6].measured.contains("(WebContent 200 MB)"),
             "{}",
             report.rows[6].measured
+        );
+        assert!(
+            report.rows[7].measured.contains("(WebContent 400 MB)"),
+            "{}",
+            report.rows[7].measured
         );
     }
 
@@ -827,6 +841,23 @@ mod tests {
     }
 
     #[test]
+    fn core_memory_is_judged_by_footprint_and_not_by_resident_size() {
+        let core = |rss: u64, footprint: u64| {
+            let mut all = inputs(20.0, 16.7, 1_000_000);
+            for s in &mut all.memory {
+                s.app.rss = rss * 1_000_000;
+                s.app.footprint = footprint * 1_000_000;
+            }
+            build(all)
+        };
+        assert!(core(200, 60).failed().is_empty());
+        assert_eq!(
+            core(100, 75).failed(),
+            ["Core footprint with the pod list open"]
+        );
+    }
+
+    #[test]
     fn idle_cpu_is_judged_at_two_percent() {
         assert!(build(inputs(20.0, 16.7, 150_000_000)).failed().is_empty());
         assert_eq!(
@@ -841,7 +872,7 @@ mod tests {
         back.away.at_ms = -35_001.0;
         let report = build(back);
         assert_eq!(report.failed(), ["Idle CPU, 100 changes/s, window hidden"]);
-        let measured = &report.rows[9].measured;
+        let measured = &report.rows[10].measured;
         assert!(
             measured.contains("void, since the window was shown again 0.0 s before"),
             "{measured}"
@@ -850,7 +881,7 @@ mod tests {
         late.away.at_ms = -40_000.0;
         let report = build(late);
         assert_eq!(report.failed(), ["Idle CPU, 100 changes/s, window hidden"]);
-        let measured = &report.rows[9].measured;
+        let measured = &report.rows[10].measured;
         assert!(
             measured.contains("void, since the window was shown again 5.0 s"),
             "{measured}"
@@ -859,7 +890,7 @@ mod tests {
         still_hidden.away.at_ms = -34_000.0;
         let report = build(still_hidden);
         assert!(report.failed().is_empty());
-        let measured = &report.rows[9].measured;
+        let measured = &report.rows[10].measured;
         assert!(
             measured.contains("the sample ended 1.0 s before the window was shown again"),
             "{measured}"
@@ -875,7 +906,7 @@ mod tests {
         );
         let report = build(all);
         assert!(report.failed().is_empty());
-        assert_eq!(report.rows[8].value.as_deref(), Some("90.00 %"));
+        assert_eq!(report.rows[9].value.as_deref(), Some("90.00 %"));
     }
 
     #[test]
@@ -945,10 +976,10 @@ mod tests {
             table(&report)
                 .starts_with("2026-11-01, Apple M4 Max, macOS 27.0, release build, abc\n")
         );
-        assert_eq!(report.rows.len(), 18);
+        assert_eq!(report.rows.len(), 19);
         assert!(report.failed().is_empty());
-        assert_eq!(report.rows[9].status, Status::Pass);
-        for row in &report.rows[10..] {
+        assert_eq!(report.rows[10].status, Status::Pass);
+        for row in &report.rows[11..] {
             assert_eq!(row.value, None, "{}", row.metric);
             assert_eq!(row.status, Status::Shown);
             assert!(
@@ -969,7 +1000,7 @@ mod tests {
     fn the_table_lists_every_row() {
         let report = build(inputs(30.0, 16.7, 0));
         let table = table(&report);
-        assert_eq!(table.lines().filter(|l| l.starts_with("| ")).count(), 20);
+        assert_eq!(table.lines().filter(|l| l.starts_with("| ")).count(), 21);
         assert!(table.contains("| First paint after the space connects | 400 ms | < 1 s | pass |"));
         assert!(
             table.starts_with(

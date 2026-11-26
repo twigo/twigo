@@ -844,14 +844,14 @@ What needs the rows of every part, as an object's page and a workload's pods do,
 ### 3.8 Performance budgets and the benchmark
 
 These are targets on a kwok cluster, which simulates nodes and pods without kubelets, at 5k and 50k pods with churn.
-The harness measures the 5k column; the 50k one has not been measured.
+The harness measures the 5k column; the 50k one has not been measured, and its core memory, 500 MB, was set for resident size before the 5k column's moved to footprint.
 
 | Metric                                                   | Target (5k pods)     | Target (50k pods)     |
 | -------------------------------------------------------- | -------------------- | --------------------- |
 | Pod list first paint after the space connects (LAN)      | < 1 s                | < 4 s                 |
 | Change → painted cell, p95                               | < 150 ms             | < 300 ms              |
 | Scroll and sort                                          | 60 fps, sort < 50 ms | 60 fps, sort < 200 ms |
-| Core RSS with the pod list open                          | < 150 MB             | < 500 MB              |
+| Core footprint with the pod list open                    | < 70 MB              | < 500 MB              |
 | Webview memory with the pod list open                    | < 300 MB             | < 400 MB              |
 | Idle CPU (100 changes/s background churn, window hidden) | < 2 %                | < 2 %                 |
 
@@ -866,14 +866,15 @@ It builds the app's bench mode in release, runs a churn generator at 100 changes
 - **First paint** runs from opening the list to its first rows painted; the space's discovery starts as the space opens, before the list, so only what remains of it counts.
 - **Change → painted cell** joins the churn generator's log of changes, by pod and restart count, with the webview's paints of the new count, through Unix ms on both sides, from the patch sent.
 - **Scroll** is the mean fps of `requestAnimationFrame` over 5 s of scrolling at 4,000 px/s, and **sort** the p95 from a header click to the resorted rows painted, over eight sorts.
-- **Core RSS** is the app process's resident size with the list open under churn.
+- **Core footprint** is the app process's physical footprint with the list open under churn.
+  Its resident size is shown beside it and never judged: it reads 89 to 99 MB above the footprint, clean pages of the binary, the frameworks and mapped files, which macOS takes back when it wants, so one code read 142 to 153 MB in ten runs ([bench](bench.md#why-the-targets-moved)).
 - **Webview memory** is the resident size of the WebKit processes the app is responsible for, the process macOS records as having asked for them, but the GPU process; the harness starts the app responsible for itself, since one started from a terminal shares the terminal's.
   Their physical footprint and the GPU process are shown apart and never judged: footprint leaves out pages WebKit reused and counts graphics that resident size does not, so it swings between runs ([bench](bench.md#on-the-rust-path)).
 - **Idle CPU** is the CPU time of the app and those WebKit processes over 30 s with the window hidden, as a share of one core.
 - **Visible CPU** is the same over 20 s with the window on screen, while the driver sleeps; it is shown and never judged, since it swings too much to tell a regression from noise ([bench](bench.md#the-visible-window)).
-- **M2's sessions**, a shell in a pod, a port-forward and a terminal, add rows that are shown and never judged: core RSS, webview memory and CPU with the window on screen and hidden, sampled once the terminal's watch has stopped; the core's CPU while the terminal's `kubectl get pods -A -w` runs through the policy proxy and straight to the cluster, the difference being the proxy's; and the gate's share of the core's CPU, an estimate ([bench](bench.md#the-sessions)).
+- **M2's sessions**, a shell in a pod, a port-forward and a terminal, add rows that are shown and never judged: core footprint, webview memory and CPU with the window on screen and hidden, sampled once the terminal's watch has stopped; the core's CPU while the terminal's `kubectl get pods -A -w` runs through the policy proxy and straight to the cluster, the difference being the proxy's; and the gate's share of the core's CPU, an estimate ([bench](bench.md#the-sessions)).
 
-The report judges the six metrics above and fails the run on a missed target; the footprint, the GPU process, Visible CPU and the rows of the sessions are shown beside them and never judged.
+The report judges the six metrics above and fails the run on a missed target; the core's resident size, the webview's footprint, the GPU process, Visible CPU and the rows of the sessions are shown beside them and never judged.
 CI does not run the harness yet: it needs an unlocked GUI session, since WebKit paints nothing behind a locked screen, and Linux needs the sampler's WebKitGTK branch.
 
 Of the cases that broke other clients, two are replayed by tests outside the bench: an API-server restart during a watch (`crates/twigo-cache/tests/restart_live.rs`) and 25 contexts whose exec plugins never answer, of which only the opened space's runs (`twenty_five_plugins_that_never_answer_run_only_for_the_space_opened` in `crates/twigo-core/src/tests.rs`).
