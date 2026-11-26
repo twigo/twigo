@@ -52,6 +52,7 @@ pub(super) async fn fetch(
     kind: Kind,
     version: &str,
     scope: &Scope,
+    previous: Option<&Samples>,
 ) -> Result<Samples, Failure> {
     let request = Request::get(uri(kind, version, scope))
         .header(ACCEPT, "application/json")
@@ -78,7 +79,7 @@ pub(super) async fn fetch(
         .map_err(|_| Failure::Unavailable)?
         .to_bytes();
     let body = encoding::page(&parts.headers, body).map_err(|_| Failure::Undecodable)?;
-    sample::parse(&body, kind).map_err(|_| Failure::Undecodable)
+    sample::parse(&body, kind, previous).map_err(|_| Failure::Undecodable)
 }
 
 #[cfg(test)]

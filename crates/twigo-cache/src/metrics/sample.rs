@@ -14,7 +14,8 @@ use super::Kind;
 
 #[derive(Debug, Clone)]
 pub struct Sample {
-    /// Moves with every scrape, so a sample is not compared by it.
+    /// Moves with every scrape, so a sample is not compared by it, and a poll that finds the same
+    /// values keeps the sample and the time of the scrape that first read them.
     pub sampled: Option<Timestamp>,
     /// Nanocores; a pod's is the sum over its containers, as kubectl sums them
     /// ([`metrics_printer.go`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/kubectl/pkg/metricsutil/metrics_printer.go#L188-L202)).
@@ -48,9 +49,10 @@ impl PartialEq for Sample {
 
 impl Eq for Sample {}
 
-/// By namespace, empty for a node, then name.
+/// By namespace, empty for a node, then name. An answer shares the names and the samples it finds
+/// the same with the one before.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct Samples(HashMap<Box<str>, HashMap<Box<str>, Arc<Sample>>>);
+pub struct Samples(HashMap<Arc<str>, HashMap<Arc<str>, Arc<Sample>>>);
 
 impl Samples {
     pub fn get(&self, namespace: &str, name: &str) -> Option<&Arc<Sample>> {
@@ -73,12 +75,16 @@ impl Samples {
         })
     }
 
-    fn insert(&mut self, namespace: &str, name: &str, sample: Sample) {
+    /// `expected` sizes the table of a namespace that is new to this answer.
+    fn insert(&mut self, namespace: &str, name: Arc<str>, sample: Arc<Sample>, expected: usize) {
         let samples = match self.0.get_mut(namespace) {
             Some(samples) => samples,
-            None => self.0.entry(namespace.into()).or_default(),
+            None => self
+                .0
+                .entry(namespace.into())
+                .or_insert_with(|| HashMap::with_capacity(expected)),
         };
-        samples.insert(name.into(), Arc::new(sample));
+        samples.insert(name, sample);
     }
 }
 
@@ -96,7 +102,7 @@ struct Item<'a> {
     metadata: Metadata<'a>,
     #[serde(borrow, default)]
     timestamp: Option<Cow<'a, str>>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "by_name")]
     containers: Vec<Named<'a>>,
     #[serde(borrow, default)]
     usage: Option<Usage<'a>>,
@@ -114,8 +120,9 @@ struct Metadata<'a> {
 struct Named<'a> {
     #[serde(borrow)]
     name: Cow<'a, str>,
-    #[serde(borrow)]
-    usage: Usage<'a>,
+    /// Nanocores and bytes, none where they do not parse.
+    #[serde(deserialize_with = "container_usage")]
+    usage: Option<(i64, i64)>,
 }
 
 #[derive(Deserialize)]
@@ -132,26 +139,48 @@ fn usage(usage: &Usage<'_>) -> Option<(i64, i64)> {
     Some((cpu, memory))
 }
 
+fn by_name<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<Named<'de>>, D::Error> {
+    let mut containers = Vec::<Named<'de>>::deserialize(deserializer)?;
+    containers.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(containers)
+}
+
+fn container_usage<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<(i64, i64)>, D::Error> {
+    Usage::deserialize(deserializer).map(|parsed| usage(&parsed))
+}
+
 impl Item<'_> {
-    fn sample(&self, kind: Kind) -> Option<Sample> {
-        let sampled = self
-            .timestamp
+    fn sampled(&self) -> Option<Timestamp> {
+        self.timestamp
             .as_deref()
-            .and_then(|timestamp| timestamp.parse().ok());
+            .and_then(|timestamp| timestamp.parse().ok())
+    }
+
+    /// The sample of an item, or `held` where it is the same, and none for an item the server
+    /// leaves out.
+    fn sample(&self, kind: Kind, held: Option<&Arc<Sample>>) -> Option<Arc<Sample>> {
         match kind {
             Kind::Nodes => {
                 let (cpu, memory) = usage(self.usage.as_ref()?)?;
-                Some(Sample {
-                    sampled,
+                if let Some(held) = held.filter(|held| held.cpu == cpu && held.memory == memory) {
+                    return Some(Arc::clone(held));
+                }
+                Some(Arc::new(Sample {
+                    sampled: self.sampled(),
                     cpu,
                     memory,
                     containers: Box::default(),
-                })
+                }))
             }
             Kind::Pods => {
+                if let Some(held) = held.filter(|held| self.same_as(held)) {
+                    return Some(Arc::clone(held));
+                }
                 let mut containers = Vec::with_capacity(self.containers.len());
                 for container in &self.containers {
-                    let (cpu, memory) = usage(&container.usage)?;
+                    let (cpu, memory) = container.usage?;
                     containers.push(Container {
                         name: container.name.as_ref().into(),
                         cpu,
@@ -161,25 +190,37 @@ impl Item<'_> {
                 if containers.is_empty() {
                     return None;
                 }
-                containers.sort_by(|a, b| a.name.cmp(&b.name));
-                Some(Sample {
-                    sampled,
+                Some(Arc::new(Sample {
+                    sampled: self.sampled(),
                     cpu: containers.iter().map(|container| container.cpu).sum(),
                     memory: containers.iter().map(|container| container.memory).sum(),
                     containers: containers.into(),
-                })
+                }))
             }
         }
+    }
+
+    fn same_as(&self, sample: &Sample) -> bool {
+        sample.containers.len() == self.containers.len()
+            && sample
+                .containers
+                .iter()
+                .zip(&self.containers)
+                .all(|(held, container)| {
+                    *held.name == *container.name
+                        && container.usage == Some((held.cpu, held.memory))
+                })
     }
 }
 
 /// Reads a list's items one at a time, each into its sample as it comes.
 #[derive(Clone, Copy)]
-struct Parser {
+struct Parser<'p> {
     kind: Kind,
+    previous: Option<&'p Samples>,
 }
 
-impl<'de> Visitor<'de> for Parser {
+impl<'de> Visitor<'de> for Parser<'_> {
     type Value = Samples;
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -210,19 +251,26 @@ impl<'de> Visitor<'de> for Parser {
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Samples, A::Error> {
         let mut samples = Samples::default();
         while let Some(item) = seq.next_element::<Item<'de>>()? {
-            if let Some(sample) = item.sample(self.kind) {
-                let namespace = match self.kind {
-                    Kind::Pods => item.metadata.namespace.as_deref().unwrap_or_default(),
-                    Kind::Nodes => "",
-                };
-                samples.insert(namespace, &item.metadata.name, sample);
-            }
+            let namespace = match self.kind {
+                Kind::Pods => item.metadata.namespace.as_deref().unwrap_or_default(),
+                Kind::Nodes => "",
+            };
+            let names = self.previous.and_then(|previous| previous.0.get(namespace));
+            let before = names.and_then(|names| names.get_key_value(&*item.metadata.name));
+            let Some(sample) = item.sample(self.kind, before.map(|(_, sample)| sample)) else {
+                continue;
+            };
+            let name = before.map_or_else(
+                || Arc::from(&*item.metadata.name),
+                |(name, _)| Arc::clone(name),
+            );
+            samples.insert(namespace, name, sample, names.map_or(0, HashMap::len));
         }
         Ok(samples)
     }
 }
 
-impl<'de> DeserializeSeed<'de> for Parser {
+impl<'de> DeserializeSeed<'de> for Parser<'_> {
     type Value = Samples;
 
     /// A list that holds no item may send `null`, as Go encodes a nil slice.
@@ -231,10 +279,15 @@ impl<'de> DeserializeSeed<'de> for Parser {
     }
 }
 
-/// An item whose usage does not parse has no sample, as a pod the server leaves out.
-pub fn parse(body: &[u8], kind: Kind) -> Result<Samples, serde_json::Error> {
+/// An item whose usage does not parse has no sample, as a pod the server leaves out. `previous`
+/// is the answer before for the same scope.
+pub fn parse(
+    body: &[u8],
+    kind: Kind,
+    previous: Option<&Samples>,
+) -> Result<Samples, serde_json::Error> {
     let mut deserializer = serde_json::Deserializer::from_slice(body);
-    let samples = (&mut deserializer).deserialize_map(Parser { kind })?;
+    let samples = (&mut deserializer).deserialize_map(Parser { kind, previous })?;
     deserializer.end()?;
     Ok(samples)
 }
@@ -246,7 +299,7 @@ mod tests {
     use super::*;
 
     fn parsed(list: &serde_json::Value, kind: Kind) -> Samples {
-        parse(list.to_string().as_bytes(), kind).unwrap()
+        parse(list.to_string().as_bytes(), kind, None).unwrap()
     }
 
     #[test]
@@ -291,7 +344,7 @@ mod tests {
 
     #[test]
     fn a_recorded_list_of_kwok_pods_reads_as_what_their_annotations_say() {
-        let samples = parse(PODS, Kind::Pods).unwrap();
+        let samples = parse(PODS, Kind::Pods, None).unwrap();
         assert_eq!(samples.len(), items(PODS));
         let near = |value: i64, wanted: i64| (value - wanted).abs() < wanted / 100;
         let web = samples.get("record-metrics", "web").unwrap();
@@ -307,7 +360,7 @@ mod tests {
 
     #[test]
     fn a_recorded_list_of_real_pods_reads_all_its_items() {
-        let samples = parse(REAL_PODS, Kind::Pods).unwrap();
+        let samples = parse(REAL_PODS, Kind::Pods, None).unwrap();
         assert_eq!(samples.len(), items(REAL_PODS));
         let etcd = samples
             .iter()
@@ -319,7 +372,7 @@ mod tests {
 
     #[test]
     fn a_recorded_list_of_nodes_reads_all_its_items_without_a_namespace() {
-        let samples = parse(NODES, Kind::Nodes).unwrap();
+        let samples = parse(NODES, Kind::Nodes, None).unwrap();
         assert_eq!(samples.len(), items(NODES));
         let kwok = samples.get("", "kwok-node-0").unwrap();
         assert!(kwok.cpu > 0 && kwok.memory > 0 && kwok.containers.is_empty());
@@ -394,12 +447,12 @@ mod tests {
             json!(null),
         ] {
             assert!(
-                parse(body.to_string().as_bytes(), Kind::Pods).is_err(),
+                parse(body.to_string().as_bytes(), Kind::Pods, None).is_err(),
                 "{body}"
             );
         }
-        assert!(parse(br#"{"items":[]} x"#, Kind::Pods).is_err());
-        assert!(parse(br#"{"items":[{"metadata":{"name":"p""#, Kind::Pods).is_err());
+        assert!(parse(br#"{"items":[]} x"#, Kind::Pods, None).is_err());
+        assert!(parse(br#"{"items":[{"metadata":{"name":"p""#, Kind::Pods, None).is_err());
     }
 
     #[test]
@@ -413,17 +466,177 @@ mod tests {
             }],
             "metadata": {}, "apiVersion": "metrics.k8s.io/v1beta1", "kind": "PodMetricsList"
         }"#;
-        let samples = parse(list, Kind::Pods).unwrap();
+        let samples = parse(list, Kind::Pods, None).unwrap();
         assert_eq!(samples.len(), 1);
         let sample = samples.get("a", "p").unwrap();
         assert_eq!((sample.cpu, sample.memory), (2_000_000, 1024 * 1024));
     }
 
+    fn pod(namespace: &str, name: &str, containers: &[(&str, &str)]) -> serde_json::Value {
+        let containers: Vec<_> = containers
+            .iter()
+            .map(|(container, cpu)| {
+                json!({ "name": container, "usage": { "cpu": cpu, "memory": "1Mi" } })
+            })
+            .collect();
+        json!({
+            "metadata": { "name": name, "namespace": namespace },
+            "timestamp": "2026-11-13T16:00:00Z",
+            "containers": containers,
+        })
+    }
+
+    fn after(previous: &Samples, list: &serde_json::Value) -> Samples {
+        parse(list.to_string().as_bytes(), Kind::Pods, Some(previous)).unwrap()
+    }
+
+    fn key<'a>(samples: &'a Samples, namespace: &str, name: &str) -> &'a Arc<str> {
+        samples.0[namespace].get_key_value(name).unwrap().0
+    }
+
+    #[test]
+    fn a_poll_keeps_the_sample_and_the_name_of_what_it_finds_the_same() {
+        let first = parsed(
+            &json!({ "items": [
+                pod("a", "same", &[("x", "1m"), ("y", "2m")]),
+                pod("a", "moved", &[("x", "1m")]),
+                pod("a", "split", &[("x", "1m"), ("y", "2m")]),
+                pod("b", "other", &[("x", "1m")]),
+            ] }),
+            Kind::Pods,
+        );
+        let mut list = json!({ "items": [
+            pod("a", "same", &[("y", "2m"), ("x", "1m")]),
+            pod("a", "moved", &[("x", "2m")]),
+            pod("a", "split", &[("x", "2m"), ("y", "1m")]),
+            pod("a", "new", &[("x", "1m")]),
+            pod("b", "other", &[("x", "1m")]),
+        ] });
+        list["items"][0]["timestamp"] = json!("2026-11-13T16:00:15Z");
+        let second = after(&first, &list);
+
+        let (before, now) = (
+            first.get("a", "same").unwrap(),
+            second.get("a", "same").unwrap(),
+        );
+        assert!(
+            Arc::ptr_eq(before, now),
+            "the same values, in another order and a later scrape"
+        );
+        assert_eq!(
+            now.sampled,
+            Some("2026-11-13T16:00:00Z".parse().unwrap()),
+            "of the scrape that first read them"
+        );
+        assert!(Arc::ptr_eq(
+            key(&first, "a", "same"),
+            key(&second, "a", "same")
+        ));
+        assert!(Arc::ptr_eq(
+            first.get("b", "other").unwrap(),
+            second.get("b", "other").unwrap()
+        ));
+
+        for name in ["moved", "split"] {
+            let (before, now) = (
+                first.get("a", name).unwrap(),
+                second.get("a", name).unwrap(),
+            );
+            assert!(!Arc::ptr_eq(before, now), "{name}");
+            assert_ne!(before, now, "{name}");
+            assert!(
+                Arc::ptr_eq(key(&first, "a", name), key(&second, "a", name)),
+                "its name is the same"
+            );
+        }
+        assert_eq!(
+            second.get("a", "split").unwrap().cpu,
+            3_000_000,
+            "the same total, another split"
+        );
+        assert_eq!(second.len(), 5);
+        assert!(first.get("a", "new").is_none() && second.get("a", "new").is_some());
+    }
+
+    #[test]
+    fn a_node_that_reads_the_same_keeps_its_sample() {
+        let node = |cpu: &str| {
+            json!({ "items": [{
+                "metadata": { "name": "n" },
+                "timestamp": "2026-11-13T16:28:56Z",
+                "usage": { "cpu": cpu, "memory": "1Mi" },
+            }] })
+        };
+        let first = parsed(&node("1m"), Kind::Nodes);
+        let same = parse(node("1m").to_string().as_bytes(), Kind::Nodes, Some(&first)).unwrap();
+        let moved = parse(node("2m").to_string().as_bytes(), Kind::Nodes, Some(&first)).unwrap();
+        assert!(Arc::ptr_eq(
+            first.get("", "n").unwrap(),
+            same.get("", "n").unwrap()
+        ));
+        assert!(!Arc::ptr_eq(
+            first.get("", "n").unwrap(),
+            moved.get("", "n").unwrap()
+        ));
+        assert_eq!(moved.get("", "n").unwrap().cpu, 2_000_000);
+    }
+
+    #[test]
+    fn a_pod_that_left_and_came_back_under_its_name_is_a_new_sample() {
+        let with =
+            json!({ "items": [pod("a", "p", &[("x", "1m")]), pod("a", "q", &[("x", "1m")])] });
+        let without = json!({ "items": [pod("a", "q", &[("x", "1m")])] });
+        let first = parsed(&with, Kind::Pods);
+        let gone = after(&first, &without);
+        assert!(gone.get("a", "p").is_none());
+        assert!(Arc::ptr_eq(
+            first.get("a", "q").unwrap(),
+            gone.get("a", "q").unwrap()
+        ));
+
+        let back = after(&gone, &with);
+        let (before, now) = (first.get("a", "p").unwrap(), back.get("a", "p").unwrap());
+        assert_eq!(before, now, "the same values");
+        assert!(!Arc::ptr_eq(before, now), "from the answer it left");
+        assert!(!Arc::ptr_eq(key(&first, "a", "p"), key(&back, "a", "p")));
+    }
+
+    #[test]
+    fn what_the_answer_before_held_survives_neither_a_null_list_nor_a_malformed_item() {
+        let first = parsed(
+            &json!({ "items": [pod("a", "p", &[("x", "1m")])] }),
+            Kind::Pods,
+        );
+        assert!(
+            parse(br#"{"items":null}"#, Kind::Pods, Some(&first))
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            parse(br#"{"kind":"PodMetricsList"}"#, Kind::Pods, Some(&first))
+                .unwrap()
+                .is_empty()
+        );
+        let malformed =
+            br#"{"items":[{"metadata":{"name":"p","namespace":"a"},"containers":[{"name":"x"}]}]}"#;
+        assert!(parse(malformed, Kind::Pods, Some(&first)).is_err());
+
+        let unparsed = json!({ "items": [pod("a", "p", &[("x", "lots")])] });
+        assert!(
+            after(&first, &unparsed).is_empty(),
+            "an item that does not parse is no sample, kept or not"
+        );
+    }
+
     #[test]
     fn an_empty_answer_may_send_null_and_an_item_that_does_not_parse_has_no_sample() {
-        assert!(parse(br#"{"items":null}"#, Kind::Pods).unwrap().is_empty());
         assert!(
-            parse(br#"{"kind":"PodMetricsList"}"#, Kind::Pods)
+            parse(br#"{"items":null}"#, Kind::Pods, None)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            parse(br#"{"kind":"PodMetricsList"}"#, Kind::Pods, None)
                 .unwrap()
                 .is_empty()
         );

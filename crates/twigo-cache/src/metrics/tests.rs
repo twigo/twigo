@@ -219,6 +219,47 @@ async fn a_reader_hears_only_the_keys_whose_values_changed_appeared_or_went() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_poll_keeps_the_sample_of_a_key_that_did_not_change_and_a_pod_that_came_back_has_a_new_one()
+ {
+    let rig = rig().await;
+    let mut reader = rig.context.reader(Kind::Pods);
+    reader.want(namespace("a"));
+    sleep(Duration::from_millis(1)).await;
+    drop(reader.drain());
+    let held = |name| reader.sample("a", name).expect("a sample");
+    let (p1, p2) = (held("p1"), held("p2"));
+
+    sleep(INTERVAL + Duration::from_secs(1)).await;
+    assert!(
+        Arc::ptr_eq(&p1, &held("p1")),
+        "the same values at the next poll"
+    );
+    assert!(Arc::ptr_eq(&p2, &held("p2")));
+
+    rig.fake.pod_usage("a", "p1", &[("main", "60m", "204Ki")]);
+    sleep(INTERVAL).await;
+    assert!(!Arc::ptr_eq(&p1, &held("p1")));
+    assert_eq!(held("p1").cpu, 60_000_000);
+    assert!(Arc::ptr_eq(&p2, &held("p2")), "the other one did not move");
+    assert_eq!(
+        Arc::strong_count(&p1),
+        1,
+        "the poll holds the answer before only while it reads the next"
+    );
+
+    rig.fake.delete_from(GROUP, "pods", Some("a"), "p2");
+    sleep(INTERVAL).await;
+    assert!(reader.sample("a", "p2").is_none());
+    rig.fake.pod_usage("a", "p2", &[("main", "1", "40Mi")]);
+    sleep(INTERVAL).await;
+    assert_eq!(held("p2"), p2, "the same values");
+    assert!(
+        !Arc::ptr_eq(&p2, &held("p2")),
+        "of the answer it came back in, not of the one it left"
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn an_answer_twigo_cannot_decode_is_unavailable_and_logged_once_at_error_with_its_code() {
     let rig = rig().await;
     let events = twigo_log::capture();
@@ -562,7 +603,7 @@ async fn an_answer_that_lands_between_the_check_and_the_drain_is_in_the_update_a
         rig.context.board(Kind::Pods).land(
             &Scope::Namespace("a".into()),
             MetricsState::Ready,
-            sample::parse(answer, Kind::Pods).unwrap(),
+            sample::parse(answer, Kind::Pods, None).unwrap(),
             None,
         );
     });
