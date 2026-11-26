@@ -64,14 +64,36 @@ pub enum Via {
     Direct,
 }
 
-/// What the driver says when a watch window starts (`watch-N.json`) and ends (`watched-N.json`):
-/// the bytes the terminal had received by then.
+/// What the driver says when a watch window starts (`watch-N.json`).
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Marker {
+struct Start {
     via: Via,
-    bytes: u64,
-    at_ms: f64,
+}
+
+/// What it says when the window ends (`watched-N.json`): the bytes the terminal had received at
+/// each of its ticks, as Unix milliseconds and a count, from the window's start.
+#[derive(Deserialize)]
+struct End {
+    series: Vec<(f64, u64)>,
+}
+
+/// The bytes the terminal had received at `at_ms`, between the two ticks round it.
+fn bytes_at(series: &[(f64, u64)], at_ms: f64) -> Result<f64, String> {
+    let covered = series
+        .first()
+        .zip(series.last())
+        .is_some_and(|(first, last)| first.0 <= at_ms && at_ms <= last.0);
+    if !covered {
+        return Err(format!(
+            "the terminal's counts do not cover the sample's {at_ms} ms"
+        ));
+    }
+    let after = series.partition_point(|(ms, _)| *ms < at_ms);
+    let (next_ms, next) = series[after];
+    let Some((last_ms, last)) = after.checked_sub(1).map(|before| series[before]) else {
+        return Ok(next as f64);
+    };
+    Ok(last as f64 + next.saturating_sub(last) as f64 * (at_ms - last_ms) / (next_ms - last_ms))
 }
 
 /// A window of the harness's CPU samples in which the terminal ran `kubectl get pods -A -w`.
@@ -79,8 +101,8 @@ pub struct Window {
     pub via: Via,
     pub start: Sample,
     pub end: Sample,
-    /// What the terminal received over the driver's window.
-    pub received: u64,
+    /// What the terminal received between the two samples.
+    pub received: f64,
     pub seconds: f64,
 }
 
@@ -164,8 +186,8 @@ impl Sessions {
         if memory.is_empty() {
             return Err("no sessions-memory-1.json".to_owned());
         }
-        let starts: Vec<Marker> = numbered(dir, "watch-N.json")?;
-        let ends: Vec<Marker> = numbered(dir, "watched-N.json")?;
+        let starts: Vec<Start> = numbered(dir, "watch-N.json")?;
+        let ends: Vec<End> = numbered(dir, "watched-N.json")?;
         let samples: Vec<(Sample, Sample)> = numbered::<Sample>(dir, "window-N-start.json")?
             .into_iter()
             .zip(numbered::<Sample>(dir, "window-N-end.json")?)
@@ -182,14 +204,18 @@ impl Sessions {
             .into_iter()
             .zip(ends)
             .zip(samples)
-            .map(|((start, end), (sample_start, sample_end))| Window {
-                via: start.via,
-                start: sample_start,
-                end: sample_end,
-                received: end.bytes.saturating_sub(start.bytes),
-                seconds: (end.at_ms - start.at_ms) / 1000.0,
+            .map(|((start, end), (sample_start, sample_end))| {
+                let received = bytes_at(&end.series, sample_end.at_ms)?
+                    - bytes_at(&end.series, sample_start.at_ms)?;
+                Ok(Window {
+                    via: start.via,
+                    seconds: (sample_end.at_ms - sample_start.at_ms) / 1000.0,
+                    start: sample_start,
+                    end: sample_end,
+                    received,
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, String>>()?;
         Ok(Sessions {
             opened: read(dir, "sessions.json")?,
             forward_read: read(dir, "forward-read.json")?,
@@ -444,7 +470,7 @@ fn session_rows(sessions: &Sessions, baseline: &Baseline) -> Vec<Row> {
         let per_second: Vec<f64> = windows
             .iter()
             .filter(|w| w.via == via)
-            .map(|w| w.received as f64 / w.seconds / 1000.0)
+            .map(|w| w.received / w.seconds / 1000.0)
             .collect();
         percents(&per_second)
     };
@@ -488,7 +514,7 @@ fn session_rows(sessions: &Sessions, baseline: &Baseline) -> Vec<Row> {
         PROXY,
         mean(&proxy).map(|v| format!("{v:.2} %")),
         format!(
-            "CPU time of the app process over 20 s, as a share of one core, while the terminal runs `kubectl get pods -A -w` through the policy proxy, window on screen; {} windows: {} %; the terminal received {} KB/s",
+            "CPU time of the app process over 20 s, as a share of one core, while the terminal runs `kubectl get pods -A -w` through the policy proxy, window on screen; {} windows: {} %; the terminal received {} KB/s over the sample",
             proxy.len(),
             percents(&proxy),
             rate(Via::Proxy),
@@ -498,7 +524,7 @@ fn session_rows(sessions: &Sessions, baseline: &Baseline) -> Vec<Row> {
         DIRECT,
         mean(&direct).map(|v| format!("{v:.2} %")),
         format!(
-            "the same, with the cluster's own kubeconfig named on the command line, in the same terminal; {} windows: {} %; the terminal received {} KB/s",
+            "the same, with the cluster's own kubeconfig named on the command line, in the same terminal; {} windows: {} %; the terminal received {} KB/s over the sample",
             direct.len(),
             percents(&direct),
             rate(Via::Direct),
@@ -565,7 +591,7 @@ pub(crate) mod fixture {
             via,
             start: sample(0.0, 0, 0),
             end: sample(20_000.0, app_ms * 1_000_000, 2_000_000_000),
-            received: 2_000_000,
+            received: 2_000_000.0,
             seconds: 20.0,
         }
     }
@@ -817,16 +843,19 @@ mod tests {
             let via = if n % 2 == 1 { "proxy" } else { "direct" };
             put(
                 &format!("watch-{n}.json"),
-                serde_json::json!({ "via": via, "bytes": 100, "atMs": 1000.0 }),
+                serde_json::json!({ "via": via, "atMs": 1000.0 }),
             );
             put(&format!("window-{n}-start.json"), at(0.0));
             put(&format!("window-{n}-end.json"), at(20_000.0));
         }
+        let series: Vec<(f64, u64)> = (0..=30u32)
+            .map(|s| (f64::from(s) * 1000.0, u64::from(100 * s)))
+            .collect();
         for n in 1..=ends {
             let via = if n % 2 == 1 { "proxy" } else { "direct" };
             put(
                 &format!("watched-{n}.json"),
-                serde_json::json!({ "via": via, "bytes": 2100, "atMs": 21_000.0 }),
+                serde_json::json!({ "via": via, "series": series }),
             );
         }
         put("idle-sessions-start.json", at(0.0));
@@ -855,9 +884,38 @@ mod tests {
             inputs.windows.iter().map(|w| w.via).collect::<Vec<_>>(),
             [Via::Proxy, Via::Direct, Via::Proxy]
         );
-        assert_eq!(inputs.windows[0].received, 2000);
+        assert_eq!(inputs.windows[0].received, 2000.0);
         assert_eq!(inputs.windows[0].seconds, 20.0);
         assert!(inputs.hidden.is_none());
+    }
+
+    #[test]
+    fn the_bytes_at_a_moment_lie_between_the_two_ticks_round_it() {
+        let series = [(1000.0, 0), (2000.0, 1000), (3000.0, 5000)];
+        assert_eq!(bytes_at(&series, 1000.0), Ok(0.0));
+        assert_eq!(bytes_at(&series, 1500.0), Ok(500.0));
+        assert_eq!(bytes_at(&series, 2000.0), Ok(1000.0));
+        assert_eq!(bytes_at(&series, 2500.0), Ok(3000.0));
+        assert_eq!(bytes_at(&series, 3000.0), Ok(5000.0));
+        assert!(bytes_at(&series, 999.0).is_err());
+        assert!(bytes_at(&series, 3001.0).is_err());
+        assert!(bytes_at(&[], 0.0).is_err());
+    }
+
+    #[test]
+    fn a_window_that_ended_before_its_sample_did_is_an_error() {
+        let dir = run_dir(4, 4);
+        let series: Vec<(f64, u64)> = (0..=10).map(|s| (f64::from(s) * 1000.0, 0)).collect();
+        std::fs::write(
+            dir.path().join("watched-2.json"),
+            serde_json::json!({ "via": "direct", "series": series }).to_string(),
+        )
+        .unwrap();
+        let error = Inputs::read(dir.path()).sessions.err().unwrap();
+        assert!(
+            error.contains("do not cover the sample's 20000 ms"),
+            "{error}"
+        );
     }
 
     #[test]

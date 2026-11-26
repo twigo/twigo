@@ -337,6 +337,33 @@ test("a watch that never shows the pods fails with the end of what the terminal 
   );
 });
 
+test("a window counts the terminal's bytes at every tick from its marker to its end, for the report to read over the harness's own sample", async () => {
+  const bench = fake();
+  asleep.on = (ms) => {
+    if (ms === 250) bench.say("x".repeat(100));
+  };
+  await bench.run();
+  const written = (name: string) =>
+    bench.written.find(([each]) => each === name)?.[1] as Record<
+      string,
+      unknown
+    >;
+  const marker = written("watch-2") as { via: string; atMs: number };
+  const { via, series } = written("watched-2") as {
+    via: string;
+    series: [number, number][];
+  };
+  expect(marker.via).toBe("direct");
+  expect(via).toBe("direct");
+  expect(series).toHaveLength(141);
+  const times = series.map(([at]) => at);
+  expect(times).toEqual([...times].sort((a, b) => a - b));
+  expect(times[0]).toBeGreaterThanOrEqual(marker.atMs);
+  expect(series[series.length - 1]?.[1]).toBe(
+    (series[0]?.[1] ?? 0) + 140 * 100,
+  );
+}, 20_000);
+
 test("the first list is the whole of it, counted by its lines and not by its bytes", async () => {
   let now = 0;
   vi.spyOn(performance, "now").mockImplementation(() => (now += 1000));

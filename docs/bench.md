@@ -27,7 +27,7 @@ The harness measures the six budgets of [ARCHITECTURE 3.8](ARCHITECTURE.md#38-pe
    It writes `sessions.json` and sleeps for 30 s.
    The harness reads the forward once through its local port (`forward-read.json`).
 8. Four windows follow, in the order proxy, direct, direct, proxy.
-   For each the driver has the terminal's watch run as the window says, writes `watch-N.json`, and sleeps for 35 s; the harness waits 5 s and samples CPU time at the start and the end of 20 s (`window-N-start.json`, `window-N-end.json`), and the driver writes `watched-N.json` when the window is over.
+   For each the driver has the terminal's watch run as the window says, writes `watch-N.json`, and sleeps for 35 s; the harness waits 5 s and samples CPU time at the start and the end of 20 s (`window-N-start.json`, `window-N-end.json`), and the driver writes `watched-N.json` when the window is over, with the bytes the terminal had received at each tick of 250 ms, from which the report reads what it received between the harness's two samples, not over the driver's 35 s.
 9. The driver stops the watch with Ctrl-C, types a command whose output only a shell at its prompt prints, waits for that output and for the terminal to go quiet, and writes `stopped.json`.
    The harness waits 10 s and samples memory five times, 2 s apart (`sessions-memory-N.json`), waits 5 s and samples CPU time at the start and the end of 20 s with the window on screen (`sessions-visible-start.json`, `sessions-visible-end.json`).
    The driver sleeps for 55 s and fails the run if the terminal printed more than 1,024 bytes meanwhile, a prompt redrawn at most; the harness fails the run if the window hid before the visible sample ended.

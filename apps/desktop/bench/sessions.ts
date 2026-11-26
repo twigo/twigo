@@ -33,6 +33,8 @@ export interface Opened {
 const LEAD_MS = 30_000;
 /** Longer than the harness's settling and sampling of one window. */
 export const WINDOW_MS = 35_000;
+/** How often a window counts what the terminal has received. */
+const TICK_MS = 250;
 /**
  * Longer than what the harness does once the watch has stopped: its settling, its five memory
  * samples and its sample of the window on screen, as `bench/harness.sh` checks.
@@ -373,9 +375,9 @@ async function openSessions(
 
 /**
  * The windows the harness samples: for each of `WATCHES`, the terminal's
- * watch is the one it names, `watch-N` says so and how many bytes the
- * terminal has had, and `watched-N` says how many it had when the window
- * ended.
+ * watch is the one it names, `watch-N` says so, and `watched-N` has how many
+ * bytes the terminal had at each tick of the window, from which the report
+ * reads what it received over the harness's own sample.
  */
 async function windows(
   probe: Probe,
@@ -395,14 +397,15 @@ async function windows(
     await watching(probe, terminal, { target, rows, via, was });
     was = via;
     const n = String(index + 1);
-    await write(`watch-${n}`, { via, bytes: terminal.bytes, atMs: Date.now() });
-    await sleep(WINDOW_MS);
+    await write(`watch-${n}`, { via, atMs: Date.now() });
+    const series: [number, number][] = [];
+    for (let waited = 0; waited < WINDOW_MS; waited += TICK_MS) {
+      series.push([Date.now(), terminal.bytes]);
+      await sleep(TICK_MS);
+    }
+    series.push([Date.now(), terminal.bytes]);
     running("the terminal", terminal);
-    await write(`watched-${n}`, {
-      via,
-      bytes: terminal.bytes,
-      atMs: Date.now(),
-    });
+    await write(`watched-${n}`, { via, series });
   }
 }
 
