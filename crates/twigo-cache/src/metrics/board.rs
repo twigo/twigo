@@ -285,6 +285,12 @@ impl Board {
         }
     }
 
+    fn answered(&self, scope: &Scope) -> Option<Arc<Samples>> {
+        let state = self.state();
+        let answer = state.requests.get(scope)?.answer.as_ref()?;
+        Some(Arc::clone(&answer.samples))
+    }
+
     fn settled(&self, id: u64) -> bool {
         let state = self.state();
         state.members.get(&id).is_none_or(|member| {
@@ -503,12 +509,13 @@ async fn poll(board: Arc<Board>, scope: Scope, mut again: watch::Receiver<()>) {
         };
         let mut abandoned = clients.connections().abandoned();
         let fetched = {
+            let previous = board.answered(&scope);
             let _turn = board
                 .turns
                 .acquire()
                 .await
                 .expect("the semaphore stays open");
-            fetch(&clients, board.kind, version, &scope).await
+            fetch(&clients, board.kind, version, &scope, previous.as_deref()).await
         };
         match fetched {
             Ok(samples) => {

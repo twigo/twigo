@@ -29,8 +29,6 @@ Findings that belong to no step yet.
   - An open pod's requests and limits come from its containers: a pod-level `spec.resources` is not read.
   - The bench's Core RSS is over its budget of 150 MB with the metric columns shown: 161 to 166 MB against 145 to 146 MB on the commit before them, and 152 MB with the Metrics API removed (`bench/harness.sh`, kind 1.37, 2026-11-14).
     The live heap grew by 2.8 MB; the rest is pages malloc keeps.
-    Every poll parses the cluster's list into a `Vec` of items and a whole new set of samples, 20,000 allocations at 5,000 pods (`crates/twigo-cache/src/metrics/fetch.rs`, `sample.rs`).
-    To fix at M2's close, with the budgets: parse the answer as a stream and keep the samples that did not change.
   - A context's follower that a list or an object holds while no watch does, or while the watch is replaced, keeps a CRD or APIService upstream that a `401` ended: following again asks only a follower that a failed credential stopped to fetch again, so a CRD installed since goes unseen until nothing holds the follower or the context's fingerprint changes (ARCHITECTURE 3.6).
   - A refusal the poller remembers survives the Metrics API being removed and installed again when the context's follower ended between that change and the next reader: the follower's channel is closed by then, and the value it held last equals the one it holds again.
   - `tests::twenty_five_plugins_that_never_answer_run_only_for_the_space_opened` in `twigo-core` failed once in three full runs of its library tests on 2026-11-13 and passed alone every time; nothing in it reads metrics.

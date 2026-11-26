@@ -219,6 +219,29 @@ async fn a_reader_hears_only_the_keys_whose_values_changed_appeared_or_went() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_poll_builds_every_sample_anew_and_holds_no_answer_but_the_last_while_it_sleeps() {
+    let rig = rig().await;
+    let mut reader = rig.context.reader(Kind::Pods);
+    reader.want(namespace("a"));
+    sleep(Duration::from_millis(1)).await;
+    drop(reader.drain());
+    let held = |name| reader.sample("a", name).expect("a sample");
+    let (p1, p2) = (held("p1"), held("p2"));
+
+    sleep(INTERVAL + Duration::from_secs(1)).await;
+    for (before, name) in [(&p1, "p1"), (&p2, "p2")] {
+        let now = held(name);
+        assert_eq!(*before, now, "the same values at the next poll");
+        assert!(!Arc::ptr_eq(before, &now), "{name}");
+        assert_eq!(
+            Arc::strong_count(before),
+            1,
+            "{name}: the poll holds the answer before only while it reads the next"
+        );
+    }
+}
+
+#[tokio::test(start_paused = true)]
 async fn an_answer_twigo_cannot_decode_is_unavailable_and_logged_once_at_error_with_its_code() {
     let rig = rig().await;
     let events = twigo_log::capture();
@@ -562,7 +585,7 @@ async fn an_answer_that_lands_between_the_check_and_the_drain_is_in_the_update_a
         rig.context.board(Kind::Pods).land(
             &Scope::Namespace("a".into()),
             MetricsState::Ready,
-            sample::parse(answer, Kind::Pods).unwrap(),
+            sample::parse(answer, Kind::Pods, None).unwrap(),
             None,
         );
     });
