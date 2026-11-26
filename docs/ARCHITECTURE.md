@@ -4,8 +4,8 @@ Twigo is an open-source desktop IDE for Kubernetes: native, fast and keyboard-fi
 It aims to show the person who runs many clusters what is wrong, why, and what changed, from the keyboard, with every change guarded (D13).
 This document fixes the architecture; the M0 spikes in `docs/spikes/` correct it wherever they measured otherwise.
 
-- Status: M0 in progress, steps 1 to 5 done, steps 6 and 7 in review, 2026-11-01
-- Stack: Tauri 2 (2.12.x), Rust with kube-rs (5.0.x, k8s-openapi 0.29), React 19 + TypeScript, Tailwind 4, shadcn/ui, pnpm monorepo
+- Status: M2 in progress, its last step, the budgets at 5k pods (3.8), under way, 2026-11-26
+- Stack: Tauri 2 (2.12.x), Rust with kube-rs (5.1.x, k8s-openapi 0.29), React 19 + TypeScript, Tailwind 4, shadcn/ui, pnpm monorepo
 - Reference code: the retired NATS IDE at `6ee327f`, whose history survives only in a local checkout; section 1 maps what carries over
 
 ## 0. Context
@@ -50,7 +50,8 @@ Decisions taken with the owner on 2026-11-14, after the [strategic review](revie
 3. **Safe by default.**
    The read-only lock, dry-run diffs and approvals are enforced in Rust at one point.
    The UI, extensions and the MCP server always go through it.
-   Child processes get a policy proxy, which guards against accidents but is not a security boundary (6.4).
+   A terminal goes through a policy proxy where its context is not read-write when it starts, or the admin's policy file says so, and runs with the person's own kubeconfig on a read-write context.
+   The proxy guards against accidents but is not a security boundary (6.4).
 4. **An open core that names no vendor.**
    The core never mentions Segla or any cloud.
    Providers attach only through the extension API.
@@ -64,20 +65,20 @@ Decisions taken with the owner on 2026-11-14, after the [strategic review](revie
 
 The sources are in the appendix.
 
-| Their problem                                                                                                                                           | Seen in                                            | Twigo's answer                                                                                                                                                |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Login wall, paid tiers for basics (hotbar, MCP, extensions), closed source                                                                              | Lens since 2023                                    | Apache-2.0, no account, every core feature free (0.2)                                                                                                         |
-| Full list of every kind with no `limit`; one watch per namespace; a full app instance per open cluster (iframes)                                        | Freelens / OpenLens                                | Shared, ref-counted Table watches per GVR and scope (per namespace, widened above 4 namespaces); one webview; per-cluster budgets (3.2)                       |
-| Unbatched global events per watch event; full snapshot per change; merge on the UI thread                                                               | Kubeli, srelens, Aptakube                          | Rust coalesces, sorts and windows; one Channel per view; acks for flow control (3.5)                                                                          |
-| Hangs with "All namespaces" on 30k pods; eager metrics on huge lists                                                                                    | Aptakube #499                                      | Rust owns sort, filter and window; metrics only for the rows in view, polled by a poller of its own (3.4, 3.6)                                                |
-| Freezes on big ConfigMaps                                                                                                                               | Aptakube #575                                      | Large values rendered lazily (3.6)                                                                                                                            |
-| Exec plugins not found from a Dock launch; kubelogin re-run every 30 s, opening browser tabs; device codes lost; plugins run for every context at start | Lens #7956, Headlamp #7879, Freelens < 2.0         | Login-shell environment, a credential runner of our own: timeout, single-flight, no retry loops, visible prompts; connect only on space activation (6.1, 6.2) |
-| Empty views after a fixed cache-sync timeout                                                                                                            | k9s PR #4023                                       | Typed view states: `syncing / ready / relisting / forbidden / unauthorized / error` (3.7)                                                                     |
-| Port-forwards tied to one pod; no failover behind a Service; random pod names restored                                                                  | k9s, Aptakube #384, #519                           | Forward targets are Services or workloads, their pods read through EndpointSlices, and a new pod is taken when the current one leaves (4.6)                   |
-| Extension API removed, rewritten or put behind a paywall; extensions break with each host React/MobX bump                                               | Lens 2024.9 and 2026.10, Freelens 2.0              | Versioned WIT kept side by side (Zed), no host libraries shared as implicit API, a fixture extension in CI (5.3)                                              |
-| In-process plugins with no boundary; malware in plugin stores                                                                                           | Headlamp, Backstage, Obsidian, VS Code (GlassWorm) | WASM sandbox, capabilities declared and granted, signed packages, nothing executes in the workbench DOM (5.3, 5.6)                                            |
-| A local proxy that breaks SOCKS, bastion and corporate proxies                                                                                          | Freelens #766, Lens #6063                          | No proxy in the UI path. The core talks to the API server directly through the kubeconfig proxy settings (6.3)                                                |
-| Projects that died with their only sponsor                                                                                                              | Octant, Monokle, Kubernetic, Seabird               | Vendor-neutral core; Segla is an extension, not a dependency (0.2)                                                                                            |
+| Their problem                                                                                                                                           | Seen in                                            | Twigo's answer                                                                                                                                                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Login wall, paid tiers for basics (hotbar, MCP, extensions), closed source                                                                              | Lens since 2023                                    | Apache-2.0, no account, every core feature free (0.2)                                                                                                                                                        |
+| Full list of every kind with no `limit`; one watch per namespace; a full app instance per open cluster (iframes)                                        | Freelens / OpenLens                                | Shared, ref-counted Table watches per GVR and scope (per namespace, widened above 4 namespaces); one webview; per-cluster budgets (3.2)                                                                      |
+| Unbatched global events per watch event; full snapshot per change; merge on the UI thread                                                               | Kubeli, srelens, Aptakube                          | Rust coalesces, sorts and windows; one Channel per view; acks for flow control (3.5)                                                                                                                         |
+| Hangs with "All namespaces" on 30k pods; eager metrics on huge lists                                                                                    | Aptakube #499                                      | Rust owns sort, filter and window; metrics only for the namespaces of the rows in view, or of the whole list while it is sorted by CPU or Memory, polled by a poller of its own (3.4, 3.6)                   |
+| Freezes on big ConfigMaps                                                                                                                               | Aptakube #575                                      | Large values rendered lazily (3.6)                                                                                                                                                                           |
+| Exec plugins not found from a Dock launch; kubelogin re-run every 30 s, opening browser tabs; device codes lost; plugins run for every context at start | Lens #7956, Headlamp #7879, Freelens < 2.0         | Login-shell environment, a credential runner of our own: timeout, single-flight, no retry loops, visible prompts; connect only on space activation (6.1, 6.2)                                                |
+| Empty views after a fixed cache-sync timeout                                                                                                            | k9s PR #4023                                       | Typed view states: `syncing / ready / relisting / forbidden / unauthorized / error` (3.7)                                                                                                                    |
+| Port-forwards tied to one pod; no failover behind a Service; random pod names restored                                                                  | k9s, Aptakube #384, #519                           | Forward targets are pods, Services or workloads, a Service's pods read through its EndpointSlices and a workload's from the Ready pods it controls, and a new pod is taken when the current one leaves (4.6) |
+| Extension API removed, rewritten or put behind a paywall; extensions break with each host React/MobX bump                                               | Lens 2024.9 and 2026.10, Freelens 2.0              | Versioned WIT kept side by side (Zed), no host libraries shared as implicit API, a fixture extension in CI (5.3)                                                                                             |
+| In-process plugins with no boundary; malware in plugin stores                                                                                           | Headlamp, Backstage, Obsidian, VS Code (GlassWorm) | WASM sandbox, capabilities declared and granted, signed packages, nothing executes in the workbench DOM (5.3, 5.6)                                                                                           |
+| A local proxy that breaks SOCKS, bastion and corporate proxies                                                                                          | Freelens #766, Lens #6063                          | No proxy in the UI path. The core talks to the API server directly through the kubeconfig proxy settings (6.3)                                                                                               |
+| Projects that died with their only sponsor                                                                                                              | Octant, Monokle, Kubernetic, Seabird               | Vendor-neutral core; Segla is an extension, not a dependency (0.2)                                                                                                                                           |
 
 Worth taking:
 
@@ -102,8 +103,8 @@ Everything NATS-specific goes.
 | Monorepo tooling: `pnpm-workspace.yaml`, `tsconfig.base.json`, `eslint.config.js` (incl. the boundary rule), Prettier, husky + commitlint, `cliff.toml`, Dependabot, `.github/workflows/ci.yml` and `pr-title.yml`, issue/PR templates, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT | root                                    | The boundary rule changes its target: the workbench must not import `packages/kube`.                                                                                                                                                                                                            |
 | `.github/workflows/release.yml`, `RELEASING.md`, `apps/twigo/scripts/set-version.mjs`                                                                                                                                                                                           | root, `apps/desktop/scripts`            | The tauri-action matrix (macOS arm64 and x64, Linux on ubuntu-22.04), notarization secrets, updater signing, a draft release with `latest.json`. **Use the bundle identifier `io.twigo.ide` and a new updater key (D10)**, so the two apps share no app-data directory or single-instance lock. |
 | Tauri plugin set (`src-tauri/src/lib.rs`): single-instance (registered first) and window-state now; updater, process, opener and dialog with the features that call them                                                                                                        | `apps/desktop/src-tauri`                | Window chrome stays: `titleBarStyle: Overlay`, `trafficLightPosition`, and the strict CSP.                                                                                                                                                                                                      |
-| `libs/ui` (shadcn components, `theme.css` tokens, sparkline, `cn`)                                                                                                                                                                                                              | `packages/ui`                           | It is the base of the design system (4.9). `code-viewer` (CodeMirror) is replaced by Monaco.                                                                                                                                                                                                    |
-| `apps/twigo/src/index.css`: typography (Inter `cv01`/`ss03`, weights 510/590, 13 px base, tabular numbers) and the dockview tab skin (selected-tab chip, no underline)                                                                                                          | `packages/ui`, `packages/workbench`     | The rest of the design language (4.9).                                                                                                                                                                                                                                                          |
+| `libs/ui` (shadcn components, `theme.css` tokens, `cn`)                                                                                                                                                                                                                         | `packages/ui`                           | It is the base of the design system (4.9). The sparkline was not carried over. `code-viewer` (CodeMirror) is replaced by Monaco.                                                                                                                                                                |
+| `apps/twigo/src/index.css`: typography (Inter `cv01`/`ss03`, weights 510/590, 13 px base, tabular numbers) and the dockview tab skin (selected-tab chip, no underline)                                                                                                          | `packages/ui`, `packages/workbench`     | Replaced, not carried over: the platform's UI font, with `ss06` for identifiers on macOS, weights 400 and 600, 13 px body text and the bundled JetBrains Mono, and a connected active tab (4.9).                                                                                                |
 | `ErrorBoundary`, `PanelBoundary`, `store/zoom.ts`, `store/commandHistory.ts`, `lib/updater.ts` + `store/updateCheck.ts`, `shell/menu.ts` (native menu built from commands), `lib/appVersion.ts`                                                                                 | `packages/workbench`                    | `menu.ts` changes: it is built from the menu registry (5.1), not a hand-written list. `store/zoom.ts` became `src/zoom.ts`, which keeps the factor in the app's state while `apps/desktop` applies it (4.1).                                                                                    |
 | Typed IPC errors: Rust `Error::kind` + TS `IpcError` (`lib/api.ts`, `nats/error.rs`)                                                                                                                                                                                            | `crates/twigo-ipc`, `packages/protocol` | Error codes and kinds are generated from Rust instead of written by hand ([decision](decisions/error-codes.md)).                                                                                                                                                                                |
 | Bounded coalescing with a `dropped` counter (`nats/subscription.rs`)                                                                                                                                                                                                            | `twigo-sessions` (logs)                 | The same rule holds: never lose data silently, show the gap.                                                                                                                                                                                                                                    |
@@ -124,7 +125,7 @@ Everything NATS-specific goes.
 | `components/views/VirtualTree.tsx`, `components/editor/MessageTable.tsx` (TanStack Virtual)              | Explorer tree, resource table                                                     | The table becomes window-driven: Rust sends only the visible window (3.4).                                                                                                                                                                                  |
 | `store/connScoped.ts` (teardown registry)                                                                | Space and context teardown registry                                               | Same pattern, keyed by context.                                                                                                                                                                                                                             |
 | Connection manager UX (`ConnectionPicker`, `ConnectionSwitcher`, import and write-back of NATS contexts) | Cluster catalog (5.5)                                                             | Same promise: **read what the CLI already has**, here the kubeconfig. Twigo never writes the kubeconfig except through explicit commands.                                                                                                                   |
-| `emit.rs` (global events)                                                                                | Channels per subscription + a few typed global events                             | Tauri documents its events as "not designed for low latency or high throughput".                                                                                                                                                                            |
+| `emit.rs` (global events)                                                                                | Channels per subscription and per follower                                        | Tauri documents its events as "not designed for low latency or high throughput", so Twigo uses none.                                                                                                                                                        |
 | `components/workbench/Toaster.tsx` + `store/toasts.ts`                                                   | `Toast` and `notify` in `packages/ui`; the shell mounts `<Toaster>`               | sonner positions, stacks and times the toasts, so the hand-written store goes; the look and the lifetimes stay, and a repeat with the same key replaces its toast                                                                                           |
 
 ### Drop
@@ -152,13 +153,15 @@ Everything NATS-specific goes.
 │ twigo-log       diagnostics log (twigo.log) · panic hook · the audit log's file       │
 │ twigo-panic     supervisor of the app-wide duties · what ends an item · the seam      │
 │                                                                                       │
-│ twigo-core      spaces · settings · catalog · command bus · policy proxy · approval   │
-│                 broker · state                                                        │
+│ twigo-core      spaces · catalog · command bus and its actions · policy proxy ·       │
+│                 approval broker · port-forward manager · state                        │
 │  ├─ twigo-kube      kubeconfig source · client factory · credential runner            │
-│  │                  discovery + OpenAPI cache · operations (apply, scale, drain…)     │
+│  │                  discovery + OpenAPI cache · the apply configuration of an edit    │
 │  │                  └─ policy layer (tower) ◄── twigo-policy: modes · approval · audit│
 │  ├─ twigo-cache     watch hub: upstream watches → row stores → query views → batcher  │
-│  ├─ twigo-sessions  logs · exec/attach · port-forward manager · local pty             │
+│  ├─ twigo-sessions  logs · exec/attach · a port-forward's data path · local pty       │
+│  ├─ twigo-describe  Overview documents of objects · pure                              │
+│  ├─ twigo-helm      Helm releases read from their Secrets · pure                      │
 │  ├─ twigo-ext-host  wasmtime, one store per extension · capability gate · registry    │
 │  ├─ twigo-mcp       MCP server (rmcp) on a per-user local socket                      │
 │  └─ twigo-env       login-shell environment for every child process                   │
@@ -203,7 +206,7 @@ The hook of `twigo-log` records every panic first (4.10).
   An answer that comes once Twigo has begun to end does nothing, so an exit never turns into a restart.
 - **A joined task's panic** goes on as it was (`twigo_panic::joined`, and `twigo_panic::blocking` for a closure on the blocking pool), so the hook records it once.
 - **The rest** is left to tokio, and the hook's record is all its panic leaves: among it the forward's pump, whose row then stops changing, the discovery follower, the metrics poll, a credential plugin's run, whose status stays `running`, the sign-in and fingerprint followers, the terminals' kubeconfig watcher threads, the per-window followers and the proxy's connections.
-- `TWIGO_PANIC=<name>` makes the duty or the item of that name panic each time it runs, and the kubeconfig watch at each change of its files, in a build with the app's `inject` feature, which turns on `twigo-panic`'s and which a release build never has: the names are the duties above, `supervisor`, `forward restore`, `list`, `helm releases`, `helm release`, `helm decode`, `object`, `logs`, `log stream`, `pod shell`, `terminal`, `forward`, `forward recheck`, `hub upstream`, `store lock`, `plan run`, `command`, `policy proxy`, `proxy relock`, and the threads `state writer` and `kubeconfig watch`.
+- `TWIGO_PANIC=<name>` makes the duty or the item of that name panic each time it runs, and the kubeconfig watch at each change of its files, in a build with the app's `inject` feature, which turns on `twigo-panic`'s and which a release build never has: the names are `catalog sources`, `seen contexts`, `terminal offers`, `unlock expiry`, `forward modes` and, where the app gives a network watch, `network` for the duties, then `supervisor`, `forward restore`, `list`, `helm releases`, `helm release`, `helm decode`, `object`, `logs`, `log stream`, `pod shell`, `terminal`, `forward`, `forward recheck`, `hub upstream`, `store lock`, `plan run`, `command`, `policy proxy`, `proxy relock`, and the threads `state writer` and `kubeconfig watch`.
 
 A wasmtime trap ends the extension call, not the app.
 Each webview is already a separate OS process managed by the system.
@@ -211,8 +214,9 @@ The only extra processes Twigo needs are the ones it must run anyway: exec plugi
 
 **Multiple windows.**
 One core process serves every window.
-List subscriptions are keyed by `(window, view)`, so a window reaches only its own, and closing or reloading it drops them: a page that starts to load has none of the lists of the page it replaces.
-The followers of the catalog, the credentials, the resources, the shell and the keyboard are kept one per window, replaced when its next page subscribes and dropped with the window.
+Every subscription of a window, its lists, open objects and releases, logs sessions, shells and terminals, plans, asks and offers, is keyed by the window, so a window reaches only its own, and closing or reloading it ends them: its asks are denied, and a page that starts to load has none of the page it replaces.
+Port-forwards outlive windows: a window that goes stops following them, and they run on.
+The followers of the catalog, the credentials, the resources, the shell, the keyboard, Twigo's own problems, the asks, the forwards and the terminals' offers are kept one per window, replaced when its next page subscribes and dropped with the window.
 A send ends a follower only when it fails, which Tauri 2.12.7 does only once the event loop is gone: a reloaded page and a closed window both take it ([`Channel`](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.7/crates/tauri/src/ipc/channel.rs#L428-L438), [`send_user_message`](https://github.com/tauri-apps/tauri/blob/tauri-runtime-wry-v2.12.5/crates/tauri-runtime-wry/src/lib.rs#L259-L276)).
 Detached editor windows (VS Code's auxiliary windows) come after the MVP.
 
@@ -222,11 +226,11 @@ Detached editor windows (VS Code's auxiliary windows) come after the MVP.
 twigo/
 ├─ apps/desktop/              Tauri app: thin glue; src-tauri only wires crates into commands/channels
 ├─ crates/
-│  ├─ twigo-core/             app services: spaces, settings layers, catalog, command bus and its actions, policy proxy and approval broker
-│  ├─ twigo-kube/             contexts, client factory, credential runner, discovery/OpenAPI cache
+│  ├─ twigo-core/             app services: spaces, catalog, state store, command bus and its actions, policy proxy and approval broker, open objects and Helm releases, the port-forward manager, the terminals' kubeconfigs and their offers, the problem report; settings layers later (4.8)
+│  ├─ twigo-kube/             contexts, client factory, credential runner, discovery/OpenAPI cache, the apply configuration of an edit (6.5)
 │  ├─ twigo-cache/            watch hub (upstreams, row stores, query views, batching), the discovery it follows, the metrics poller
 │  ├─ twigo-describe/         describers by GroupKind: an object and its related facts → the Overview document (4.3)
-│  ├─ twigo-sessions/         logs, exec/attach, port-forward manager, pty terminal
+│  ├─ twigo-sessions/         logs, exec/attach, a port-forward's data path, pty terminal
 │  ├─ twigo-policy/           read-only modes, authorize(), what an approval covers, audit log, redaction
 │  ├─ twigo-quantity/         Kubernetes resource quantities: the describers and the metrics poller read them alike
 │  ├─ twigo-env/              login-shell environment resolution
@@ -235,9 +239,9 @@ twigo/
 │  ├─ twigo-ipc/              protocol types (serde) + TS codegen (ts-rs); channel framing
 │  ├─ twigo-keyboard/         active keyboard layout and its changes, from TIS, xkbcommon and ToUnicodeEx
 │  ├─ twigo-netmon/           wake from sleep and network changes, from IOKit, SystemConfiguration, logind and rtnetlink
-│  ├─ twigo-ext-host/         wasmtime host, manifests, capability enforcement, registry client
-│  ├─ twigo-ext-api/          WIT package `twigo:extension` (versioned dirs) + Rust guest SDK
-│  ├─ twigo-mcp/              MCP server + `twigo mcp` stdio shim
+│  ├─ twigo-ext-host/         empty until the extension runtime (7.2): wasmtime host, manifests, capability enforcement, registry client
+│  ├─ twigo-ext-api/          empty until the extension runtime (7.2): WIT package `twigo:extension` (versioned dirs) + Rust guest SDK
+│  ├─ twigo-mcp/              empty until M3 (7.4): MCP server + `twigo mcp` stdio shim
 │  └─ twigo-helm/             Helm releases read from their Secrets: decoded, described, their secret-grade parts masked; CLI bridge later
 ├─ packages/
 │  ├─ ui/                     design system (from legacy libs/ui)
@@ -245,7 +249,7 @@ twigo/
 │  ├─ kube/                   explorer, resource tables, resource editors, YAML/diff, logs, terminal views
 │  ├─ protocol/               generated TS types + typed invoke/channel client + mock backend
 │  └─ utils/
-├─ extensions/                first-party extensions built on the public API (fixture + dogfood)
+├─ extensions/                later (7.2): first-party extensions built on the public API (fixture + dogfood)
 ├─ bench/                     kind/kwok cluster scripts, perf harness (harness.sh)
 │  ├─ harness/                twigo-bench: churn generator, process sampler, report
 │  └─ ipc/                    IPC bench: the isolation pattern's cost, the tier-2 frame probe
@@ -263,8 +267,8 @@ Why these crates:
   `twigo-kube` builds its gate into every client, so the crate holds no Kubernetes client of its own.
   What an approval covers is its too, while the policy proxy's server and the approval broker live in `twigo-core`, since they need the context's clients and the windows.
 - `twigo-log` holds what logging needs once, so no crate sets up a subscriber of its own: the rotating file that both the diagnostics log and the audit log write through, the subscriber with its run-time filter, the panic hook, the facts of a run and the list of the problems of Twigo's own files (4.10), which is why it depends on `twigo-ipc` for `IpcError`.
-  Every other crate logs through `tracing`, and depends on `twigo-log` for no more than a repeated failure's count and the problems it reports.
-- `twigo-panic` holds what containing a panic needs once, so the crates that spawn an item or join a task do not each write it: it depends on no other crate of Twigo, and `twigo-kube`, `twigo-cache`, `twigo-sessions` and `twigo-core` use it.
+  Every other crate logs through `tracing` and takes from `twigo-log` no more than a repeated failure's count and the problems it reports, except `twigo-policy`, whose audit log writes through the rotating file, and `twigo-core`, whose problem report reads the facts of a run and the places of panics.
+- `twigo-panic` holds what containing a panic needs once, so the crates that spawn an item or join a task do not each write it: it depends on no other crate of Twigo, and `twigo-kube`, `twigo-cache`, `twigo-sessions`, `twigo-core` and the app use it.
 - `twigo-keyboard` keeps the OS's keyboard APIs out of `apps/desktop`.
   It needs no Tauri, and its tests read named layouts without a window.
 - `twigo-netmon` keeps the OS's power and network notifications out of the transport, which only learns that the machine woke or the network changed.
@@ -274,15 +278,15 @@ It translates Tauri commands and channels into calls on `twigo-core`.
 
 ### 2.3 Frontend packages
 
-| Package              | Owns                                                                                                                                                                                                                                                                                                                                                             | May import                    |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
-| `packages/ui`        | Tokens, and primitives (shadcn/Radix) for every recurring pattern: actions and their menus, tones and status dots, counts, keys, fields, segmented controls, view switches (`TabBar`), the data grid, the tree, the line list and styled text, the histogram, property lists, sections, callouts and banners, toasts (`notify`), empty, loading and error states | —                             |
-| `packages/workbench` | Layout parts and the panel's own dockview, contribution registries, command, menu, keybinding and context-key services, the list service and its `list.*` commands, quick access, the toaster and notification centre (4.7), settings UI, spaces UI, editor service over the editor area and the panel                                                           | `ui`, `protocol`              |
-| `packages/kube`      | Every Kubernetes view and editor, column rules and cells, status entries; registers into the workbench registries                                                                                                                                                                                                                                                | `ui`, `workbench`, `protocol` |
-| `packages/protocol`  | Generated request and response types, a channel client with seq/ack, and a **mock backend** that runs the UI in a plain browser on fixtures (design reviews, component tests)                                                                                                                                                                                    | —                             |
-| `packages/utils`     | Pure helpers without React or IPC, such as formatters                                                                                                                                                                                                                                                                                                            | —                             |
-| `apps/desktop/src`   | Bootstraps the workbench, registers `kube`, and applies the interface zoom to the webview (`zoom.ts`)                                                                                                                                                                                                                                                            | all                           |
-| `apps/desktop/bench` | The bench mode's entry and driver, built only by `vite build --mode bench` ([bench](bench.md))                                                                                                                                                                                                                                                                   | all                           |
+| Package              | Owns                                                                                                                                                                                                                                                                                                                                                                                                                                                           | May import                    |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `packages/ui`        | Tokens, and primitives (shadcn/Radix) for every recurring pattern: actions and their menus, tones and status dots, counts, keys, fields, segmented controls, view switches (`TabBar`), the data grid, the tree, the line list and styled text, the histogram, property lists, sections, callouts and banners, toasts (`notify`), empty, loading and error states                                                                                               | —                             |
+| `packages/workbench` | Layout parts and the panel's own dockview, contribution registries, command, menu, keybinding and context-key services, the list service and its `list.*` commands, quick access, the command bus's friction, countdowns and undo, the asks of the approval broker, the toaster (4.7), Twigo's own problems and Report a Problem (4.10), spaces UI, editor service over the editor area and the panel; the notification centre (4.7) and the settings UI later | `ui`, `protocol`              |
+| `packages/kube`      | Every Kubernetes view and editor, column rules and cells, status entries; registers into the workbench registries                                                                                                                                                                                                                                                                                                                                              | `ui`, `workbench`, `protocol` |
+| `packages/protocol`  | Generated request and response types, a channel client with seq/ack, and a **mock backend** that runs the UI in a plain browser on fixtures (design reviews, component tests)                                                                                                                                                                                                                                                                                  | —                             |
+| `packages/utils`     | Pure helpers without React or IPC, such as formatters                                                                                                                                                                                                                                                                                                                                                                                                          | —                             |
+| `apps/desktop/src`   | Bootstraps the workbench, registers `kube`, and applies the interface zoom to the webview (`zoom.ts`)                                                                                                                                                                                                                                                                                                                                                          | all                           |
+| `apps/desktop/bench` | The bench mode's entry and driver, built only by `vite build --mode bench` ([bench](bench.md))                                                                                                                                                                                                                                                                                                                                                                 | all                           |
 
 Every package may import `utils`.
 The ESLint boundary rule from legacy now enforces the whole table; above all, `workbench` must not import `kube`.
@@ -295,25 +299,25 @@ Contributions are data that the workbench renders, menus become `ui` actions thr
 
 ```
 kube-apiserver
-  │ Table list/watch           single-object GET + watch      metadata watch
+  │ Table list/watch           single-object list + watch     metadata watch
   │ (as=Table, includeObject=  (editor open)                  (namespaces, CRDs, APIServices,
   │  Metadata)                                                 owner index)
   ▼
 Upstream  (context × GVR × scope × server-side selectors)   ref-counted · linger 60 s · per-cluster budget
   │ decode rows; managedFields skipped at deserialisation; typed cells
   ▼
-RowStore  uid → Row { meta-lite (name, ns, uid, rv, labels, owners, created, received), cells[] }
+RowStore  uid → Row { meta-lite (name, ns, uid, rv, labels, owners, created, received, generated), cells[] }
   │ change set
   ▼
 QueryView  (per subscription: namespaces, label filter, text filter, values, groupBy, sort, window)   incremental ordered index
   │ window diff
   ▼
 Batcher   coalesce by uid · flush ≤ 50 ms · one unacked batch · paused while hidden
-  │ Channel (JSON): { seq, total, columns?, window?:{start, ids}, upserts, status, groups? }
+  │ Channel (JSON): { seq, view, total, columns?, window?:{start, ids}, upserts, status, parts?, counts?, groups?, metrics? }
   ▼
 View store (frontend)   Map<id, Row> + version, read via useSyncExternalStore
   ▼
-Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column state only)
+Virtualized grid (packages/ui DataGrid over TanStack Virtual, fixed row height)
 ```
 
 ### 3.2 Upstreams: what is watched
@@ -327,6 +331,7 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
   - Background tabs and inactive spaces unsubscribe.
     Their upstream lingers, then stops.
   - Coming back resumes from the last `resourceVersion`, or relists on `410 Gone`.
+  - A session holds the upstreams it reads while it runs, shown or not: a logs tab its target's pods, and a port-forward its pod, Service and EndpointSlices or workload while it has a connection or checks its target, in any space and after its window closed (4.6).
 - **Scope follows the namespace selection.**
   - One upstream per selected namespace, so looking at 200 pods in one namespace never watches the cluster's 50k.
   - More than a few selected namespaces (default 4) switch to one cluster-wide upstream, if the person may list the kind cluster-wide.
@@ -363,7 +368,7 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
   A label selector goes to the server where what a list wants is a few of many objects of a kind, as the Secrets of Helm's releases are among a cluster's Secrets: the list and the watch ask for `labelSelector=owner=helm`, Helm's own query, and nothing else of the kind is fetched or watched.
   The 500 Secrets of 50 releases of 10 revisions in one namespace take, as metadata with that selector, 23,839 B on the wire (gzip) and 388,442 B in the hub, and as objects 4,487,710 B and 6,701,455 B (kind 1.37.0, 2026-11-22, a scratch example that asks for a page of 500 as the hub does, the heap counted by dhat).
 - **One HTTP/2 connection per cluster.**
-  kube-rs's default client speaks HTTP/1.1 only: hyper is built with `http1` alone, as checked in `kube-client/Cargo.toml` at 4.2.
+  kube-rs's default client speaks HTTP/1.1 only: hyper is built with `http1` alone, as checked in `kube-client/Cargo.toml` at 5.1.0.
   So each context has two shared hyper-util clients of Twigo's own: an HTTP/2 one for requests, watches and followed logs, and an HTTP/1.1 one for exec, attach and port-forward, whose WebSocket upgrade fails over HTTP/2 with 400.
   Every actor's kube clients sit over them (6.2, 6.4, [HTTP/2 spike](spikes/http2.md)).
 - **Per-cluster budgets.**
@@ -431,7 +436,7 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
     On macOS a change of routes alone, without an address, goes unseen.
     Chromium closes every HTTP/2 session on any address change, which Docker's interfaces set off on Linux; here containers, kind's bridge and VPNs for other networks leave connections alone, while a Wi-Fi switch or a VPN in front of the cluster retires them.
     A move to another network that keeps the address goes unseen until a ping fails, 45 s at most.
-  - A wake and a moved route of a live api connection are also counted apart, as a change of the network (`Connections::network`), which ends the sessions of exec and attach (4.6): their sockets are on the sessions client, whose connections a retirement does not reach, and a retirement from a new certificate or a failed probe says nothing of them.
+  - A wake and a moved route of a live api connection are also counted apart, as a change of the network (`Connections::network`), which ends the sessions of exec and attach and every open connection of a port-forward (4.6): their sockets are on the sessions client, whose connections a retirement does not reach, and a retirement from a new certificate or a failed probe says nothing of them.
     Only the api client's connections are tracked, so a context with a shell and no live api connection hears a wake but no network change: its shell ends later, when the kernel fails its socket, as `ConnectionLost` (how long that takes: not measured).
   - Retiring poisons the connection: the pool keeps a dead connection that still looks open, and every actor's client holds a clone of that pool, so rebuilding one client would not reach the others.
     The streams on it run until their upstreams re-watch.
@@ -474,11 +479,11 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
 
 ### 3.3 Three upstream kinds
 
-| Kind         | Request                                                                                                                                                                                                                | Used for                                                                                                                                                                                                             |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Table**    | `GET …?watch=true&allowWatchBookmarks=true&includeObject=Metadata` with `Accept: application/json;as=Table;v=v1;g=meta.k8s.io, application/json`, read through `Client::send`, decoded by its `Content-Encoding` (3.2) | Every list, for built-in kinds and CRDs alike. The server computes the columns, the same as `kubectl get -w`.                                                                                                        |
-| **Metadata** | List and watch with `Accept: application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1` and `…as=PartialObjectMetadata…`, managedFields skipped at deserialisation                                              | Indexes: CRDs and APIServices (discovery invalidation), and owner references for the "Related" tab. The Secrets of Helm's releases, selected by `labelSelector=owner=helm`: a release's row is made of their labels. |
-| **Object**   | List and watch with `fieldSelector=metadata.name=…`, another field selector or none, as a Table with `includeObject=Object`: whole objects with their cells                                                            | An open editor: live YAML, overview, conflict detection; an object's events; what its describer reads while it is open, such as a namespace's ReplicaSets or EndpointSlices, or a node's pods by `spec.nodeName`.    |
+| Kind         | Request                                                                                                                                                                                                                | Used for                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Table**    | `GET …?watch=true&allowWatchBookmarks=true&includeObject=Metadata` with `Accept: application/json;as=Table;v=v1;g=meta.k8s.io, application/json`, read through `Client::send`, decoded by its `Content-Encoding` (3.2) | Every list, for built-in kinds and CRDs alike. The server computes the columns, the same as `kubectl get -w`.                                                                                                                                                                                                                                                                |
+| **Metadata** | List and watch with `Accept: application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1` and `…as=PartialObjectMetadata…`, managedFields skipped at deserialisation                                              | Indexes: CRDs and APIServices (discovery invalidation), and owner references for the "Related" tab. The Secrets of Helm's releases, selected by `labelSelector=owner=helm`: a release's row is made of their labels. A delete's objects until they go, a drain's pods of its node by `spec.nodeName`, and the ReplicaSets or Jobs through which a workload's pods are found. |
+| **Object**   | List and watch with `fieldSelector=metadata.name=…`, another field selector or none, as a Table with `includeObject=Object`: whole objects with their cells                                                            | An open editor: live YAML, overview, conflict detection; an object's events; what its describer reads while it is open, such as a namespace's ReplicaSets or EndpointSlices, or a node's pods by `spec.nodeName`. The target of a logs tab or a port-forward and its pods: a pod, a Service and its namespace's EndpointSlices, or a workload and its namespace's pods.      |
 
 All three run on the hub's own list and watch rather than kube-runtime's `watcher`, which 5.0 cannot start from a `resourceVersion` once it is recreated, nor tell to re-watch on wake or after a probe: it reopens a quiet watch only after `timeoutSeconds` and 5 s, without a probe ([`next_with_idle_timeout`](https://github.com/kube-rs/kube/blob/5.0.0/kube-runtime/src/watcher.rs#L529-L548)).
 
@@ -584,7 +589,7 @@ Anything else in the query, the space, the resource, the namespaces, the selecto
   It sends the pod columns once a list knows them, from its first page on, and an empty list of columns before, as Rust does.
 - Multi-context spaces (7.2): the query view merges the upstreams of several contexts and adds a Context column.
   Row identity is `context/namespace/name` already, so one-context spaces, all that M1 serves, need no change then.
-- Selections and bulk actions refer to row IDs, so "select all 5,000" never ships 5,000 rows.
+- Marks are row IDs, so a mark costs the webview no row; a delete of several sends one `ResourceRef` per marked row, and no command marks every row of a list.
 
 This scales to 50k rows.
 Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread after every batch.
@@ -593,8 +598,8 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
 
 - One Tauri `Channel` per subscription.
   Channels deliver in order.
-  Payloads over 8 KB travel via the `ipc://` fetch path, not `eval`.
-  Global events are used only for rare notices: catalog, settings, policy prompts.
+  A JSON payload of 8 KiB or more, and a binary one of 1 KiB or more, travels by the `ipc://` fetch path, not `eval` ([thresholds](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.7/crates/tauri/src/ipc/channel.rs#L34-L38), [dispatch](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.7/crates/tauri/src/ipc/channel.rs#L292-L306)).
+  Tauri's global events are not used: the catalog, the asks of the approval broker and every other notice go over a Channel of a window's follower (2.1).
 - Coalescing by uid inside a flush window, in the row store's feed (3.4), which holds the keys and reads each row as it is at the flush:
   - the latest version wins;
   - a delete wins;
@@ -617,7 +622,7 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
 ### 3.6 Opening an object, and what is never pre-fetched
 
 - **Opening an object.**
-  `GET` the full object, then start an Object upstream for live changes.
+  An Object upstream lists the object by `metadata.name` and watches it from that list (3.3); no `GET` comes before it.
   - managedFields stay on the Rust side: they serve conflict display and are hidden in the editor.
   - Secrets keep their values in Rust.
     Only keys and sizes are sent, until the user explicitly reveals a value.
@@ -698,7 +703,7 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     The bytes of the namespaces' lists pass the cluster's at the 11th, since the ten largest hold nearly all the pods and each request adds its own.
     The time of one row differed between the runs by up to 1.2 times (the 19 namespaces: 10.3, 10.9 and 11.9 ms), and the namespaces' lists never took as long as the cluster's.
   - Sorted by CPU or Memory, a list reads every namespace of the list, not the window's: the one exception to "only the window", since rows without a sample would otherwise sort wherever the window left them and the order would move as it does.
-    A list of all namespaces sorted so asks for the cluster in one request as well (decision 69) and its namespaces as the fallback: the cluster covers the namespaces' and the pods' readers only while it answers, so when it is forbidden or unavailable they are listed themselves and say their own state.
+    A list of all namespaces sorted so asks for the cluster in one request as well and its namespaces as the fallback: the cluster covers the namespaces' and the pods' readers only while it answers, so when it is forbidden or unavailable they are listed themselves and say their own state.
     A list of chosen namespaces never asks for the cluster, nor does a list of all namespaces that the hub resolved to the namespaces the person may list (3.2): a person who may not list the pods cluster-wide is taken to be refused their metrics there too, so the request would only repeat every 15 s to be refused.
   - A list's first batch has what the poller already holds.
     A list that joins a scope another reads, as a new subscription does while the old one is still open (4.4), has the scope's samples and state in its first batch, with no request.
@@ -794,7 +799,7 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     A first load of `api/v1` (1,604,476 bytes) took a fresh process from 11,456–11,504 KiB resident to 19,024–19,312 KiB, and one of `apis/apps/v1` (719,385 bytes) from 11,472–11,536 KiB to 16,112–16,224 KiB.
     The allocator kept it after the document was dropped, and ten more loads of `api/v1` added 1,792 to 1,968 KiB (`cargo run --release -p twigo-kube --example openapi_memory -- v1 Pod`, three runs each, release build, macOS, kind 1.37, 2026-11-08).
 - **Never pre-fetched.**
-  Counts for every kind, full lists of CRDs (they can be tens of MB), large ConfigMap values (rendered lazily), metrics for invisible rows.
+  Counts for every kind, full lists of CRDs (they can be tens of MB), large ConfigMap values (rendered lazily), and metrics of namespaces with no row in view, but for a list sorted by CPU or Memory (above).
 
 ### 3.7 View states
 
@@ -838,7 +843,8 @@ What needs the rows of every part, as an object's page and a workload's pods do,
 
 ### 3.8 Performance budgets and the benchmark
 
-These are targets, measured on a kwok cluster, which simulates nodes and pods without kubelets, at 5k, 20k and 50k pods with churn:
+These are targets on a kwok cluster, which simulates nodes and pods without kubelets, at 5k and 50k pods with churn.
+The harness measures the 5k column; the 50k one has not been measured.
 
 | Metric                                                   | Target (5k pods)     | Target (50k pods)     |
 | -------------------------------------------------------- | -------------------- | --------------------- |
@@ -854,6 +860,7 @@ Any page that repaints, a blank one with one changing number included, holds abo
 They are children of launchd, not of the app, so measuring per process under-reports a Tauri app by about half.
 
 `bench/harness.sh` measures them at 5k pods on macOS ([bench](bench.md)).
+Runs at 20k and 50k pods are not built yet ([what is left](bench.md#what-is-left)), and neither are the replays of other clients' failures below.
 It builds the app's bench mode in release, runs a churn generator at 100 changes/s against kwok, launches the app on the cluster's kubeconfig, whose webview driver opens the space of its one context, then opens, scrolls, sorts and watches the pod list, and prints one row per metric with its value, target, status and what it measured:
 
 - **First paint** runs from opening the list to its first rows painted; the space's discovery starts as the space opens, before the list, so only what remains of it counts.
@@ -868,12 +875,11 @@ It builds the app's bench mode in release, runs a churn generator at 100 changes
 The report judges every metric but those three, and fails the run on a missed target.
 CI does not run the harness yet: it needs an unlocked GUI session, since WebKit paints nothing behind a locked screen, and Linux needs the sampler's WebKitGTK branch.
 
-The bench also replays the cases that broke other clients, and one that loopback cannot show:
+Of the cases that broke other clients, two are replayed by tests outside the bench: an API-server restart during a watch (`crates/twigo-cache/tests/restart_live.rs`) and 25 contexts whose exec plugins never answer, of which only the opened space's runs (`twenty_five_plugins_that_never_answer_run_only_for_the_space_opened` in `crates/twigo-core/src/tests.rs`).
+The bench is to replay the others, one of which loopback cannot show; none is built yet:
 
 - all namespaces on 30k pods;
 - a ConfigMap with 2,000 keys;
-- 25 contexts whose exec plugins time out;
-- an API-server restart during a watch;
 - packet loss on the one HTTP/2 connection, for head-of-line blocking ([HTTP/2 spike](spikes/http2.md)).
 
 ## 4. Workbench and UI model
