@@ -926,6 +926,41 @@ async fn a_sort_by_a_metric_in_place_holds_its_first_order_for_the_scopes_it_new
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_scope_a_401_stopped_is_asked_again_by_the_next_change_of_the_view() {
+    let fake = cluster(true).await;
+    let namespace_a = "/apis/metrics.k8s.io/v1beta1/namespaces/a/pods";
+    fake.state().unauthorized.insert(namespace_a.to_owned());
+    let mut list = Metered::start(fake, None).await;
+    list.batcher().set_window(0, 3, true);
+    let down = list.watch(Duration::from_secs(5)).await;
+    assert_eq!(
+        down.last().and_then(|batch| batch.metrics),
+        Some(MetricsState::Unavailable)
+    );
+    let stopped = polls(&list.fake, "a");
+    list.watch(Duration::from_secs(600)).await;
+    assert_eq!(
+        polls(&list.fake, "a"),
+        stopped,
+        "nothing asks again by itself"
+    );
+
+    list.fake.state().unauthorized.clear();
+    list.batcher()
+        .set_view(1, Shape::of(|view| view.text = Some("p".to_owned())));
+    let back = list.watch(Duration::from_secs(5)).await;
+    assert_eq!(polls(&list.fake, "a"), stopped + 1);
+    assert_eq!(
+        back.last().and_then(|batch| batch.metrics),
+        Some(MetricsState::Ready)
+    );
+    assert_eq!(
+        list.cpus(&back, "kind-test/a/p1").last(),
+        Some(&Cell::Int(2_000_000))
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_list_of_all_namespaces_sorted_by_a_metric_asks_the_cluster_and_its_namespaces_when_refused()
  {
     let sort = || Sort {

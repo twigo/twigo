@@ -896,6 +896,43 @@ fn only_a_change_of_the_text_asks_for_the_rows_again() {
     }
 }
 
+#[test]
+fn a_change_that_comes_while_every_row_is_awaited_is_in_the_reset_that_follows() {
+    let mut rig = pods_rig(&query());
+    let asked = Shape::of(|view| {
+        view.text = Some("web".to_owned());
+        view.sort = Some(Sort {
+            column: "Name".to_owned(),
+            descending: true,
+        });
+    });
+    assert!(rig.view.reshape(1, asked), "the text asks for every row");
+
+    for (namespace, name) in [
+        ("a", "web-1"),
+        ("a", "web-2"),
+        ("b", "web-3"),
+        ("b", "web-4"),
+    ] {
+        rig.store.upsert(pod(namespace, name, "Running", "1"));
+    }
+    rig.flush_from(false, |_, _| None);
+    rig.store.delete(&pod("a", "web-2", "Running", "1"));
+    rig.store.delete(&pod("b", "web-3", "Running", "1"));
+    rig.flush_from(false, |_, _| None);
+
+    let batch = rig.flush_from(true, |_, _| None).unwrap();
+    assert_eq!(ids(&batch), ["kind-test/b/web-4", "kind-test/a/web-1"]);
+    assert_eq!(batch.total, 2);
+    assert_eq!(
+        upserts(&batch),
+        [
+            ("kind-test/b/web-4", &ipc::Cell::Text("1".to_owned())),
+            ("kind-test/a/web-1", &ipc::Cell::Text("1".to_owned()))
+        ]
+    );
+}
+
 fn naive(rows: &HashMap<String, Row>, query: &ListQuery) -> Expected {
     fn sorted(counts: HashMap<String, u32>) -> Vec<ValueCount> {
         let mut counts: Vec<ValueCount> = counts

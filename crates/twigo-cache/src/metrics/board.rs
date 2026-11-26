@@ -174,6 +174,15 @@ struct Request {
 }
 
 impl State {
+    /// Restarts the tasks that a credential failure ended, for the requests that answer `wants`.
+    fn ask_again<'a>(&self, wants: impl IntoIterator<Item = &'a Scope>) {
+        for want in wants {
+            if let Some(request) = self.serving(want) {
+                request.again.send_replace(());
+            }
+        }
+    }
+
     /// The request that answers a want: the cluster's while it answers, else the want's own or,
     /// for a pod, its namespace's.
     fn serving(&self, want: &Scope) -> Option<&Request> {
@@ -264,11 +273,7 @@ impl Board {
         let added: Vec<Scope> = scopes.difference(&member.wants.scopes).cloned().collect();
         member.wants = Wants::new(scopes);
         self.replan(state);
-        for want in &added {
-            if let Some(request) = state.serving(want) {
-                request.again.send_replace(());
-            }
-        }
+        state.ask_again(&added);
         let member = &state.members[&id];
         for want in &added {
             for (scope, request) in &state.requests {
@@ -282,6 +287,13 @@ impl Board {
                     });
                 }
             }
+        }
+    }
+
+    fn ask_again(&self, id: u64) {
+        let state = self.state();
+        if let Some(member) = state.members.get(&id) {
+            state.ask_again(&member.wants.scopes);
         }
     }
 
@@ -601,6 +613,12 @@ impl Reader {
 
     pub fn wants(&self) -> &HashSet<Scope> {
         &self.wants
+    }
+
+    /// Asks the scopes it wants anew, as a reader does that comes wanting them, which restarts
+    /// those a `401` ended.
+    pub fn ask_again(&self) {
+        self.context.board(self.kind).ask_again(self.id);
     }
 
     /// Whether every scope it wants has answered or failed once, and what the poller holds for
