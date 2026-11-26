@@ -65,7 +65,14 @@ impl Quantity {
         if whole.is_empty() && fraction.is_empty() || fraction.contains('.') {
             return None;
         }
-        let digits: i128 = format!("{whole}{fraction}").parse().ok()?;
+        let digits = whole
+            .bytes()
+            .chain(fraction.bytes())
+            .try_fold(0i128, |digits, digit| {
+                digits
+                    .checked_mul(10)?
+                    .checked_add(i128::from(digit - b'0'))
+            })?;
         let scale = 10i128.checked_pow(u32::try_from(fraction.len()).ok()?)?;
         let (num, den): (i128, i128) = match suffix {
             "n" => (1, 1_000_000_000),
@@ -163,6 +170,9 @@ mod tests {
             ("500m", 500),
             ("1", 1000),
             ("0.5", 500),
+            (".5", 500),
+            ("5.", 5000),
+            ("0012", 12_000),
             ("1.5Gi", 1_610_612_736_000),
             ("16Mi", 16_777_216_000),
             ("2k", 2_000_000),
