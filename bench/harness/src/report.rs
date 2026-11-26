@@ -254,9 +254,13 @@ fn is_gpu(process: &Process) -> bool {
     process.name == GPU_PROCESS
 }
 
-fn median_mb(samples: &[Sample], bytes: impl Fn(&Sample) -> u64) -> f64 {
+pub(crate) fn median_mb(samples: &[Sample], bytes: impl Fn(&Sample) -> u64) -> f64 {
     let values: Vec<f64> = samples.iter().map(|s| mb(bytes(s))).collect();
     percentile(&values, 50.0).unwrap_or(0.0)
+}
+
+pub(crate) fn budgeted(sample: &Sample, bytes: fn(&Process) -> u64) -> u64 {
+    sample.webkit.iter().filter(|p| !is_gpu(p)).map(bytes).sum()
 }
 
 pub fn fps(frame_ms: &[f64]) -> f64 {
@@ -394,9 +398,6 @@ pub fn build(inputs: Inputs) -> Report {
         ),
     });
 
-    let budgeted = |s: &Sample, bytes: fn(&Process) -> u64| -> u64 {
-        s.webkit.iter().filter(|p| !is_gpu(p)).map(bytes).sum()
-    };
     let webkit_rss = median_mb(&memory, |s| budgeted(s, |p| p.rss));
     let webkit_footprint = median_mb(&memory, |s| budgeted(s, |p| p.footprint));
     let per_process = |bytes: fn(&Process) -> u64| -> Vec<String> {

@@ -8,12 +8,9 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use crate::process::{Process, Sample};
-use crate::report::{Hidden, Row, Status, cpu_percent, read, read_optional};
-use crate::stats::percentile;
+use crate::process::Sample;
+use crate::report::{Hidden, Row, Status, budgeted, cpu_percent, median_mb, read, read_optional};
 
-const MB: f64 = 1_000_000.0;
-const GPU_PROCESS: &str = "com.apple.WebKit.GPU";
 /// How often the app polls the metrics API, which the API server does not count
 /// (`twigo_cache::metrics::INTERVAL`).
 const POLL_SECONDS: f64 = 15.0;
@@ -280,20 +277,6 @@ fn percents(values: &[f64]) -> String {
         .join(", ")
 }
 
-fn median_mb(samples: &[Sample], bytes: impl Fn(&Sample) -> u64) -> f64 {
-    let values: Vec<f64> = samples.iter().map(|s| bytes(s) as f64 / MB).collect();
-    percentile(&values, 50.0).unwrap_or(0.0)
-}
-
-fn budgeted(sample: &Sample) -> u64 {
-    sample
-        .webkit
-        .iter()
-        .filter(|p: &&Process| p.name != GPU_PROCESS)
-        .map(|p| p.rss)
-        .sum()
-}
-
 fn shown(metric: &str, value: Option<String>, measured: String) -> Row {
     Row {
         metric: metric.into(),
@@ -455,7 +438,7 @@ fn session_rows(sessions: &Sessions, baseline: &Baseline) -> Vec<Row> {
             core - baseline.core_mb,
         ),
     ));
-    let webview = median_mb(memory, budgeted);
+    let webview = median_mb(memory, |s| budgeted(s, |p| p.rss));
     rows.push(shown(
         WEBVIEW,
         Some(format!("{webview:.0} MB")),
@@ -569,6 +552,7 @@ fn gate_row(share: &GateShare) -> Row {
 #[cfg(test)]
 pub(crate) mod fixture {
     use super::*;
+    use crate::process::Process;
 
     pub(crate) fn process(pid: i32, name: &str, rss: u64, cpu_ns: u64) -> Process {
         Process {
