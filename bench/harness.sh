@@ -154,9 +154,8 @@ churn=$!
 
 churn_alive() {
   if ! kill -0 "$churn" 2>/dev/null; then
-    echo "the churn generator exited" >&2
     tail -20 "$out/churn.log" >&2
-    exit 1
+    fail "the churn generator exited"
   fi
 }
 
@@ -222,7 +221,7 @@ wait_for() {
       return 0
     fi
     no_failure || return 1
-    churn_alive
+    churn_alive || return 1
     if ! kill -0 "$app" 2>/dev/null; then
       tail -20 "$out/app.log" >&2
       fail "the app quit before writing $file" || return 1
@@ -327,14 +326,17 @@ elif ! wait "$app"; then
   exit 1
 fi
 app=
-churn_alive
-kill -INT "$churn"
+failed=
+kill -INT "$churn" 2>/dev/null || true
 if ! wait "$churn"; then
   echo "the churn generator failed" >&2
   tail -20 "$out/churn.log" >&2
-  exit 1
+  # It printed no summary, which the report would read from the empty file.
+  rm -f "$out/churn.json"
+  failed=1
 fi
 churn=
 
-"$tool" report "$out"
+"$tool" report "$out" || failed=1
 echo "$out" >&2
+[ -z "$failed" ] || exit 1
