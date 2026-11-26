@@ -557,7 +557,7 @@ Anything else in the query, the space, the resource, the namespaces, the selecto
 - A change of the view part is made of the rows the view holds, without a new subscription: a sort re-keys its entries and orders its index anew, a count, a group or values place the held rows again, and a collapsed group changes only which rows the window reads.
   A text is the exception: the view holds only the rows its text keeps, so a text that changes asks its source for every row again, as a relist does.
   Until that Reset comes the view holds no row and no index, only the samples its rows had, so a change of rows that comes first has nothing to join and is dropped, the Reset carrying every row.
-  The change goes out at once as a window's does, or with the ack of the batch in flight; changes that come while a batch waits are made together and the batch names the last.
+  Changes that come while a batch waits are made together and the batch names the last.
   A batch is sent for a change that moves nothing, so the webview always hears its number.
   Tauri runs each async command as a task of its own on a multi-thread runtime ([`respond_async_serialized_inner`](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.7/crates/tauri/src/ipc/mod.rs#L371-L375)), and a regex compiles before a change reaches its list, so two changes can arrive out of order: the list drops a change numbered no higher than the newest it holds or has taken, and its batches never name a number lower than the last.
   A channel hands its messages to the webview in the order they were sent, since each carries the index it was sent with ([`Channel::send`](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.7/crates/tauri/src/ipc/channel.rs#L284), [`Channel`](https://github.com/tauri-apps/tauri/blob/%40tauri-apps/api-v2.12.5/packages/api/src/core.ts#L129-L176)), so a batch of an older view never reaches the list's snapshot after a newer one's, and the webview keeps no guard of its own.
@@ -860,14 +860,13 @@ Any page that repaints, a blank one with one changing number included, holds abo
 They are children of launchd, not of the app, so measuring per process under-reports a Tauri app by about half.
 
 `bench/harness.sh` measures them at 5k pods on macOS ([bench](bench.md)).
-Runs at 20k and 50k pods are not built yet ([what is left](bench.md#what-is-left)), and of the cases that broke other clients (below) only two are replayed, by tests outside the bench.
 It builds the app's bench mode in release, runs a churn generator at 100 changes/s against kwok, launches the app on the cluster's kubeconfig, whose webview driver opens the space of its one context, then opens, scrolls, sorts and watches the pod list, and prints one row per metric with its value, target, status and what it measured:
 
 - **First paint** runs from opening the list to its first rows painted; the space's discovery starts as the space opens, before the list, so only what remains of it counts.
 - **Change → painted cell** joins the churn generator's log of changes, by pod and restart count, with the webview's paints of the new count, through Unix ms on both sides, from the patch sent.
 - **Scroll** is the mean fps of `requestAnimationFrame` over 5 s of scrolling at 4,000 px/s, and **sort** the p95 from a header click to the resorted rows painted, over eight sorts.
 - **Core footprint** is the app process's physical footprint with the list open under churn.
-  Its resident size is shown beside it and never judged: it reads 89 to 99 MB above the footprint, clean pages of the binary, the frameworks and mapped files, which macOS takes back when it wants, so one code read 142 to 153 MB in ten runs ([bench](bench.md#why-the-targets-moved)).
+  Its resident size is shown beside it and never judged: it adds clean pages of the binary, the frameworks and mapped files, which macOS takes back when it wants, so it swings between runs ([bench](bench.md#why-the-targets-moved)).
 - **Webview memory** is the resident size of the WebKit processes the app is responsible for, the process macOS records as having asked for them, but the GPU process; the harness starts the app responsible for itself, since one started from a terminal shares the terminal's.
   Their physical footprint and the GPU process are shown apart and never judged: footprint leaves out pages WebKit reused and counts graphics that resident size does not, so it swings between runs ([bench](bench.md#on-the-rust-path)).
 - **Idle CPU** is the CPU time of the app and those WebKit processes over 30 s with the window hidden, as a share of one core.

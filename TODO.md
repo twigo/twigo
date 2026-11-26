@@ -79,7 +79,7 @@ Findings that belong to no step yet.
   - `no rows sorted by Restarts descending` stopped one driver run in about forty on 2026-11-07, in a build with the clock of ages off; not investigated.
   - One run read a webview footprint of 404 MB with 235 MiB resident; what it held is not known.
   - The first paint came one or three 50 ms steps of the batcher later than in the other runs: 359 to 363 ms against 268 to 313 ms in 5 of 25 runs on 2026-11-17, and 416 ms against 255 to 262 ms in 2 of 10 runs on 2026-11-26 (`bench/harness.sh`, kind 1.37 with 5,000 pods, an Apple M4 Max); its target of 1 s holds, and the cause was not looked for.
-  - A hidden page still takes a terminal's output: with the window hidden and `kubectl get pods -A -w` printing about 11 KB a second in the terminal, the app read 7.15 to 7.61 % of a core and WebContent 5.94 to 6.28 %, against 0.78 to 1.07 % and 0.02 to 0.14 % hidden with the list alone (`bench/harness.sh`, kind 1.37 with 5,000 pods, an Apple M4 Max, 2026-11-26, four runs with the screen locked, [bench](docs/bench.md#the-sessions)).
+  - A hidden page still takes a terminal's output: with the window hidden and `kubectl get pods -A -w` printing about 11 KB a second in the terminal, the app and WebContent read far more CPU than hidden with the list alone ([bench](docs/bench.md#the-sessions)).
     Why the page keeps parsing the output and the core keeps reading it while hidden was not looked into; the bench's sessions rows are sampled with the watch stopped.
 - The grid's row actions (`packages/ui/src/grid/DataGrid.tsx`):
   - Shift+Tab no longer stops on the menu button of a row without the cursor, which mounts once the focus is on that row.
