@@ -95,14 +95,17 @@ image=$(k get node "$node" -o jsonpath='{.status.images[*].names[*]}' |
 [ -n "$image" ] || { echo "$node holds no docker.io/kindest/local-path-helper image" >&2; exit 1; }
 forward_pod=$(k -n kube-system get pods -l k8s-app=kube-dns -o jsonpath='{.items[0].metadata.name}')
 sessions_kubeconfig=$kubeconfig
-# A run that was killed, or whose clean-up timed out, leaves the namespace behind.
-k delete namespace "$SESSIONS_NAMESPACE" --ignore-not-found --timeout=120s >&2
-k create namespace "$SESSIONS_NAMESPACE" >&2
-for _ in $(seq 1 60); do
-  k -n "$SESSIONS_NAMESPACE" get serviceaccount default >/dev/null 2>&1 && break
-  sleep 1
-done
-k -n "$SESSIONS_NAMESPACE" apply -f - >&2 <<YAML
+# A pod that does not start fails the sessions only, so it is kept for them (`shell_failed`) and the
+# budgets are measured all the same.
+shell_pod() {
+  # A run that was killed, or whose clean-up timed out, leaves the namespace behind.
+  k delete namespace "$SESSIONS_NAMESPACE" --ignore-not-found --timeout=120s >&2 || return 1
+  k create namespace "$SESSIONS_NAMESPACE" >&2 || return 1
+  for _ in $(seq 1 60); do
+    k -n "$SESSIONS_NAMESPACE" get serviceaccount default >/dev/null 2>&1 && break
+    sleep 1
+  done
+  k -n "$SESSIONS_NAMESPACE" apply -f - >&2 <<YAML || return 1
 apiVersion: v1
 kind: Pod
 metadata:
@@ -119,7 +122,10 @@ spec:
         - -c
         - 'coproc S { read; }; while :; do read -t 3600 -u "\${S[0]}"; done'
 YAML
-k -n "$SESSIONS_NAMESPACE" wait --for=condition=Ready pod/shell --timeout=120s >&2
+  k -n "$SESSIONS_NAMESPACE" wait --for=condition=Ready pod/shell --timeout=120s >&2
+}
+shell_failed=
+shell_pod || shell_failed="the pod shell in $SESSIONS_NAMESPACE was not made ready (kubectl's error is on the harness's stderr)"
 sessions=$(jq -cn --arg namespace "$SESSIONS_NAMESPACE" --arg forward "$forward_pod" \
   --argjson port "$FORWARD_PORT" --arg kubectl "$kubectl_path" --arg kubeconfig "$kubeconfig" \
   '{shell: {namespace: $namespace, pod: "shell", container: "shell"},
@@ -271,6 +277,7 @@ sleep "$IDLE_SAMPLE"
 # The sessions: the driver opens a shell, a port-forward and a terminal, and the harness samples them.
 sessions_phase() {
   local port status n
+  [ -z "$shell_failed" ] || { fail "$shell_failed" || return 1; }
   echo "the window is back; the app opens a shell, a port-forward and a terminal" >&2
   wait_for sessions.json 180 || return 1
   port=$(jq -r .forward.local "$out/sessions.json") || return 1
