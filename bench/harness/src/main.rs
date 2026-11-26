@@ -129,7 +129,7 @@ fn report(args: &[String]) -> Result<(), String> {
         return Err(USAGE.to_owned());
     };
     let dir = Path::new(dir);
-    let report = report::build(report::Inputs::read(dir)?)?;
+    let report = report::build(report::Inputs::read(dir)?);
     let json = serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?;
     std::fs::write(dir.join("report.json"), json).map_err(|e| e.to_string())?;
     print!("{}", report::table(&report));

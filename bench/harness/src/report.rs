@@ -112,9 +112,8 @@ pub struct Inputs {
 }
 
 pub(crate) fn read<T: DeserializeOwned>(dir: &Path, name: &str) -> Result<T, String> {
-    let path = dir.join(name);
-    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
+    let text = std::fs::read_to_string(dir.join(name)).map_err(|e| format!("{name}: {e}"))?;
+    serde_json::from_str(&text).map_err(|e| format!("{name}: {e}"))
 }
 
 pub(crate) fn read_optional<T: DeserializeOwned>(
@@ -163,7 +162,7 @@ impl Inputs {
             hidden: read_optional(dir, "hidden.json")?,
             churn: read_optional(dir, "churn.json")?,
             log: read_log(dir)?,
-            sessions: sessions::Inputs::read(dir)?,
+            sessions: sessions::Inputs::read(dir),
         })
     }
 }
@@ -277,7 +276,7 @@ fn spread_text(spread: &Spread) -> String {
     )
 }
 
-pub fn build(inputs: Inputs) -> Result<Report, String> {
+pub fn build(inputs: Inputs) -> Report {
     let Inputs {
         run,
         webview,
@@ -470,9 +469,9 @@ pub fn build(inputs: Inputs) -> Result<Report, String> {
         core_mb: core,
         webview_mb: webkit_rss,
     };
-    rows.extend(sessions::rows(&sessions, &baseline)?);
+    rows.extend(sessions::rows(&sessions, &baseline));
 
-    Ok(Report { run, rows, churn })
+    Report { run, rows, churn }
 }
 
 pub fn table(report: &Report) -> String {
@@ -632,10 +631,6 @@ mod tests {
         }
     }
 
-    fn built(inputs: Inputs) -> Report {
-        build(inputs).unwrap()
-    }
-
     fn statuses(report: &Report) -> Vec<(&str, &Status)> {
         report
             .rows
@@ -646,7 +641,7 @@ mod tests {
 
     #[test]
     fn every_metric_has_a_row_and_is_judged() {
-        let report = built(inputs(20.0, 16.7, 1_000_000));
+        let report = build(inputs(20.0, 16.7, 1_000_000));
         assert_eq!(
             statuses(&report),
             [
@@ -695,7 +690,7 @@ mod tests {
         let (latencies, unjoined) = change_latencies(&inputs.webview.changes.painted, &inputs.log);
         assert_eq!(latencies, [20.0, 60.0, 10.0]);
         assert_eq!(unjoined, 1, "a patch that failed sets no count");
-        let report = built(inputs);
+        let report = build(inputs);
         assert!(
             report.rows[1]
                 .measured
@@ -713,7 +708,7 @@ mod tests {
         slow.log[1].sent = 0.0;
         slow.log[2].sent = 0.0;
         assert_eq!(
-            built(slow).failed(),
+            build(slow).failed(),
             [
                 "First paint after the space connects",
                 "Change → painted cell, p95",
@@ -728,7 +723,7 @@ mod tests {
     fn no_paint_to_join_fails_the_change_row() {
         let mut none = inputs(20.0, 16.7, 0);
         none.log.clear();
-        let report = built(none);
+        let report = build(none);
         assert_eq!(report.rows[1].status, Status::Fail);
         assert!(report.rows[1].measured.contains("no samples"));
     }
@@ -757,7 +752,7 @@ mod tests {
                 s
             })
             .collect();
-        let report = built(all);
+        let report = build(all);
         assert_eq!(report.rows[4].value.as_deref(), Some("200 MB"));
         assert_eq!(report.rows[5].value.as_deref(), Some("200 MB"));
         assert_eq!(report.rows[6].value.as_deref(), Some("400 MB"));
@@ -792,18 +787,18 @@ mod tests {
 
     #[test]
     fn webview_memory_is_judged_by_resident_size_and_not_by_footprint() {
-        assert!(built(with_webcontent(250, 900)).failed().is_empty());
+        assert!(build(with_webcontent(250, 900)).failed().is_empty());
         assert_eq!(
-            built(with_webcontent(350, 100)).failed(),
+            build(with_webcontent(350, 100)).failed(),
             ["Webview memory with the pod list open"]
         );
     }
 
     #[test]
     fn idle_cpu_is_judged_at_two_percent() {
-        assert!(built(inputs(20.0, 16.7, 150_000_000)).failed().is_empty());
+        assert!(build(inputs(20.0, 16.7, 150_000_000)).failed().is_empty());
         assert_eq!(
-            built(inputs(20.0, 16.7, 250_000_000)).failed(),
+            build(inputs(20.0, 16.7, 250_000_000)).failed(),
             ["Idle CPU, 100 changes/s, window hidden"]
         );
     }
@@ -815,7 +810,7 @@ mod tests {
             sample(0.0, 0, vec![]),
             sample(10_000.0, 9_000_000_000, vec![]),
         );
-        let report = built(all);
+        let report = build(all);
         assert!(report.failed().is_empty());
         assert_eq!(report.rows[8].value.as_deref(), Some("90.00 %"));
     }
@@ -831,9 +826,76 @@ mod tests {
         assert!((cpu_percent(&start, &end) - 1.0).abs() < 1e-9);
     }
 
+    fn run_dir_before_the_sessions(idle_ns: u64) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let put = |name: &str, value: serde_json::Value| {
+            std::fs::write(dir.path().join(name), value.to_string()).unwrap();
+        };
+        let at = |ms: f64, app_cpu: u64| serde_json::to_value(sample(ms, app_cpu, vec![])).unwrap();
+        put(
+            "run.json",
+            serde_json::json!({
+                "date": "2026-11-01", "machine": "Apple M4 Max", "os": "macOS 27.0",
+                "commit": "abc", "build": "release",
+            }),
+        );
+        put(
+            "webview.json",
+            serde_json::json!({
+                "rows": 5000, "refreshMs": 16.7, "firstPaintMs": 400.0,
+                "scroll": {
+                    "seconds": 5.0, "pxPerSecond": 4000.0,
+                    "frameMs": vec![16.7; 300], "blankFrames": 0,
+                },
+                "sort": [{ "column": "Name", "descending": false, "ms": 20.0 }],
+                "changes": {
+                    "seconds": 60.0,
+                    "painted": [{ "pod": "bench-a", "restarts": 1, "at": 1000.0 }],
+                    "offscreen": 0, "superseded": 0, "timedOut": 0,
+                },
+            }),
+        );
+        put("memory-1.json", at(0.0, 0));
+        put("visible-start.json", at(0.0, 0));
+        put("visible-end.json", at(10_000.0, 0));
+        put("idle-start.json", at(0.0, 0));
+        put("idle-end.json", at(10_000.0, idle_ns));
+        put("hidden.json", serde_json::json!({ "visibility": "hidden" }));
+        std::fs::write(
+            dir.path().join("churn.jsonl"),
+            r#"{"pod":"bench-a","restarts":1,"sent":980.0}"#,
+        )
+        .unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_run_without_the_sessions_reports_and_judges_the_rows_it_has() {
+        let dir = run_dir_before_the_sessions(1_000_000);
+        let report = build(Inputs::read(dir.path()).unwrap());
+        assert_eq!(report.rows.len(), 18);
+        assert!(report.failed().is_empty());
+        assert_eq!(report.rows[9].status, Status::Pass);
+        for row in &report.rows[10..] {
+            assert_eq!(row.value, None, "{}", row.metric);
+            assert_eq!(row.status, Status::Shown);
+            assert!(
+                row.measured.starts_with("not measured: "),
+                "{}: {}",
+                row.metric,
+                row.measured
+            );
+        }
+        let busy = run_dir_before_the_sessions(250_000_000);
+        assert_eq!(
+            build(Inputs::read(busy.path()).unwrap()).failed(),
+            ["Idle CPU, 100 changes/s, window hidden"]
+        );
+    }
+
     #[test]
     fn the_table_lists_every_row() {
-        let report = built(inputs(30.0, 16.7, 0));
+        let report = build(inputs(30.0, 16.7, 0));
         let table = table(&report);
         assert_eq!(table.lines().filter(|l| l.starts_with("| ")).count(), 20);
         assert!(table.contains("| First paint after the space connects | 400 ms | < 1 s | pass |"));

@@ -31,7 +31,9 @@ The harness measures the six budgets of [ARCHITECTURE 3.8](ARCHITECTURE.md#38-pe
    The harness waits 5 s, then samples CPU time at the start and the end of 30 s.
 10. The harness stops the churn and runs `twigo-bench report`.
 
-When the driver fails, the webview writes `failure.json` and then calls `idle` all the same, so the harness checks for `failure.json` after every wait and before the report, prints it and stops.
+When the driver fails, the webview writes `failure.json` and then calls `idle` all the same, so the harness checks for `failure.json` after every wait, prints it and stops.
+Once the idle sample is taken, the judged rows are measured, so a failure from then on, in opening a shell, a forward or a terminal, in a watch window or in the harness's own step there, does not stop the run: the harness keeps it in `failure.json`, stops the app and reports.
+The sessions' rows then read `not measured` with what failed, the gate's row is built on its own files, and the harness exits as the judged rows say, so a run whose sessions failed exits 0 when they pass; the table and stderr say what failed.
 
 ## The bench mode
 

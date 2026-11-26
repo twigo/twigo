@@ -156,10 +156,24 @@ churn_alive() {
   fi
 }
 
+# Past the idle sample the judged rows are measured, and a failure of the sessions' part is kept in
+# failure.json and reported with them, where before it stopped the run (`tolerate`).
+tolerate=
+
+fail() {
+  echo "$1" >&2
+  if [ -n "$tolerate" ]; then
+    [ -e "$out/failure.json" ] || jq -n --arg message "$1" '{message: $message}' >"$out/failure.json"
+    return 1
+  fi
+  exit 1
+}
+
 no_failure() {
   if [ -e "$out/failure.json" ]; then
     cat "$out/failure.json" >&2
     echo >&2
+    if [ -n "$tolerate" ]; then return 1; fi
     exit 1
   fi
 }
@@ -192,23 +206,26 @@ wait_for() {
   local file=$1 left=$2
   while :; do
     if [ -e "$out/$file" ]; then
-      no_failure
-      return
+      no_failure || return 1
+      return 0
     fi
-    no_failure
+    no_failure || return 1
     churn_alive
     if ! kill -0 "$app" 2>/dev/null; then
-      echo "the app quit before writing $file" >&2
       tail -20 "$out/app.log" >&2
-      exit 1
+      fail "the app quit before writing $file" || return 1
     fi
     left=$((left - 1))
     if [ "$left" -le 0 ]; then
-      echo "no $file within $2 s" >&2
-      exit 1
+      fail "no $file within $2 s" || return 1
     fi
     sleep 1
   done
+}
+
+# A sample of the app, which fails once the app has quit.
+take() {
+  "$tool" sample "$app" >"$out/$1" || fail "the app could not be sampled for $1, it has quit"
 }
 
 echo "app running, its window at the screen's left edge; keep the screen unlocked" >&2
@@ -241,46 +258,54 @@ sleep "$IDLE_SETTLE"
 sleep "$IDLE_SAMPLE"
 "$tool" sample "$app" >"$out/idle-end.json"
 
-echo "the window is back; the app opens a shell, a port-forward and a terminal" >&2
-wait_for sessions.json 180
-local_port=$(jq -r .forward.local "$out/sessions.json")
-status=$(curl -sS --max-time 10 -o "$out/forward-read.body" -w '%{http_code}' \
-  "http://127.0.0.1:$local_port/health") || {
-  echo "the forward on localhost:$local_port does not answer" >&2
-  exit 1
+# The sessions: the driver opens a shell, a port-forward and a terminal, and the harness samples them.
+sessions_phase() {
+  local port status n
+  echo "the window is back; the app opens a shell, a port-forward and a terminal" >&2
+  wait_for sessions.json 180 || return 1
+  port=$(jq -r .forward.local "$out/sessions.json") || return 1
+  status=$(curl -sS --max-time 10 -o "$out/forward-read.body" -w '%{http_code}' \
+    "http://127.0.0.1:$port/health") || {
+    fail "the forward on localhost:$port does not answer" || return 1
+  }
+  [ "$status" = 200 ] || { fail "the forward answers HTTP $status, not 200" || return 1; }
+  jq -n --argjson status "$status" --argjson bytes "$(wc -c <"$out/forward-read.body")" \
+    '{status: $status, bytes: $bytes}' >"$out/forward-read.json" || return 1
+  sleep "$SETTLE"
+  for n in $(seq 1 "$MEMORY_SAMPLES"); do
+    [ "$n" -eq 1 ] || sleep "$MEMORY_EVERY"
+    no_failure || return 1
+    take "sessions-memory-$n.json" || return 1
+  done
+  for n in $(seq 1 "$WINDOWS"); do
+    wait_for "watch-$n.json" 120 || return 1
+    sleep "$VISIBLE_SETTLE"
+    take "window-$n-start.json" || return 1
+    sleep "$VISIBLE_SAMPLE"
+    take "window-$n-end.json" || return 1
+    if [ -e "$out/watched-$n.json" ]; then
+      fail "watch window $n ended before its sample did" || return 1
+    fi
+  done
+  wait_for idle-sessions.json 180 || return 1
+  sleep "$IDLE_SETTLE"
+  take idle-sessions-start.json || return 1
+  sleep "$IDLE_SAMPLE"
+  take idle-sessions-end.json || return 1
 }
-[ "$status" = 200 ] || { echo "the forward answers HTTP $status, not 200" >&2; exit 1; }
-jq -n --argjson status "$status" --argjson bytes "$(wc -c <"$out/forward-read.body")" \
-  '{status: $status, bytes: $bytes}' >"$out/forward-read.json"
-sleep "$SETTLE"
-for n in $(seq 1 "$MEMORY_SAMPLES"); do
-  [ "$n" -eq 1 ] || sleep "$MEMORY_EVERY"
-  no_failure
-  "$tool" sample "$app" >"$out/sessions-memory-$n.json"
-done
-for n in $(seq 1 "$WINDOWS"); do
-  wait_for "watch-$n.json" 120
-  sleep "$VISIBLE_SETTLE"
-  "$tool" sample "$app" >"$out/window-$n-start.json"
-  sleep "$VISIBLE_SAMPLE"
-  "$tool" sample "$app" >"$out/window-$n-end.json"
-  if [ -e "$out/watched-$n.json" ]; then
-    echo "watch window $n ended before its sample did" >&2
-    exit 1
-  fi
-done
-wait_for idle-sessions.json 180
-sleep "$IDLE_SETTLE"
-"$tool" sample "$app" >"$out/idle-sessions-start.json"
-sleep "$IDLE_SAMPLE"
-"$tool" sample "$app" >"$out/idle-sessions-end.json"
-if ! wait "$app"; then
+
+tolerate=1
+sessions_phase || true
+tolerate=
+if [ -e "$out/failure.json" ]; then
+  kill "$app" 2>/dev/null || true
+  wait "$app" 2>/dev/null || true
+elif ! wait "$app"; then
   echo "the app failed after its last sample" >&2
   tail -40 "$out/app.log" >&2 2>/dev/null || true
   exit 1
 fi
 app=
-no_failure
 churn_alive
 kill -INT "$churn"
 if ! wait "$churn"; then

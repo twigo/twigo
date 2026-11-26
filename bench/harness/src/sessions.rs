@@ -101,17 +101,33 @@ pub struct GateClass {
     pub cold_gate_ns: f64,
 }
 
+/// What the sessions' rows are built from, or why they cannot be: a step of the run that failed
+/// leaves its files missing, and the judged rows are reported all the same.
 pub struct Inputs {
+    pub sessions: Result<Sessions, String>,
+    pub gate: Result<GateInputs, String>,
+}
+
+pub struct Sessions {
     pub opened: Opened,
     pub forward_read: ForwardRead,
     pub memory: Vec<Sample>,
     pub windows: Vec<Window>,
     pub idle: (Sample, Sample),
     pub hidden: Option<Hidden>,
+}
+
+pub struct GateInputs {
     /// The core's CPU over the steady phase, and what the API server counted at its two ends.
     pub steady: (Sample, Sample),
     pub apiserver: (String, String),
-    pub gate: GateCost,
+    pub cost: GateCost,
+}
+
+/// Why the run stopped (`failure.json`), written by the driver or the harness.
+#[derive(Deserialize)]
+struct Failure {
+    message: String,
 }
 
 /// `<prefix>1.json`, `<prefix>2.json` and on, as many as the harness took.
@@ -124,15 +140,28 @@ fn numbered<T: serde::de::DeserializeOwned>(dir: &Path, name: &str) -> Result<Ve
 }
 
 fn text(dir: &Path, name: &str) -> Result<String, String> {
-    let path = dir.join(name);
-    std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))
+    std::fs::read_to_string(dir.join(name)).map_err(|e| format!("{name}: {e}"))
 }
 
 impl Inputs {
-    pub fn read(dir: &Path) -> Result<Self, String> {
+    pub fn read(dir: &Path) -> Self {
+        let stopped = read_optional::<Failure>(dir, "failure.json")
+            .map(|failure| failure.map(|failure| failure.message))
+            .unwrap_or_else(Some);
+        Inputs {
+            sessions: Sessions::read(dir).map_err(|missing| {
+                stopped.map_or(missing, |message| format!("the run stopped: {message}"))
+            }),
+            gate: GateInputs::read(dir),
+        }
+    }
+}
+
+impl Sessions {
+    fn read(dir: &Path) -> Result<Self, String> {
         let memory = numbered(dir, "sessions-memory-N.json")?;
         if memory.is_empty() {
-            return Err(format!("{}: no sessions-memory-1.json", dir.display()));
+            return Err("no sessions-memory-1.json".to_owned());
         }
         let starts: Vec<Marker> = numbered(dir, "watch-N.json")?;
         let ends: Vec<Marker> = numbered(dir, "watched-N.json")?;
@@ -142,8 +171,7 @@ impl Inputs {
             .collect();
         if starts.is_empty() || starts.len() != ends.len() || starts.len() != samples.len() {
             return Err(format!(
-                "{}: {} watch markers, {} ends and {} sampled windows, which must be as many and not none",
-                dir.display(),
+                "{} watch markers, {} ends and {} sampled windows, which must be as many and not none",
                 starts.len(),
                 ends.len(),
                 samples.len()
@@ -161,7 +189,7 @@ impl Inputs {
                 seconds: (end.at_ms - start.at_ms) / 1000.0,
             })
             .collect();
-        Ok(Inputs {
+        Ok(Sessions {
             opened: read(dir, "sessions.json")?,
             forward_read: read(dir, "forward-read.json")?,
             memory,
@@ -171,6 +199,13 @@ impl Inputs {
                 read(dir, "idle-sessions-end.json")?,
             ),
             hidden: read_optional(dir, "hidden-sessions.json")?,
+        })
+    }
+}
+
+impl GateInputs {
+    fn read(dir: &Path) -> Result<Self, String> {
+        Ok(GateInputs {
             steady: (
                 read(dir, "steady-start.json")?,
                 read(dir, "steady-end.json")?,
@@ -179,7 +214,7 @@ impl Inputs {
                 text(dir, "apiserver-start.txt")?,
                 text(dir, "apiserver-end.txt")?,
             ),
-            gate: read(dir, "gate-cost.json")?,
+            cost: read(dir, "gate-cost.json")?,
         })
     }
 }
@@ -277,7 +312,7 @@ pub struct GateShare {
     pub estimate: f64,
 }
 
-pub fn gate_share(
+fn gate_share(
     steady: &(Sample, Sample),
     apiserver: &(String, String),
     gate: &GateCost,
@@ -316,18 +351,47 @@ fn percent(value: f64) -> String {
     }
 }
 
-pub fn rows(inputs: &Inputs, baseline: &Baseline) -> Result<Vec<Row>, String> {
-    let Inputs {
+const CORE: &str = "Core RSS, sessions open";
+const WEBVIEW: &str = "  Webview memory, sessions open";
+const VISIBLE: &str = "Visible CPU, sessions open, window on screen";
+const IDLE: &str = "Idle CPU, sessions open, window hidden";
+const PROXY: &str = "Terminal watch through the policy proxy: core CPU";
+const DIRECT: &str = "  The same watch straight to the cluster";
+const SHARE: &str = "  The policy proxy's share";
+const GATE: &str = "Gate, share of the core's CPU, steady phase";
+const SESSION_ROWS: [&str; 7] = [CORE, WEBVIEW, VISIBLE, IDLE, PROXY, DIRECT, SHARE];
+
+pub fn rows(inputs: &Inputs, baseline: &Baseline) -> Vec<Row> {
+    let mut rows = match &inputs.sessions {
+        Ok(sessions) => session_rows(sessions, baseline),
+        Err(why) => SESSION_ROWS
+            .into_iter()
+            .map(|metric| shown(metric, None, format!("not measured: {why}")))
+            .collect(),
+    };
+    rows.push(
+        match inputs
+            .gate
+            .as_ref()
+            .map_err(String::clone)
+            .and_then(|gate| gate_share(&gate.steady, &gate.apiserver, &gate.cost))
+        {
+            Ok(share) => gate_row(&share),
+            Err(why) => shown(GATE, None, format!("not measured: {why}")),
+        },
+    );
+    rows
+}
+
+fn session_rows(sessions: &Sessions, baseline: &Baseline) -> Vec<Row> {
+    let Sessions {
         opened,
         forward_read,
         memory,
         windows,
         idle,
         hidden,
-        steady,
-        apiserver,
-        gate,
-    } = inputs;
+    } = sessions;
     let open = format!(
         "a shell in pod {} (asked in a dialog: {:?}), a port-forward of {}:{} on localhost:{} (read once: HTTP {}, {} bytes), and a {} terminal ({}) watching pods; taken after the window was hidden and shown again",
         opened.shell.pod,
@@ -344,7 +408,7 @@ pub fn rows(inputs: &Inputs, baseline: &Baseline) -> Result<Vec<Row>, String> {
 
     let core = median_mb(memory, |s| s.app.rss);
     rows.push(shown(
-        "Core RSS, sessions open",
+        CORE,
         Some(format!("{core:.0} MB")),
         format!(
             "resident size of {} under churn with the pod list and {open}; the median of {} samples; {:+.0} MB against the row with the list alone",
@@ -355,7 +419,7 @@ pub fn rows(inputs: &Inputs, baseline: &Baseline) -> Result<Vec<Row>, String> {
     ));
     let webview = median_mb(memory, budgeted);
     rows.push(shown(
-        "  Webview memory, sessions open",
+        WEBVIEW,
         Some(format!("{webview:.0} MB")),
         format!(
             "resident size of the WebKit processes but the GPU process, the same samples; {:+.0} MB against the row with the list alone",
@@ -387,7 +451,7 @@ pub fn rows(inputs: &Inputs, baseline: &Baseline) -> Result<Vec<Row>, String> {
     };
     let visible = totals(Via::Proxy);
     rows.push(shown(
-        "Visible CPU, sessions open, window on screen",
+        VISIBLE,
         mean(&visible).map(|v| format!("{v:.2} %")),
         format!(
             "CPU time of the app and its WebKit processes over 20 s, as a share of one core, with the window on screen and the terminal watching through the proxy; {} windows: {} %; sorted by Restarts descending, 100 changes/s; it swings between runs, so nothing judges it (docs/bench.md)",
@@ -397,7 +461,7 @@ pub fn rows(inputs: &Inputs, baseline: &Baseline) -> Result<Vec<Row>, String> {
     ));
     let (start, end) = idle;
     rows.push(shown(
-        "Idle CPU, sessions open, window hidden",
+        IDLE,
         Some(format!("{:.2} %", cpu_percent(start, end))),
         format!(
             "CPU time of the app and its {} WebKit processes over {:.0} s, as a share of one core, of which the app process {:.2} %; document {}; the terminal's watch goes on",
@@ -422,7 +486,7 @@ pub fn rows(inputs: &Inputs, baseline: &Baseline) -> Result<Vec<Row>, String> {
         .collect::<Vec<_>>()
         .join(", ");
     rows.push(shown(
-        "Terminal watch through the policy proxy: core CPU",
+        PROXY,
         mean(&proxy).map(|v| format!("{v:.2} %")),
         format!(
             "CPU time of the app process over 20 s, as a share of one core, while the terminal runs `kubectl get pods -A -w` through the policy proxy, window on screen; {} windows: {} %; the terminal received {} KB/s",
@@ -432,7 +496,7 @@ pub fn rows(inputs: &Inputs, baseline: &Baseline) -> Result<Vec<Row>, String> {
         ),
     ));
     rows.push(shown(
-        "  The same watch straight to the cluster",
+        DIRECT,
         mean(&direct).map(|v| format!("{v:.2} %")),
         format!(
             "the same, with the cluster's own kubeconfig named on the command line, in the same terminal; {} windows: {} %; the terminal received {} KB/s",
@@ -442,7 +506,7 @@ pub fn rows(inputs: &Inputs, baseline: &Baseline) -> Result<Vec<Row>, String> {
         ),
     ));
     rows.push(shown(
-        "  The policy proxy's share",
+        SHARE,
         mean(&proxy)
             .zip(mean(&direct))
             .map(|(proxy, direct)| format!("{:+.2} %", proxy - direct)),
@@ -451,21 +515,18 @@ pub fn rows(inputs: &Inputs, baseline: &Baseline) -> Result<Vec<Row>, String> {
         ),
     ));
 
-    let share = gate_share(steady, apiserver, gate)?;
-    rows.push(shown(
-        "Gate, share of the core's CPU, steady phase",
+    rows
+}
+
+fn gate_row(share: &GateShare) -> Row {
+    shown(
+        GATE,
         Some(format!("about {}", percent(share.estimate))),
         format!(
             "an estimate, not a bound: the {} requests that were not patches which the API server counted in {:.0} s, whoever sent them, and the {} polls of the metrics API that it does not count, each at {:.0} ns, the dearest class's cost in gate_cost with the caches evicted before the call ({:.0} ns in a hot loop; both layers, a guarded context, the UI), over the core's {:.0} ms of CPU; the churn's patches are the only ones, and the app sends none (docs/bench.md)",
-            share.counted,
-            share.seconds,
-            share.polls,
-            share.cost_ns,
-            share.hot_ns,
-            share.core_ms,
+            share.counted, share.seconds, share.polls, share.cost_ns, share.hot_ns, share.core_ms,
         ),
-    ));
-    Ok(rows)
+    )
 }
 
 #[cfg(test)]
@@ -525,7 +586,30 @@ apiserver_request_duration_seconds_count{verb="GET"} 99999
         }
     }
 
-    pub(crate) fn inputs(core_ms_in_a_proxy_window: u64, core_ms_in_a_direct_one: u64) -> Inputs {
+    pub(crate) fn gate() -> GateInputs {
+        GateInputs {
+            steady: (sample(0.0, 0, 0), sample(60_000.0, 600_000_000, 0)),
+            apiserver: (
+                METRICS.to_owned(),
+                METRICS
+                    .replace("} 10\n", "} 14\n")
+                    .replace("} 5000\n", "} 11000\n")
+                    .replace("} 40\n", "} 70\n"),
+            ),
+            cost: GateCost {
+                classes: vec![
+                    class("GET", 300.0, 1200.0),
+                    class("GET", 450.0, 1500.0),
+                    class("PATCH", 400.0, 3000.0),
+                ],
+            },
+        }
+    }
+
+    pub(crate) fn sessions(
+        core_ms_in_a_proxy_window: u64,
+        core_ms_in_a_direct_one: u64,
+    ) -> Sessions {
         let opened = Opened {
             shell: OpenedShell {
                 pod: "shell".into(),
@@ -541,7 +625,7 @@ apiserver_request_duration_seconds_count{verb="GET"} 99999
                 shell: "zsh".into(),
             },
         };
-        Inputs {
+        Sessions {
             opened,
             forward_read: ForwardRead {
                 status: 200,
@@ -558,28 +642,20 @@ apiserver_request_duration_seconds_count{verb="GET"} 99999
             hidden: Some(Hidden {
                 visibility: "hidden".into(),
             }),
-            steady: (sample(0.0, 0, 0), sample(60_000.0, 600_000_000, 0)),
-            apiserver: (
-                METRICS.to_owned(),
-                METRICS
-                    .replace("} 10\n", "} 14\n")
-                    .replace("} 5000\n", "} 11000\n")
-                    .replace("} 40\n", "} 70\n"),
-            ),
-            gate: GateCost {
-                classes: vec![
-                    class("GET", 300.0, 1200.0),
-                    class("GET", 450.0, 1500.0),
-                    class("PATCH", 400.0, 3000.0),
-                ],
-            },
+        }
+    }
+
+    pub(crate) fn inputs(core_ms_in_a_proxy_window: u64, core_ms_in_a_direct_one: u64) -> Inputs {
+        Inputs {
+            sessions: Ok(sessions(core_ms_in_a_proxy_window, core_ms_in_a_direct_one)),
+            gate: Ok(gate()),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::fixture::{METRICS, class, inputs, sample};
+    use super::fixture::{METRICS, class, gate, inputs, sample};
     use super::*;
 
     fn baseline() -> Baseline {
@@ -598,7 +674,7 @@ mod tests {
 
     #[test]
     fn the_rows_are_shown_and_never_judged() {
-        let rows = rows(&inputs(300, 200), &baseline()).unwrap();
+        let rows = rows(&inputs(300, 200), &baseline());
         assert_eq!(rows.len(), 8);
         assert!(rows.iter().all(|row| row.status == Status::Shown));
         assert_eq!(value(&rows, "Core RSS, sessions open"), "150 MB");
@@ -607,7 +683,7 @@ mod tests {
 
     #[test]
     fn the_proxy_is_what_the_core_spends_more_through_it_than_straight_to_the_cluster() {
-        let rows = rows(&inputs(300, 200), &baseline()).unwrap();
+        let rows = rows(&inputs(300, 200), &baseline());
         assert_eq!(
             value(&rows, "Terminal watch through the policy proxy: core CPU"),
             "1.50 %"
@@ -625,7 +701,7 @@ mod tests {
     }
 
     fn rows_of(proxy_ms: u64, direct_ms: u64) -> Vec<Row> {
-        rows(&inputs(proxy_ms, direct_ms), &baseline()).unwrap()
+        rows(&inputs(proxy_ms, direct_ms), &baseline())
     }
 
     #[test]
@@ -665,8 +741,8 @@ mod tests {
 
     #[test]
     fn the_gate_is_the_requests_that_were_not_patches_times_the_dearest_cold_cost() {
-        let sessions = inputs(1, 1);
-        let share = gate_share(&sessions.steady, &sessions.apiserver, &sessions.gate).unwrap();
+        let gate = gate();
+        let share = gate_share(&gate.steady, &gate.apiserver, &gate.cost).unwrap();
         assert_eq!((share.counted, share.polls), (34, 4));
         assert_eq!(share.seconds, 60.0);
         assert_eq!(share.core_ms, 600.0);
@@ -678,9 +754,9 @@ mod tests {
 
     #[test]
     fn a_hot_figure_above_the_cold_one_is_the_cost() {
-        let mut sessions = inputs(1, 1);
-        sessions.gate.classes = vec![class("GET", 500.0, 400.0)];
-        let share = gate_share(&sessions.steady, &sessions.apiserver, &sessions.gate).unwrap();
+        let mut gate = gate();
+        gate.cost.classes = vec![class("GET", 500.0, 400.0)];
+        let share = gate_share(&gate.steady, &gate.apiserver, &gate.cost).unwrap();
         assert_eq!(share.cost_ns, 500.0);
     }
 
@@ -708,9 +784,9 @@ mod tests {
 
     #[test]
     fn a_gate_cost_without_a_class_but_a_patch_is_an_error() {
-        let mut sessions = inputs(1, 1);
-        sessions.gate.classes = vec![class("PATCH", 400.0, 3000.0)];
-        let error = gate_share(&sessions.steady, &sessions.apiserver, &sessions.gate).unwrap_err();
+        let mut gate = gate();
+        gate.cost.classes = vec![class("PATCH", 400.0, 3000.0)];
+        let error = gate_share(&gate.steady, &gate.apiserver, &gate.cost).unwrap_err();
         assert!(error.contains("no class but a patch"), "{error}");
     }
 
@@ -769,7 +845,9 @@ mod tests {
     #[test]
     fn a_directory_of_a_run_is_read_into_its_windows() {
         let dir = run_dir(3, 3);
-        let inputs = Inputs::read(dir.path()).unwrap();
+        let inputs = Inputs::read(dir.path());
+        assert!(inputs.gate.is_ok());
+        let inputs = inputs.sessions.unwrap();
         assert_eq!(inputs.memory.len(), 2);
         assert_eq!(
             inputs.windows.iter().map(|w| w.via).collect::<Vec<_>>(),
@@ -783,11 +861,66 @@ mod tests {
     #[test]
     fn a_window_that_was_sampled_and_never_ended_is_an_error() {
         let dir = run_dir(3, 2);
-        let error = Inputs::read(dir.path()).err().unwrap();
+        let error = Inputs::read(dir.path()).sessions.err().unwrap();
         assert!(
             error.contains("3 watch markers, 2 ends and 3 sampled windows"),
             "{error}"
         );
-        assert!(Inputs::read(run_dir(0, 0).path()).is_err());
+        assert!(Inputs::read(run_dir(0, 0).path()).sessions.is_err());
+    }
+
+    fn unmeasured(dir: &tempfile::TempDir) -> Vec<Row> {
+        rows(&Inputs::read(dir.path()), &baseline())
+    }
+
+    #[test]
+    fn a_step_that_failed_leaves_every_sessions_row_saying_so() {
+        let dir = run_dir(2, 1);
+        std::fs::write(
+            dir.path().join("failure.json"),
+            r#"{"message":"local port 8080 must be free"}"#,
+        )
+        .unwrap();
+        let rows = unmeasured(&dir);
+        assert_eq!(rows.len(), 8);
+        for row in rows.iter().take(7) {
+            assert_eq!(row.value, None, "{}", row.metric);
+            assert_eq!(row.status, Status::Shown);
+            assert!(
+                row.measured
+                    .contains("not measured: the run stopped: local port 8080 must be free"),
+                "{}: {}",
+                row.metric,
+                row.measured
+            );
+        }
+        assert!(rows[7].value.is_some(), "the gate's files are all there");
+    }
+
+    #[test]
+    fn a_run_that_never_reached_the_sessions_says_which_file_is_missing() {
+        let dir = run_dir(2, 2);
+        std::fs::remove_file(dir.path().join("sessions.json")).unwrap();
+        let rows = unmeasured(&dir);
+        assert!(
+            rows[0].measured.contains("sessions.json"),
+            "{}",
+            rows[0].measured
+        );
+        assert!(!rows[0].measured.contains("the run stopped"));
+    }
+
+    #[test]
+    fn a_run_without_the_gate_files_leaves_its_row_alone_unmeasured() {
+        let dir = run_dir(4, 4);
+        std::fs::remove_file(dir.path().join("steady-start.json")).unwrap();
+        let rows = unmeasured(&dir);
+        assert_eq!(rows[7].value, None);
+        assert!(
+            rows[7].measured.contains("steady-start.json"),
+            "{}",
+            rows[7].measured
+        );
+        assert_eq!(value(&rows, "Core RSS, sessions open"), "150 MB");
     }
 }
