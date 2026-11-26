@@ -348,6 +348,7 @@ function batch(
 ): ListBatch {
   return {
     seq,
+    view: 0,
     total: IDS.length,
     columns: first
       ? [
@@ -1215,6 +1216,7 @@ test("a hovered row's verbs read that row's own state, not the selected row's", 
   act(() => {
     script.send({
       seq: 1,
+      view: 0,
       total: 3,
       columns: [
         { name: "Name", kind: "string", priority: 0 },

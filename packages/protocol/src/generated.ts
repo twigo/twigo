@@ -950,6 +950,13 @@ export type LevelFilter = "all" | "warn" | "error";
  */
 export type ListBatch = { seq: number, 
 /**
+ * The number of the view this batch reflects: that of the last
+ * [`SetView`] the list had taken when it built the batch, 0 before any.
+ * Several changes that arrive while a batch waits for its ack are taken
+ * together, so a batch may skip the numbers between.
+ */
+view: number, 
+/**
  * Rows matching the query, in or out of the window, those of collapsed
  * groups included.
  */
@@ -1759,8 +1766,8 @@ history: Array<RevisionLine> | null, };
  * code that keeps the revision from being read, as
  * [`ReleaseBatch::problem`] tells them, and is empty when it is read: a
  * request that fails keeps the label's Status. Its batches are
- * [`ListBatch`](crate::ListBatch)es, and `list_set_window`, `list_ack` and
- * `list_unsubscribe` serve it.
+ * [`ListBatch`](crate::ListBatch)es, and `list_set_window`, `list_set_view`,
+ * `list_ack` and `list_unsubscribe` serve it.
  */
 export type ReleaseListQuery = { space: string, 
 /**
@@ -2051,6 +2058,22 @@ export type SetReleaseView = { id: SubscriptionId,
  * The revision to show; null follows the latest.
  */
 revision: number | null, parts: ReleaseParts, };
+
+/**
+ * Changes the view of a list in place: the fields of [`ListQuery`] that
+ * choose which of the list's rows show, in which order and how they are
+ * counted and grouped. A change of anything else in a query, the space, the
+ * resource, the namespaces, the selectors or the owners, is a new
+ * subscription.
+ */
+export type SetView = { id: SubscriptionId, 
+/**
+ * The number of this view, which the webview counts up from 1: the
+ * query the list subscribed with is view 0. The first batch that
+ * reflects this view carries it in [`ListBatch::view`], so the webview
+ * knows which rows answer which query.
+ */
+view: number, text: string | null, columns: { [key in string]: boolean } | null, sort: Sort | null, countBy: string | null, groupBy: Grouping | null, values: ColumnValues | null, };
 
 /**
  * `start` and `end` index the rows a window reads: every matching row,
@@ -2350,6 +2373,7 @@ export type Commands = {
   cluster_version: { request: string; response: ClusterVersion; message: null };
   list_subscribe: { request: ListQuery; response: SubscriptionId; message: ListBatch };
   list_set_window: { request: SetWindow; response: null; message: null };
+  list_set_view: { request: SetView; response: null; message: null };
   list_ack: { request: Ack; response: null; message: null };
   list_unsubscribe: { request: SubscriptionId; response: null; message: null };
   object_open: { request: OpenObject; response: SubscriptionId; message: ObjectBatch };

@@ -21,6 +21,7 @@ fn main() {
         "resources_watch",
         "list_subscribe",
         "list_set_window",
+        "list_set_view",
         "list_ack",
         "list_unsubscribe",
         "helm_list_subscribe",

@@ -1277,6 +1277,16 @@ impl<T: Item> Subscription<T> {
     /// it has listed and while it is not refused, whatever the others are,
     /// and a part that starts or stops showing resets the drain.
     pub fn drain_shown(&self) -> Shown<T> {
+        self.shown(false)
+    }
+
+    /// [`drain_shown`](Self::drain_shown) with every row of the parts that show, as after a
+    /// relist.
+    pub fn drain_all_shown(&self) -> Shown<T> {
+        self.shown(true)
+    }
+
+    fn shown(&self, all: bool) -> Shown<T> {
         let mut parts = self.inner.parts();
         let looks: Vec<(ViewState, bool)> = parts
             .iter()
@@ -1286,7 +1296,7 @@ impl<T: Item> Subscription<T> {
                 (state, shown)
             })
             .collect();
-        let mut flipped = false;
+        let mut flipped = all;
         for (part, (_, shown)) in parts.iter_mut().zip(&looks) {
             flipped |= part.showing != *shown;
             part.showing = *shown;

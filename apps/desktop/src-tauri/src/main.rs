@@ -30,9 +30,9 @@ use twigo_ipc::{
     LogBatch, LogVerbosity, NewTerminal, ObjectBatch, OpenIssue, OpenLogs, OpenObject, OpenRelease,
     OpenShell, OperationEvent, Plan, PlanId, PlanRequest, ReleaseBatch, ReleaseListQuery, Report,
     ResumeForward, SaveReport, SchemaQuery, SetLogLevel, SetLogSource, SetLogView, SetLogWindow,
-    SetParts, SetReleaseView, SetWindow, ShellAck, ShellContainers, ShellEnvironment, ShellInput,
-    ShellPod, ShellResize, Space, StartForward, StateEntry, StateSnapshot, SubscriptionId,
-    TerminalSession,
+    SetParts, SetReleaseView, SetView, SetWindow, ShellAck, ShellContainers, ShellEnvironment,
+    ShellInput, ShellPod, ShellResize, Space, StartForward, StateEntry, StateSnapshot,
+    SubscriptionId, TerminalSession,
 };
 use twigo_keyboard::{LayoutWatch, MainThread, Subscription};
 use twigo_log::{Facts, Level, Log};
@@ -411,6 +411,11 @@ fn list_set_window(
     request: SetWindow,
 ) -> Result<(), IpcError> {
     app.core.list_set_window(webview.label(), request)
+}
+
+#[tauri::command]
+fn list_set_view(webview: Webview, app: State<'_, App>, request: SetView) -> Result<(), IpcError> {
+    app.core.list_set_view(webview.label(), request)
 }
 
 #[tauri::command]
@@ -1086,6 +1091,7 @@ fn main() {
             resources_watch,
             list_subscribe,
             list_set_window,
+            list_set_view,
             list_ack,
             list_unsubscribe,
             helm_list_subscribe,

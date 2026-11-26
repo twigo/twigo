@@ -113,6 +113,7 @@ const NAMES = [
 function batch(seq: number, known: boolean): ListBatch {
   return {
     seq,
+    view: 0,
     total: known ? 2 : 0,
     columns: known ? [...NAMES] : [],
     window: { start: 0, ids: known ? ["a", "b"] : [] },
@@ -483,6 +484,7 @@ describe("a poll", () => {
     const first = seq === 1;
     return {
       seq,
+      view: 0,
       total: IDS.length,
       columns: first
         ? [
@@ -573,6 +575,7 @@ describe("a column named like a measure", () => {
   function pools(): ListBatch {
     return {
       seq: 1,
+      view: 0,
       total: 2,
       columns: [
         { name: "Name", kind: "string", priority: 0 },

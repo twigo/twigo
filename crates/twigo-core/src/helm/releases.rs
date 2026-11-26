@@ -59,7 +59,7 @@ impl Releases {
 }
 
 impl Source for Releases {
-    fn drain_shown(&mut self) -> Shown<Row> {
+    fn drain_shown(&mut self, all: bool) -> Shown<Row> {
         let Shown {
             delta,
             status,
@@ -82,7 +82,7 @@ impl Source for Releases {
         for (release, stamp, read) in self.fetches.answers() {
             touched.extend(held.answered(release, stamp, read));
         }
-        let delta = if reset {
+        let delta = if reset || all {
             Delta::Reset {
                 rows: held.rows(),
                 columns: Some(Arc::clone(&self.columns)),

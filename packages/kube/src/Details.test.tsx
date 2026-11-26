@@ -959,6 +959,7 @@ function podsBatch(
   const ids = Object.keys(statuses).map((name) => `prod-eu/default/${name}`);
   return {
     seq,
+    view: 0,
     total: 2,
     columns: first
       ? [

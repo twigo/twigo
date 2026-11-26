@@ -33,6 +33,7 @@ function row(id: string, ...cells: Row["cells"]): Row {
 function batch(seq: number, rest: Partial<ListBatch> = {}): ListBatch {
   return {
     seq,
+    view: 0,
     total: 2,
     columns: null,
     window: null,

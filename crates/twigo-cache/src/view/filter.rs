@@ -9,7 +9,7 @@ use twigo_ipc::{ErrorCode, IpcError};
 
 use crate::table::Cell;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TextFilter {
     matcher: Matcher,
     negated: bool,
@@ -20,6 +20,16 @@ enum Matcher {
     /// In ASCII lower case.
     Substring(String),
     Regex(Regex),
+}
+
+impl PartialEq for Matcher {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Matcher::Substring(a), Matcher::Substring(b)) => a == b,
+            (Matcher::Regex(a), Matcher::Regex(b)) => a.as_str() == b.as_str(),
+            _ => false,
+        }
+    }
 }
 
 impl TextFilter {

@@ -21,6 +21,7 @@ function row(id: string, cells: Cell[]): Row {
 function batch(rest: Partial<ListBatch>): ListBatch {
   return {
     seq: 1,
+    view: 0,
     total: 3,
     columns: null,
     window: null,

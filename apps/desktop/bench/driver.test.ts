@@ -68,6 +68,7 @@ test("the list's first rows are named as the screen's are, once its window start
   const list = new ListProbe();
   list.record(0, {
     seq: 1,
+    view: 0,
     total: 2,
     columns: [
       { name: "Name", kind: "string", priority: 0 },
@@ -98,6 +99,7 @@ test("the list's first rows are named as the screen's are, once its window start
   expect(topRows(list)).toEqual(["payments/api-2", "payments/api-1"]);
   list.record(1, {
     seq: 2,
+    view: 0,
     total: 2,
     columns: null,
     window: { start: 1, ids: ["a", "b"] },

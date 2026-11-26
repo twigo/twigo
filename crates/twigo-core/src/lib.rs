@@ -36,15 +36,16 @@ use twigo_cache::discovery::{Followed, Followers, Resources};
 use twigo_cache::hub::{Connect, Hub, Query, Resource, RowFormat};
 use twigo_cache::metrics::{Kind, Opening, Poller};
 use twigo_cache::request::Selectors;
-use twigo_cache::view::Spec;
+use twigo_cache::view::{Shape, Spec};
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
     AccessQuery, Ack, AnswerApproval, ApplyPreviewed, ApplyRequest, ApprovalEvent, ClusterVersion,
     CompareRevisions, ComparedRevisions, DownloadLogs, ErrorCode, Execute, Friction, GetValues,
     IpcError, ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs, OpenObject, OpenRelease,
     OpenShell, OperationEvent, Plan, PlanId, PlanRequest, ReleaseBatch, ReleaseListQuery,
-    SchemaQuery, SetLogSource, SetLogView, SetLogWindow, SetParts, SetReleaseView, SetWindow,
-    ShellAck, ShellContainers, ShellInput, ShellPod, ShellResize, SubscriptionId, ViewState,
+    SchemaQuery, SetLogSource, SetLogView, SetLogWindow, SetParts, SetReleaseView, SetView,
+    SetWindow, ShellAck, ShellContainers, ShellInput, ShellPod, ShellResize, SubscriptionId,
+    ViewState,
 };
 use twigo_kube::client::{Actor, Clients, ProxyEnv};
 use twigo_kube::credentials::{Exec, ExecError, OidcError, Provider, Registry, Source, Timeouts};
@@ -864,6 +865,14 @@ impl Core {
     pub fn list_set_window(&self, window: &str, request: SetWindow) -> Result<(), IpcError> {
         self.lists.with(window, request.id, |list| {
             list.set_window(request.start, request.end, request.metrics);
+        })
+    }
+
+    /// Serves a list of Helm releases as well (ARCHITECTURE 3.4).
+    pub fn list_set_view(&self, window: &str, request: SetView) -> Result<(), IpcError> {
+        let shape = Shape::new(&request)?;
+        self.lists.with(window, request.id, |list| {
+            list.set_view(request.view, shape);
         })
     }
 

@@ -31,6 +31,7 @@ const PODS: ListQuery = {
 function batch(metrics: ListBatch["metrics"]): ListBatch {
   return {
     seq: 1,
+    view: 0,
     total: 0,
     columns: [{ name: "Name", kind: "string", priority: 0 }],
     window: { start: 0, ids: [] },

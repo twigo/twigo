@@ -22,8 +22,8 @@ use std::sync::Arc;
 use indexset::BTreeSet;
 use jiff::Timestamp;
 use twigo_ipc::{
-    self as ipc, IpcError, ListBatch, ListQuery, MetricsState, Parts, RowGroup, RowId, ValueCount,
-    ViewState,
+    self as ipc, ColumnValues, Grouping, IpcError, ListBatch, ListQuery, MetricsState, Parts,
+    RowGroup, RowId, SetView, ValueCount, ViewState,
 };
 
 use crate::hub::Delta;
@@ -43,7 +43,6 @@ thread_local! {
     static INSERTS: Counter<usize> = const { Counter::new(0) };
 }
 
-/// The rows placed on this thread since the last call.
 #[cfg(test)]
 pub(crate) fn take_inserts() -> usize {
     INSERTS.with(|inserts| inserts.replace(0))
@@ -65,12 +64,7 @@ pub struct Spec {
     namespace_column: bool,
     labels: Option<Selector>,
     owners: Option<HashSet<String>>,
-    text: Option<TextFilter>,
-    choices: Option<BTreeMap<String, bool>>,
-    sort: Option<ipc::Sort>,
-    count_by: Option<String>,
-    group_by: Option<(String, HashSet<String>)>,
-    values: Option<(String, HashSet<String>)>,
+    shape: Shape,
     metrics: Option<Kind>,
     /// The list reads all namespaces from the cluster-wide upstream, so the
     /// cluster's metrics may be asked for them too.
@@ -93,25 +87,14 @@ impl Spec {
                 .owners
                 .as_ref()
                 .map(|uids| uids.iter().cloned().collect()),
-            text: match &query.text {
-                Some(text) => TextFilter::parse(text)?,
-                None => None,
-            },
-            choices: query.columns.clone(),
-            sort: query.sort.clone(),
-            count_by: query.count_by.clone(),
-            group_by: query.group_by.as_ref().map(|grouping| {
-                (
-                    grouping.column.clone(),
-                    grouping.collapsed.iter().cloned().collect(),
-                )
-            }),
-            values: query.values.as_ref().map(|values| {
-                (
-                    values.column.clone(),
-                    values.values.iter().cloned().collect(),
-                )
-            }),
+            shape: Shape::parse(
+                query.text.as_deref(),
+                query.columns.as_ref(),
+                query.sort.as_ref(),
+                query.count_by.as_deref(),
+                query.group_by.as_ref(),
+                query.values.as_ref(),
+            )?,
             metrics: Kind::of(&query.gvr.group, &query.gvr.version, &query.gvr.resource),
             cluster_wide: query.namespaced && query.namespaces.is_empty(),
         })
@@ -119,6 +102,81 @@ impl Spec {
 
     pub fn metrics(&self) -> Option<Kind> {
         self.metrics
+    }
+}
+
+/// The part of a query that a list changes in place (ARCHITECTURE 3.4): which
+/// rows show, in which order, and how they are counted and grouped.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Shape {
+    text: Option<TextFilter>,
+    choices: Option<BTreeMap<String, bool>>,
+    sort: Option<ipc::Sort>,
+    count_by: Option<String>,
+    group_by: Option<(String, HashSet<String>)>,
+    values: Option<(String, HashSet<String>)>,
+}
+
+impl Shape {
+    /// Refuses a regex that does not parse.
+    pub fn new(request: &SetView) -> Result<Self, IpcError> {
+        Self::parse(
+            request.text.as_deref(),
+            request.columns.as_ref(),
+            request.sort.as_ref(),
+            request.count_by.as_deref(),
+            request.group_by.as_ref(),
+            request.values.as_ref(),
+        )
+    }
+
+    fn parse(
+        text: Option<&str>,
+        choices: Option<&BTreeMap<String, bool>>,
+        sort: Option<&ipc::Sort>,
+        count_by: Option<&str>,
+        group_by: Option<&Grouping>,
+        values: Option<&ColumnValues>,
+    ) -> Result<Self, IpcError> {
+        Ok(Self {
+            text: match text {
+                Some(text) => TextFilter::parse(text)?,
+                None => None,
+            },
+            choices: choices.cloned(),
+            sort: sort.cloned(),
+            count_by: count_by.map(str::to_owned),
+            group_by: group_by.map(|grouping| {
+                (
+                    grouping.column.clone(),
+                    grouping.collapsed.iter().cloned().collect(),
+                )
+            }),
+            values: values.map(|values| {
+                (
+                    values.column.clone(),
+                    values.values.iter().cloned().collect(),
+                )
+            }),
+        })
+    }
+}
+
+#[cfg(test)]
+impl Shape {
+    pub(crate) fn of(change: impl FnOnce(&mut SetView)) -> Self {
+        let mut view = SetView {
+            id: ipc::SubscriptionId(0),
+            view: 0,
+            text: None,
+            columns: None,
+            sort: None,
+            count_by: None,
+            group_by: None,
+            values: None,
+        };
+        change(&mut view);
+        Self::new(&view).expect("a shape that parses")
     }
 }
 
@@ -190,6 +248,7 @@ impl Layout {
         if !placed {
             metric_columns(&mut wire, &mut sources);
         }
+        let shape = &spec.shape;
         let find = |name: &str| wire.iter().position(|column| column.name == name);
         let find_text =
             |name: &str| find(name).filter(|&at| !matches!(sources[at], Source::Metric(_)));
@@ -199,7 +258,7 @@ impl Layout {
             .filter(|(at, column)| {
                 !matches!(sources[*at], Source::Metric(_))
                     && (column.name == NAME
-                        || spec
+                        || shape
                             .choices
                             .as_ref()
                             .and_then(|choices| choices.get(&column.name).copied())
@@ -207,7 +266,7 @@ impl Layout {
             })
             .map(|(at, _)| at)
             .collect();
-        let chosen = spec
+        let chosen = shape
             .sort
             .as_ref()
             .and_then(|sort| Some((find(&sort.column)?, sort.descending)));
@@ -216,12 +275,12 @@ impl Layout {
             None => (find(NAME), false),
         };
         let sort_metric = sort.is_some_and(|at| matches!(sources[at], Source::Metric(_)));
-        let count = spec.count_by.as_deref().and_then(find_text);
-        let group = spec
+        let count = shape.count_by.as_deref().and_then(find_text);
+        let group = shape
             .group_by
             .as_ref()
             .and_then(|(column, collapsed)| Some((find_text(column)?, collapsed.clone())));
-        let values = spec
+        let values = shape
             .values
             .as_ref()
             .and_then(|(column, values)| Some((find_text(column)?, values.clone())));
@@ -238,6 +297,20 @@ impl Layout {
             group,
             values,
         }
+    }
+
+    /// Whether the same rows pass, count and group, a collapsed group aside.
+    fn keeps_rows_of(&self, other: &Self) -> bool {
+        self.text == other.text
+            && self.count == other.count
+            && self.values == other.values
+            && self.group.as_ref().map(|(at, _)| at) == other.group.as_ref().map(|(at, _)| at)
+    }
+
+    fn orders_as(&self, other: &Self) -> bool {
+        self.sort == other.sort
+            && self.descending == other.descending
+            && self.sort_metric == other.sort_metric
     }
 
     fn cell<'a>(&self, row: &'a Row, sample: Option<&Sample>, at: usize) -> Cow<'a, Cell> {
@@ -423,6 +496,7 @@ struct Group {
 /// What the webview holds: the last batches' window, rows and counts.
 #[derive(Default)]
 struct Sent {
+    view: u32,
     columns: Option<Vec<ipc::Column>>,
     start: u32,
     ids: Vec<Arc<str>>,
@@ -456,6 +530,8 @@ pub struct QueryView {
     window: (u32, u32),
     sent: Sent,
     seq: u32,
+    /// The view the batches reflect, as the webview numbered it.
+    view: u32,
     /// None while the context serves no metrics for the list's resource.
     metrics: Option<Metrics>,
     /// Rows that entered the index without a sample since `sample_entered` last ran.
@@ -475,6 +551,7 @@ impl QueryView {
             window: (0, 0),
             sent: Sent::default(),
             seq: 0,
+            view: 0,
             metrics: None,
             entered: Vec::new(),
         }
@@ -545,21 +622,73 @@ impl QueryView {
         self.groups.clear();
     }
 
+    fn layout(&self) -> Layout {
+        Layout::new(
+            &self.spec,
+            Arc::clone(&self.layout.server),
+            self.metrics.is_some(),
+        )
+    }
+
     fn rebuild(&mut self) {
+        self.layout = self.layout();
+        self.place_again();
+    }
+
+    fn place_again(&mut self) {
         let tracked: Vec<_> = self
             .rows
             .drain()
             .map(|(_, tracked)| (tracked.row, tracked.sample))
             .collect();
         self.clear();
-        self.layout = Layout::new(
-            &self.spec,
-            Arc::clone(&self.layout.server),
-            self.metrics.is_some(),
-        );
         for (row, sample) in tracked {
             self.insert(row, sample.filter(|_| self.metrics.is_some()));
         }
+    }
+
+    /// Orders the rows it holds anew, which counts, groups and keeps as before.
+    fn order_again(&mut self) {
+        self.index.clear();
+        let layout = &self.layout;
+        let mut entries = Vec::with_capacity(self.rows.len());
+        for tracked in self.rows.values_mut() {
+            let Some(entry) = &mut tracked.entry else {
+                continue;
+            };
+            entry.key = layout.sort_key(&tracked.row, tracked.sample.as_deref());
+            entry.descending = layout.descending;
+            entry.empty_last = layout.sort_metric;
+            entries.push(entry.clone());
+        }
+        entries.sort_unstable();
+        for entry in entries {
+            self.index.insert(entry);
+        }
+    }
+
+    /// Changes the shape of the query in place, and numbers it `view`, which the batches
+    /// reflect from the next on. Returns whether the rows must come again from their source:
+    /// the view holds only the rows its text keeps, so the next `apply` must be a `Delta::Reset`
+    /// of every row the labels keep. Any other change is made of the rows it holds.
+    #[must_use]
+    pub fn reshape(&mut self, view: u32, shape: Shape) -> bool {
+        self.view = view;
+        let old = &self.spec.shape;
+        let again =
+            old.text != shape.text || (shape.text.is_some() && old.choices != shape.choices);
+        self.spec.shape = shape;
+        let layout = self.layout();
+        let held = std::mem::replace(&mut self.layout, layout);
+        if again {
+            return true;
+        }
+        if !held.keeps_rows_of(&self.layout) {
+            self.place_again();
+        } else if !held.orders_as(&self.layout) {
+            self.order_again();
+        }
+        false
     }
 
     /// The hub settled the list's all namespaces on the namespaces the person
@@ -739,7 +868,7 @@ impl QueryView {
         {
             return;
         }
-        if let Some(text) = &self.spec.text
+        if let Some(text) = &self.spec.shape.text
             && !text.keeps(layout.text.iter().map(|&at| layout.filtered(&row, at)))
         {
             return;
@@ -837,7 +966,7 @@ impl QueryView {
 
     /// The matching rows per value of the count column, largest first.
     fn counts(&self) -> Option<Vec<ValueCount>> {
-        self.spec.count_by.as_ref()?;
+        self.spec.shape.count_by.as_ref()?;
         Some(sorted(&self.counts))
     }
 
@@ -902,6 +1031,7 @@ impl QueryView {
     /// holds the rows of the parts that show, so what it sends is theirs.
     pub fn batch(&mut self, status: ViewState, parts: Parts) -> Option<ListBatch> {
         let first = self.seq == 0;
+        let view_changed = self.view != self.sent.view;
         let columns_changed = self
             .sent
             .columns
@@ -947,6 +1077,7 @@ impl QueryView {
         let metrics = self.metrics_state();
         let metrics_changed = metrics != self.sent.metrics;
         if !window_changed
+            && !view_changed
             && !columns_changed
             && !counts_changed
             && !groups_changed
@@ -961,6 +1092,7 @@ impl QueryView {
         self.seq += 1;
         let batch = ListBatch {
             seq: self.seq,
+            view: self.view,
             total,
             columns: columns_changed.then(|| self.layout.wire.clone()),
             window: window_changed.then(|| ipc::Window {
@@ -975,6 +1107,7 @@ impl QueryView {
             metrics: metrics.filter(|_| metrics_changed),
         };
         self.sent = Sent {
+            view: self.view,
             columns: Some(self.layout.wire.clone()),
             start: self.window.0,
             ids,
