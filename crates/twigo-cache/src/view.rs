@@ -107,7 +107,7 @@ impl Spec {
 
 /// The part of a query that a list changes in place (ARCHITECTURE 3.4): which
 /// rows show, in which order, and how they are counted and grouped.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Shape {
     text: Option<TextFilter>,
     choices: Option<BTreeMap<String, bool>>,

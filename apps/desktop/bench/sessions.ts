@@ -14,16 +14,16 @@ export interface Target {
 }
 
 /** How the terminal's `kubectl get pods -A -w` reaches the cluster. */
-export type Via = "proxy" | "direct";
+type Via = "proxy" | "direct";
 
 /**
  * The windows the harness samples the core's CPU in, in this order, so that a
  * drift of the cluster or the page over them cancels between the two.
  */
-export const WATCHES: readonly Via[] = ["proxy", "direct", "direct", "proxy"];
+const WATCHES: readonly Via[] = ["proxy", "direct", "direct", "proxy"];
 
 /** What `sessions.json` says of the three sessions once they are open. */
-export interface Opened {
+interface Opened {
   shell: { pod: string; question: string };
   forward: { target: string; port: number; local: number };
   terminal: { kind: string; shell: string };
@@ -263,7 +263,7 @@ async function stopped(probe: Probe, terminal: ShellProbe): Promise<void> {
  * ended, through the proxy that the terminal's kubeconfig names or straight
  * to the cluster, and resolves once the first list of every pod has come.
  */
-export async function watching(
+async function watching(
   probe: Probe,
   terminal: ShellProbe,
   {
