@@ -1343,7 +1343,7 @@ export type Mode = "read-write" | "guarded" | "read-only";
 /**
  * Where a context's mode comes from, highest first (ARCHITECTURE 6.4).
  */
-export type ModeSource = { "kind": "policyFile", file: string, pattern: string | null, reason?: string, } | { "kind": "unlisted" } | { "kind": "moved" } | { "kind": "user", overrides: Lock | null, } | { "kind": "kubeconfig" } | { "kind": "provider" } | { "kind": "environment", environment: Environment, } | { "kind": "unmarked" };
+export type ModeSource = { "kind": "unlisted" } | { "kind": "moved" } | { "kind": "policyFile", file: string, pattern: string | null, reason?: string, } | { "kind": "user", overrides: Lock | null, } | { "kind": "kubeconfig" } | { "kind": "provider" } | { "kind": "environment", environment: Environment, } | { "kind": "unmarked" };
 
 /**
  * A terminal to start for `context`.
