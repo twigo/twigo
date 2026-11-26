@@ -39,7 +39,7 @@ struct Mirror {
 impl Mirror {
     fn read(&mut self, subscription: &Subscription<Row>) {
         let named = |row: &Arc<Row>| (RowKey::of(&row.meta), row.meta.name.to_string());
-        let shown = subscription.drain_shown();
+        let shown = subscription.drain_shown(false);
         match shown.delta {
             Delta::Reset { rows, columns } => {
                 self.rows = rows.iter().map(named).collect();

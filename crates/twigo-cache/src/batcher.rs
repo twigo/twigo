@@ -58,11 +58,7 @@ pub trait Source: Send + 'static {
 
 impl Source for Subscription<Row> {
     fn drain_shown(&mut self, all: bool) -> Shown<Row> {
-        if all {
-            self.drain_all_shown()
-        } else {
-            Subscription::drain_shown(self)
-        }
+        Subscription::drain_shown(self, all)
     }
 
     fn resolved(&self) -> bool {

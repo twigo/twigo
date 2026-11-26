@@ -64,7 +64,7 @@ impl Source for Releases {
             delta,
             status,
             parts,
-        } = self.secrets.drain_shown();
+        } = self.secrets.drain_shown(false);
         let held = &mut self.held;
         let (reset, mut touched) = match delta {
             Delta::Reset { rows, .. } => {
