@@ -4,11 +4,13 @@
 //! alone, and only a confirmed plan of the command bus or the answer to a
 //! process's ask changes it.
 //!
-//! It reads closed, as the admin's policy file does, and is read once, as
-//! the app starts: a file that cannot be read keeps `read-only` every
-//! context the admin's policy file sets no mode for, and takes no change
-//! until the person starts over, which moves it aside, or the next start, so
-//! it is never written over and a newer build's file outlives a downgrade.
+//! It reads closed, as the admin's policy file does, and is read as the app
+//! starts: a file that cannot be read keeps `read-only` every context the
+//! admin's policy file sets no mode for, and takes no change until the
+//! person starts over or the next start, so it is never written over and a
+//! newer build's file outlives a downgrade. A start over looks at the file
+//! again: it moves the file aside, is refused where the file reads by then,
+//! and moves nothing where it is gone.
 //!
 //! ```json
 //! {
@@ -27,8 +29,8 @@ use serde::{Deserialize, Serialize};
 use twigo_ipc::{Environment, ErrorCode, IpcError, Mode, ModeSource};
 use twigo_log::problems;
 
-use crate::Refused;
 use crate::file::unparsed;
+use crate::{Refused, StartOver};
 
 /// Bumped when the file's shape changes.
 const VERSION: u32 = 1;
@@ -61,26 +63,28 @@ struct Version {
 pub struct Protection {
     /// None for a policy that keeps the choices nowhere.
     path: Option<PathBuf>,
-    /// The choices, or why the file cannot be read in words that quote
-    /// nothing of it.
-    read: Result<Choices, String>,
+    /// The choices, or the file that cannot be read.
+    read: Result<Choices, Unreadable>,
 }
 
 impl Protection {
     /// Reads the file at `path`: a missing one holds no choices.
     pub fn read(path: &Path) -> Self {
-        let read = match std::fs::read(path) {
-            Ok(bytes) => parse(&bytes),
-            Err(error) if error.kind() == ErrorKind::NotFound => Ok(Choices::default()),
-            Err(error) => Err(error.kind().to_string()),
+        let read = match look(path) {
+            Look::Reads(choices) => Ok(choices),
+            Look::Missing => Ok(Choices::default()),
+            Look::Unreadable(reason) => {
+                tracing::error!(path = %path.display(), %reason, "could not read the person's protection, so every context the policy file sets no mode for is read-only");
+                problems::report(IpcError::new(
+                    ErrorCode::ProtectionUnreadable,
+                    "Twigo could not read protection.json, which holds the modes and types you set, so every context an admin's policy file sets no mode for is read-only until you start over, which moves that file aside, or restore it and restart Twigo",
+                ));
+                Err(Unreadable {
+                    path: path.to_owned(),
+                    reason,
+                })
+            }
         };
-        if let Err(reason) = &read {
-            tracing::error!(path = %path.display(), %reason, "could not read the person's protection, so every context the policy file sets no mode for is read-only");
-            problems::report(IpcError::new(
-                ErrorCode::ProtectionUnreadable,
-                "Twigo could not read protection.json, which holds the modes and types you set, so every context an admin's policy file sets no mode for is read-only until you start over, which moves that file aside, or restore it and restart Twigo",
-            ));
-        }
         Self {
             path: Some(path.to_owned()),
             read,
@@ -98,7 +102,7 @@ impl Protection {
 
     /// Where the policy keeps the choices, and what it read for the policy
     /// to hold.
-    pub(crate) fn open(self) -> (Kept, Result<Choices, String>) {
+    pub(crate) fn open(self) -> (Kept, Result<Choices, Unreadable>) {
         (Kept { path: self.path }, self.read)
     }
 }
@@ -109,51 +113,10 @@ pub(crate) struct Kept {
 }
 
 impl Kept {
-    /// What a context the admin's policy file sets no mode for is while
-    /// the file cannot be read for `reason`.
-    pub(crate) fn unreadable(&self, reason: &str) -> (Mode, ModeSource) {
-        (
-            Mode::ReadOnly,
-            ModeSource::ProtectionUnreadable {
-                file: self.file(),
-                reason: reason.to_owned(),
-            },
-        )
-    }
-
-    /// Why a change is refused while the file cannot be read.
-    pub(crate) fn refused(&self) -> Refused {
-        Refused::ProtectionUnreadable(self.file())
-    }
-
     /// Why starting over is refused while the file can be read, or is not
     /// there.
     pub(crate) fn readable(&self) -> Refused {
         Refused::ProtectionReadable(self.file())
-    }
-
-    /// Where the file moves as the person starts over.
-    pub(crate) fn aside(&self) -> String {
-        self.path
-            .as_deref()
-            .map(|path| aside(path).display().to_string())
-            .unwrap_or_default()
-    }
-
-    /// Moves the file that could not be read aside, in place of one an
-    /// earlier start over left there, so that the next choice writes a new
-    /// file; a move that fails changes nothing.
-    pub(crate) fn set_aside(&self) -> Result<(), Refused> {
-        let Some(path) = &self.path else {
-            return Ok(());
-        };
-        if let Err(error) = std::fs::rename(path, aside(path)) {
-            tracing::error!(path = %path.display(), %error, "could not move the person's protection file aside, so Twigo did not start over");
-            return Err(Refused::Unmoved(self.file(), error.kind()));
-        }
-        tracing::warn!(path = %path.display(), "the person started over without their protection file, which moved to a file of its name with .unreadable");
-        problems::clear(ErrorCode::ProtectionUnreadable);
-        Ok(())
     }
 
     /// Writes `choices`, which the policy holds only once the file holds
@@ -181,6 +144,92 @@ impl Kept {
             .as_ref()
             .map(|path| path.display().to_string())
             .unwrap_or_default()
+    }
+}
+
+/// The person's protection file that Twigo could not read as it started,
+/// which holds every context the policy file sets no mode for `read-only`
+/// and takes no change until the person starts over.
+#[derive(Clone)]
+pub(crate) struct Unreadable {
+    path: PathBuf,
+    /// Why, in words that quote nothing of it.
+    reason: String,
+}
+
+impl Unreadable {
+    /// What a context the admin's policy file sets no mode for is meanwhile.
+    pub(crate) fn access(&self) -> (Mode, ModeSource) {
+        (
+            Mode::ReadOnly,
+            ModeSource::ProtectionUnreadable {
+                file: self.file(),
+                reason: self.reason.clone(),
+            },
+        )
+    }
+
+    /// Why a change is refused meanwhile.
+    pub(crate) fn refused(&self) -> Refused {
+        Refused::ProtectionUnreadable(self.file())
+    }
+
+    /// What starting over from it does now, as the file is looked at again:
+    /// refused where it reads, as one restored by hand does, since moving it
+    /// aside would drop the choices it holds, which Twigo takes from its
+    /// next start; nothing moves where it is gone.
+    pub(crate) fn start_over(&self) -> Result<StartOver, Refused> {
+        let aside = match look(&self.path) {
+            Look::Reads(_) => return Err(Refused::Restored(self.file())),
+            Look::Missing => None,
+            Look::Unreadable(_) => Some(aside(&self.path).display().to_string()),
+        };
+        Ok(StartOver {
+            file: self.file(),
+            reason: self.reason.clone(),
+            aside,
+        })
+    }
+
+    /// Starts over as `started` says: moves the file aside where it is
+    /// there, in place of one an earlier start over left, so that the next
+    /// choice writes a new file, and takes it off the problems; a move that
+    /// fails changes nothing.
+    pub(crate) fn start(&self, started: &StartOver) -> Result<(), Refused> {
+        let path = &self.path;
+        if started.aside.is_none() {
+            tracing::warn!(path = %path.display(), "the person started over without their protection file, which was gone");
+        } else if let Err(error) = std::fs::rename(path, aside(path)) {
+            tracing::error!(path = %path.display(), %error, "could not move the person's protection file aside, so Twigo did not start over");
+            return Err(Refused::Unmoved(self.file(), error.kind()));
+        } else {
+            tracing::warn!(path = %path.display(), "the person started over without their protection file, which moved to a file of its name with .unreadable");
+        }
+        problems::clear(ErrorCode::ProtectionUnreadable);
+        Ok(())
+    }
+
+    fn file(&self) -> String {
+        self.path.display().to_string()
+    }
+}
+
+/// What the file holds, as Twigo looks at it.
+enum Look {
+    Reads(Choices),
+    Missing,
+    /// Why not, in words that quote nothing of it.
+    Unreadable(String),
+}
+
+fn look(path: &Path) -> Look {
+    match std::fs::read(path) {
+        Ok(bytes) => match parse(&bytes) {
+            Ok(choices) => Look::Reads(choices),
+            Err(reason) => Look::Unreadable(reason),
+        },
+        Err(error) if error.kind() == ErrorKind::NotFound => Look::Missing,
+        Err(error) => Look::Unreadable(error.kind().to_string()),
     }
 }
 

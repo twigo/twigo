@@ -28,6 +28,7 @@ A lost key cost the person their locks: a context they had made `read-only` over
 - **What a file that cannot be read may do next goes by what its loss does.**
   `protection.json`, whose loss would loosen protection, is never written before the next start: while it cannot be read every change of protection is refused, so a newer build's file outlives a downgrade and reads again once that build runs; it is read again only at the next start.
   The person may start over instead, a plan of the command bus that asks in a dialog: it moves the file aside as `protection.json.unreadable` with its bytes, in place of one an earlier start over left, and the policy then holds no choice and reads open, so the next choice writes a new file; where the move fails it is refused and nothing changes.
+  It looks at the file again as it plans and as it runs: one removed by hand has nothing to move, and one restored by hand, which reads now, refuses it, since moving it aside would set aside the choices it holds, which Twigo takes from its next start.
   `trust.json`, whose loss only tightens, may start anew: it moves aside as `trust.json.unreadable` with its bytes and takes new trust at once, and where the move fails the next trust writes over it.
   `state.json` moves aside as `state.json.unreadable` in the same way, and the next save starts a new file, or replaces it where the move failed.
 - **A choice holds only once its file holds it.**

@@ -200,6 +200,11 @@ error_codes! {
     /// The person's protection file can be read, or is not there, so there
     /// is nothing to start over from.
     ProtectionReadable = "protection.readable", InvalidInput;
+    /// The person's protection file that could not be read reads now, as
+    /// one restored by hand does, so Twigo did not start over, which would
+    /// set aside the choices it holds: it takes the file from its next
+    /// start.
+    ProtectionRestored = "protection.restored", Conflict;
     /// The person's protection file that cannot be read could not be moved
     /// aside, so Twigo did not start over.
     ProtectionUnmoved = "protection.unmoved", Internal;

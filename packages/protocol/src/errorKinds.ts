@@ -45,6 +45,7 @@ export const ERROR_KINDS: Record<ErrorCode, ErrorKind> = {
   "protection.unreadable": "permissions",
   "protection.unsaved": "internal",
   "protection.readable": "invalidInput",
+  "protection.restored": "conflict",
   "protection.unmoved": "internal",
   "answer.undecodable": "internal",
   "discovery.not-aggregated": "unavailable",

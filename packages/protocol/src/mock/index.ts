@@ -22,7 +22,7 @@ import type {
   TerminalKind,
   ViewState,
 } from "../generated";
-import { MockAccess } from "./access";
+import { MockAccess, type UnreadProtection } from "./access";
 import {
   APPROVAL_SCENARIOS,
   isApprovalScenario,
@@ -164,7 +164,9 @@ type ListScenario = "live" | ViewState["state"] | CauseScenario;
  * context is read-only and says why, `protectionUnreadable`: live lists while
  * the person's protection file cannot be read, so every context is read-only,
  * says why, takes no change and is listed in the problems until a start over
- * moves the file aside,
+ * moves the file aside, `protectionRestored` and `protectionRemoved`: the same
+ * after the person restored the file by hand, which refuses a start over, or
+ * removed it, which a start over moves nothing of,
  * `viewer`: live lists for a person who may only read, `protection`: live
  * lists with `qa`, which nobody marked, and `analytics`, whose kubeconfig says
  * read-only and which the person made read-write, open on the rail,
@@ -207,6 +209,8 @@ export type MockScenario =
   | "policyFile"
   | "policyFileUnreadable"
   | "protectionUnreadable"
+  | "protectionRestored"
+  | "protectionRemoved"
   | "viewer"
   | "rbacNamespaces"
   | "rbacTypedNamespaces"
@@ -232,6 +236,8 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "policyFile",
   "policyFileUnreadable",
   "protectionUnreadable",
+  "protectionRestored",
+  "protectionRemoved",
   "viewer",
   "rbacNamespaces",
   "rbacTypedNamespaces",
@@ -326,6 +332,28 @@ const FLUSH_MS = 50;
 const CHURN_MS = 1000;
 const RATE_TICK_MS = 100;
 
+/** What a look at the person's protection file finds now, by the scenarios under which Twigo could not read it as it started. */
+const UNREAD_PROTECTION: Partial<
+  Record<MockScenario, UnreadProtection["now"]>
+> = {
+  protectionUnreadable: "unreadable",
+  protectionRestored: "restored",
+  protectionRemoved: "removed",
+};
+
+function unreadProtection(
+  scenario: MockScenario,
+): UnreadProtection | undefined {
+  const now = UNREAD_PROTECTION[scenario];
+  return now === undefined
+    ? undefined
+    : {
+        reason:
+          "it says something Twigo's protection file does not at line 4, column 13",
+        now,
+      };
+}
+
 /**
  * Runs the UI in a plain browser on fixtures (ARCHITECTURE 2.3): spaces,
  * pods, their nodes, Deployments and events behind a query view with the
@@ -348,6 +376,8 @@ export function createMockBackend(
     scenario === "policyFile" ||
     scenario === "policyFileUnreadable" ||
     scenario === "protectionUnreadable" ||
+    scenario === "protectionRestored" ||
+    scenario === "protectionRemoved" ||
     scenario === "viewer" ||
     scenario === "rbacNamespaces" ||
     scenario === "rbacTypedNamespaces" ||
@@ -379,9 +409,7 @@ export function createMockBackend(
     scenario === "policyFileUnreadable"
       ? "it is not JSON at line 3, column 1"
       : undefined,
-    scenario === "protectionUnreadable"
-      ? "it says something Twigo's protection file does not at line 4, column 13"
-      : undefined,
+    unreadProtection(scenario),
   );
   const approvals = new MockApprovals(
     isApprovalScenario(scenario) ? scenario : undefined,
@@ -1167,7 +1195,7 @@ export function createMockBackend(
         }, 2 * SAVE_WORKS_MS);
         return UNSAVED;
       }
-      if (scenario === "protectionUnreadable") {
+      if (unreadProtection(scenario) !== undefined) {
         access.onStartOver(() => {
           onMessage([]);
         });

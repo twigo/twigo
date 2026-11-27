@@ -15,7 +15,7 @@ use twigo_ipc::{
 };
 
 use crate::friction::Risk;
-use crate::protection::Kept;
+use crate::protection::{Kept, Unreadable};
 use crate::{
     Actor, Approval, Attributes, Audit, By, Choices, Entry, Gate, PolicyFile, Protection, Served,
 };
@@ -180,6 +180,8 @@ pub enum Refused {
     Unsaved(String, io::ErrorKind),
     #[error("{0} can be read, or is not there, so there is nothing to start over from")]
     ProtectionReadable(String),
+    #[error("{0} can be read now, which Twigo takes from its next start, so it did not start over")]
+    Restored(String),
     #[error("Twigo could not move {0} aside ({1}), so it changed nothing")]
     Unmoved(String, io::ErrorKind),
     #[error("{0} is {1}, so there is nothing to unlock")]
@@ -191,14 +193,15 @@ pub enum Refused {
 }
 
 /// Starting over from the person's protection file that cannot be read, as
-/// a plan shows it.
+/// a plan shows it and the audit log records it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartOver {
-    /// The file, and where it moves.
     pub file: String,
-    pub aside: String,
-    /// Why it cannot be read, in words that quote nothing of it.
+    /// Why Twigo could not read it as it started, in words that quote
+    /// nothing of it.
     pub reason: String,
+    /// Where it moves, none where it is gone, so nothing moves.
+    pub aside: Option<String>,
 }
 
 /// None for a context no source lists now.
@@ -221,10 +224,9 @@ pub struct Policy {
 #[derive(Clone)]
 struct Held {
     choices: Choices,
-    /// Why the person's protection file cannot be read, which holds every
-    /// context the policy file sets no mode for `read-only` and takes no
-    /// change: read once, as the app starts, until the person starts over.
-    unreadable: Option<String>,
+    /// The person's protection file that could not be read as the app
+    /// started, until the person starts over.
+    unreadable: Option<Unreadable>,
     /// By context. Never stored: a restart relocks.
     unlocks: HashMap<String, Unlock>,
     /// By context: how many times a choice, an unlock or its end changed
@@ -456,10 +458,7 @@ impl Policy {
             // known, and the policy file speaks of a name that names nothing now.
             None => (Mode::ReadOnly, ModeSource::Unlisted),
             Some(metadata) => file
-                .or_else(|| {
-                    let reason = held.unreadable.as_deref()?;
-                    Some(self.kept.unreadable(reason))
-                })
+                .or_else(|| held.unreadable.as_ref().map(Unreadable::access))
                 .unwrap_or_else(|| self.resolve(context, held, &metadata, environment)),
         };
         let unlocked = held
@@ -912,54 +911,50 @@ impl Policy {
         self.kept.file()
     }
 
-    /// What starting over from the person's protection file would do now:
-    /// refused unless it cannot be read.
+    /// What starting over from the person's protection file would do now,
+    /// as it is looked at again: refused unless it could not be read as the
+    /// app started, and where it reads now.
     pub fn plan_start_over(&self) -> Result<StartOver, Refused> {
-        self.starting_over(&self.held())
+        self.unreadable(&self.held())?.start_over()
     }
 
-    fn starting_over(&self, held: &Held) -> Result<StartOver, Refused> {
-        let reason = held
-            .unreadable
-            .clone()
-            .ok_or_else(|| self.kept.readable())?;
-        Ok(StartOver {
-            file: self.kept.file(),
-            aside: self.kept.aside(),
-            reason,
-        })
-    }
-
-    /// Starts over from the person's protection file that cannot be read,
-    /// as a person confirmed through `friction`: the file moves aside, and
-    /// the policy holds no choice and no longer reads closed, so every
-    /// context is what its locks say, or unmarked. Refused, with nothing
-    /// changed, once the file can be read or where the move fails, so the
-    /// next choice writes a new file only once the old one is aside. The
-    /// audit log records it with why the file could not be read.
+    /// Starts over from the person's protection file that could not be read,
+    /// as a person confirmed through `friction`, as it is looked at again:
+    /// the file moves aside, or is gone already, and the policy holds no
+    /// choice and no longer reads closed, so every context is what its locks
+    /// say, or unmarked. Refused, with nothing changed, where the file reads
+    /// now, or where the move fails, so the next choice writes a new file
+    /// only once the old one is aside. The audit log records it with why the
+    /// file could not be read.
     pub fn start_over(&self, friction: &Friction) -> Result<(), Refused> {
         let mut held = self.held();
-        let started = self.starting_over(&held)?;
-        self.kept.set_aside()?;
+        let unreadable = self.unreadable(&held)?;
+        let started = unreadable.start_over()?;
+        unreadable.start(&started)?;
         held.unreadable = None;
         drop(held);
         self.changed();
         self.audit.record(&Entry::StartedOver {
             file: &started.file,
-            aside: &started.aside,
             reason: &started.reason,
+            aside: started.aside.as_deref(),
             friction,
         });
         Ok(())
     }
 
+    /// The person's protection file that could not be read, which a start
+    /// over starts from: refused while it reads, or was not there.
+    fn unreadable<'a>(&self, held: &'a Held) -> Result<&'a Unreadable, Refused> {
+        held.unreadable.as_ref().ok_or_else(|| self.kept.readable())
+    }
+
     /// Refuses every change while the person's protection file cannot be
     /// read, so nothing writes over it.
     fn refuse_unreadable(&self, held: &Held) -> Result<(), Refused> {
-        match held.unreadable {
-            Some(_) => Err(self.kept.refused()),
-            None => Ok(()),
-        }
+        held.unreadable
+            .as_ref()
+            .map_or(Ok(()), |unreadable| Err(unreadable.refused()))
     }
 
     fn changed(&self) {

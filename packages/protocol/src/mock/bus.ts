@@ -1850,10 +1850,10 @@ export class MockBus {
     };
   }
 
-  /** Starting over from the person's protection file that cannot be read, as Rust's `actions::start_over` plans it. */
+  /** Starting over from the person's protection file that cannot be read, as Rust's `actions::start_over` plans it, looked at again as it runs. */
   #startOver(): Planned {
     const { protection } = this.host;
-    const { file, aside, reason } = protection.startingOver();
+    const { file, reason, aside } = protection.startingOver();
     return {
       context: null,
       plan: {
@@ -1861,7 +1861,9 @@ export class MockBus {
         confirm: "Start Over",
         destructive: false,
         consequences: [
-          `It moves ${file}, which cannot be read (${reason}), to ${aside}, in place of any file there.`,
+          aside === null
+            ? `${file}, which could not be read (${reason}), is gone, so nothing moves.`
+            : `It moves ${file}, which cannot be read (${reason}), to ${aside}, in place of any file there.`,
           "Every context you marked before asks again: one that an admin's policy file, its kubeconfig or its provider locks keeps that lock, and any other asks what it is before its first write or exec.",
         ],
         affected: [],

@@ -252,6 +252,55 @@ test("under protectionUnreadable a start over plans and runs as Rust's does: the
   expect(await again).toMatchObject({ code: "protection.readable" });
 });
 
+test("under protectionRestored the person restored the file by hand, so a start over is refused as Rust refuses it and every context stays read-only", async () => {
+  const backend = createMockBackend("protectionRestored");
+  const watched = backend.subscribe("contexts_watch", null, () => undefined);
+  await vi.advanceTimersByTimeAsync(0);
+  const refused = backend
+    .invoke("command_plan", { action: "startOver" })
+    .catch((error: unknown) => error);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(await refused).toMatchObject({ code: "protection.restored" });
+  for (const { access } of (await watched).contexts) {
+    expect(access.source.kind).toBe("protectionUnreadable");
+  }
+});
+
+test("under protectionRemoved the person removed the file by hand, so a start over moves nothing, runs as Rust's does and the problem leaves the list", async () => {
+  const backend = createMockBackend("protectionRemoved");
+  const problems: string[][] = [];
+  const listed = backend.subscribe("problems_watch", null, (next) =>
+    problems.push(next.map(({ code }) => code)),
+  );
+  let contexts: Context[] = [];
+  const watched = backend.subscribe("contexts_watch", null, (next) => {
+    contexts = next.contexts;
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(await listed).toHaveLength(1);
+  await watched;
+
+  const planned = backend.invoke("command_plan", { action: "startOver" });
+  await vi.advanceTimersByTimeAsync(0);
+  const plan = await planned;
+  expect(plan.consequences[0]).toContain("is gone");
+  expect(plan.consequences.join(" ")).not.toContain(".unreadable");
+  const events: OperationEvent[] = [];
+  const ran = backend.subscribe(
+    "command_execute",
+    { plan: plan.id, typed: null },
+    (event) => events.push(event),
+  );
+  await vi.advanceTimersByTimeAsync(0);
+  await ran;
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(events).toMatchObject([{ state: "done" }]);
+  expect(problems).toEqual([[]]);
+  expect(contexts.find(({ name }) => name === "dev")?.access.source).toEqual({
+    kind: "unmarked",
+  });
+});
+
 test("under problemsCleared the state cannot be saved until a save works, and a later save fails again", async () => {
   const sent: string[][] = [];
   const listed = createMockBackend("problemsCleared").subscribe(

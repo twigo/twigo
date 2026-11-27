@@ -55,6 +55,12 @@ export interface Kubeconfigs {
   readonly types: Readonly<Record<string, Environment>>;
 }
 
+/** The person's protection file that Twigo could not read as it started: why, and what a look at it finds now, after the person left it, restored it or removed it by hand. */
+export interface UnreadProtection {
+  readonly reason: string;
+  readonly now: "unreadable" | "restored" | "removed";
+}
+
 /** What `twigo-policy` keeps for each context, over the fixtures' kubeconfig marks. */
 export class MockAccess {
   readonly #watchers = new Set<(catalog: Catalog) => void>();
@@ -65,8 +71,8 @@ export class MockAccess {
   readonly #changed = new Map<string, number>();
   /** Contexts a policy file turned read-only after the app started. */
   readonly #filed = new Set<string>();
-  /** Why the person's protection file cannot be read, until they start over. */
-  #protectionUnreadable: string | undefined;
+  /** The person's protection file that could not be read, until they start over. */
+  #protectionUnreadable: UnreadProtection | undefined;
   readonly #startedOver = new Set<() => void>();
 
   constructor(
@@ -78,8 +84,8 @@ export class MockAccess {
     private readonly listed: Catalog = { contexts: CONTEXTS, failures: [] },
     /** Why the admin's policy file cannot be read, which makes every context read-only. */
     private readonly unreadable?: string,
-    /** Why the person's protection file cannot be read, which holds none of their choices, makes every context read-only below a policy file's entry and refuses every change until the person starts over. */
-    protectionUnreadable?: string,
+    /** The person's protection file that cannot be read, which holds none of their choices, makes every context read-only below a policy file's entry and refuses every change until the person starts over. */
+    protectionUnreadable?: UnreadProtection,
   ) {
     this.#protectionUnreadable = protectionUnreadable;
     const read = protectionUnreadable === undefined;
@@ -216,19 +222,25 @@ export class MockAccess {
     }
   }
 
-  /** What a start over from the person's protection file would move where, as `Policy::plan_start_over` says: refused while the file reads. */
-  startingOver(): { file: string; aside: string; reason: string } {
-    const reason = this.#protectionUnreadable;
-    if (reason === undefined) {
+  /** What a start over from the person's protection file would do now, as `Policy::plan_start_over` looks at the file again: refused while the policy reads it and where it reads by now, and nothing moves where it is gone. */
+  startingOver(): { file: string; reason: string; aside: string | null } {
+    const unread = this.#protectionUnreadable;
+    if (unread === undefined) {
       throw new IpcError(
         "protection.readable",
         `${PROTECTION_FILE} can be read, or is not there, so there is nothing to start over from`,
       );
     }
+    if (unread.now === "restored") {
+      throw new IpcError(
+        "protection.restored",
+        `${PROTECTION_FILE} can be read now, which Twigo takes from its next start, so it did not start over`,
+      );
+    }
     return {
       file: PROTECTION_FILE,
-      aside: `${PROTECTION_FILE}.unreadable`,
-      reason,
+      reason: unread.reason,
+      aside: unread.now === "removed" ? null : `${PROTECTION_FILE}.unreadable`,
     };
   }
 
@@ -362,7 +374,7 @@ export class MockAccess {
         source: {
           kind: "protectionUnreadable",
           file: PROTECTION_FILE,
-          reason: this.#protectionUnreadable,
+          reason: this.#protectionUnreadable.reason,
         },
       };
     }

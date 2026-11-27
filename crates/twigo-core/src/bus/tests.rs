@@ -1511,6 +1511,114 @@ async fn starting_over_asks_in_a_dialog_on_no_context_and_its_run_records_its_li
 }
 
 #[tokio::test]
+async fn a_protection_file_restored_by_hand_refuses_a_start_over_at_plan_and_at_run_with_its_code()
+{
+    let _unreadable = UNREADABLE.lock().await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("protection.json");
+    std::fs::write(&path, "{ not json").unwrap();
+    let core = running_with(dir.path(), PRODUCTION);
+    core.catalog.contexts().await;
+    let restored = r#"{"version": 1, "modes": {"kind-prod": "guarded"}, "environments": {}}"#;
+
+    std::fs::write(&path, restored).unwrap();
+    let refused = core
+        .command_plan("main", PlanRequest::StartOver)
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code, ErrorCode::ProtectionRestored);
+    std::fs::write(&path, "{ not json").unwrap();
+    let plan = core
+        .command_plan("main", PlanRequest::StartOver)
+        .await
+        .unwrap();
+    std::fs::write(&path, restored).unwrap();
+    let (told, send) = events();
+    let request = Execute {
+        plan: plan.id,
+        typed: None,
+    };
+    let refused = core
+        .command_execute("main", request, send)
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code, ErrorCode::ProtectionRestored);
+
+    assert!(told.lock().unwrap().is_empty());
+    assert!(listed());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), restored);
+    assert!(matches!(
+        core.policy.access("kind-prod").source,
+        ModeSource::ProtectionUnreadable { .. }
+    ));
+    let line = json!({
+        "event": "refused",
+        "command": "startOver",
+        "target": path.display().to_string(),
+        "why": { "kind": "restored" },
+    });
+    assert_eq!(audit(dir.path()), [line.clone(), line]);
+}
+
+#[tokio::test]
+async fn a_protection_file_removed_by_hand_is_started_over_from_with_nothing_moved_and_the_problem_cleared()
+ {
+    let _unreadable = UNREADABLE.lock().await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("protection.json");
+    std::fs::write(&path, "{ not json").unwrap();
+    let core = running_with(dir.path(), PRODUCTION);
+    core.catalog.contexts().await;
+    let ModeSource::ProtectionUnreadable { reason, .. } = core.policy.access("kind-prod").source
+    else {
+        panic!("{:?}", core.policy.access("kind-prod"));
+    };
+
+    std::fs::remove_file(&path).unwrap();
+    let plan = core
+        .command_plan("main", PlanRequest::StartOver)
+        .await
+        .unwrap();
+    assert!(
+        !plan
+            .consequences
+            .iter()
+            .any(|said| said.contains("protection.json.unreadable")),
+        "{:?}",
+        plan.consequences
+    );
+    let (told, send) = events();
+    let request = Execute {
+        plan: plan.id,
+        typed: None,
+    };
+    core.command_execute("main", request, send).await.unwrap();
+
+    assert!(matches!(
+        told.lock().unwrap().as_slice(),
+        [OperationEvent::Done { .. }]
+    ));
+    assert!(!listed());
+    assert!(!dir.path().join("protection.json.unreadable").exists());
+    assert_eq!(
+        core.policy.access("kind-prod").source,
+        ModeSource::Environment {
+            environment: Environment::Production
+        }
+    );
+    assert_eq!(
+        audit(dir.path()),
+        [json!({
+            "event": "startedOver",
+            "file": path.display().to_string(),
+            "reason": reason,
+            "aside": null,
+            "friction": { "kind": "confirm" },
+        })]
+    );
+}
+
+#[tokio::test]
 async fn a_choice_that_cannot_be_saved_is_refused_with_its_code_and_the_log_says_why() {
     let dir = tempfile::tempdir().unwrap();
     let core = running_with(dir.path(), PRODUCTION);

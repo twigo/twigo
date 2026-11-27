@@ -82,6 +82,7 @@ const PINNED: &[(ErrorCode, &str, ErrorKind)] = &[
     (ProtectionUnreadable, "protection.unreadable", Permissions),
     (ProtectionUnsaved, "protection.unsaved", Internal),
     (ProtectionReadable, "protection.readable", InvalidInput),
+    (ProtectionRestored, "protection.restored", Conflict),
     (ProtectionUnmoved, "protection.unmoved", Internal),
     (AnswerUndecodable, "answer.undecodable", Internal),
     (

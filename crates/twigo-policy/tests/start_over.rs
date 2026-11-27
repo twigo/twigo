@@ -27,8 +27,20 @@ fn opened(dir: &Path, protection: &Path) -> Arc<Policy> {
             _ => Some(Metadata::default()),
         },
         Protection::read(protection),
-        Audit::off(),
+        Audit::open(&dir.join("audit.jsonl")),
     )
+}
+
+fn audited(dir: &Path) -> Vec<serde_json::Value> {
+    std::fs::read_to_string(dir.join("audit.jsonl"))
+        .unwrap_or_default()
+        .lines()
+        .map(|line| {
+            let mut line: serde_json::Value = serde_json::from_str(line).unwrap();
+            line.as_object_mut().unwrap().remove("at");
+            line
+        })
+        .collect()
 }
 
 fn aside(path: &Path) -> PathBuf {
@@ -58,7 +70,7 @@ fn starting_over_moves_the_file_aside_with_its_bytes_and_the_policy_holds_no_cho
 
     let planned = policy.plan_start_over().unwrap();
     assert_eq!(planned.file, path.display().to_string());
-    assert_eq!(planned.aside, aside(&path).display().to_string());
+    assert_eq!(planned.aside, Some(aside(&path).display().to_string()));
     assert!(!planned.reason.is_empty());
     policy.start_over(&Friction::Confirm).unwrap();
 
@@ -144,6 +156,98 @@ fn starting_over_is_refused_while_the_file_can_be_read_or_is_missing() {
         policy.access("kind-a").source,
         ModeSource::User { overrides: None }
     );
+}
+
+#[test]
+fn a_file_restored_by_hand_refuses_a_start_over_at_plan_and_at_run_and_reads_at_the_next_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("protection.json");
+    std::fs::write(&path, UNREADABLE).unwrap();
+    let policy = opened(dir.path(), &path);
+    let mut changes = policy.changes();
+    changes.borrow_and_update();
+    let restored = r#"{"version": 1, "modes": {"kind-a": "read-only"}, "environments": {}}"#;
+
+    std::fs::write(&path, restored).unwrap();
+    assert!(matches!(
+        policy.plan_start_over(),
+        Err(Refused::Restored(_))
+    ));
+    std::fs::write(&path, UNREADABLE).unwrap();
+    policy.plan_start_over().unwrap();
+    std::fs::write(&path, restored).unwrap();
+    assert!(matches!(
+        policy.start_over(&Friction::Confirm),
+        Err(Refused::Restored(_))
+    ));
+
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), restored);
+    assert!(!aside(&path).exists());
+    assert!(!changes.has_changed().unwrap());
+    assert!(unread(&policy.access("kind-a")));
+    assert!(audited(dir.path()).is_empty());
+    let started = opened(dir.path(), &path).access("kind-a");
+    assert_eq!(
+        (started.mode, started.source),
+        (Mode::ReadOnly, ModeSource::User { overrides: None })
+    );
+}
+
+#[test]
+fn a_file_removed_by_hand_is_started_over_from_with_nothing_moved() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("protection.json");
+    std::fs::write(&path, UNREADABLE).unwrap();
+    let policy = opened(dir.path(), &path);
+    let mut changes = policy.changes();
+    changes.borrow_and_update();
+    let reason = match policy.access("kind-a").source {
+        ModeSource::ProtectionUnreadable { reason, .. } => reason,
+        source => panic!("{source:?}"),
+    };
+
+    std::fs::remove_file(&path).unwrap();
+    let planned = policy.plan_start_over().unwrap();
+    assert_eq!(planned.aside, None);
+    assert_eq!(planned.reason, reason);
+    policy.start_over(&Friction::Confirm).unwrap();
+
+    assert!(!path.exists());
+    assert!(!aside(&path).exists());
+    assert!(changes.has_changed().unwrap());
+    let a = policy.access("kind-a");
+    assert_eq!((a.mode, &a.source), (Mode::Guarded, &ModeSource::Unmarked));
+    assert_eq!(
+        audited(dir.path()),
+        [serde_json::json!({
+            "event": "startedOver",
+            "file": path.display().to_string(),
+            "reason": reason,
+            "aside": null,
+            "friction": { "kind": "confirm" },
+        })]
+    );
+    let planned = policy.plan("kind-a", marked()).unwrap();
+    policy
+        .change("kind-a", &planned, &Friction::AtOnce)
+        .unwrap();
+    assert!(path.exists());
+}
+
+#[test]
+fn a_file_removed_between_the_plan_and_the_run_is_started_over_from_with_nothing_moved() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("protection.json");
+    std::fs::write(&path, UNREADABLE).unwrap();
+    let policy = opened(dir.path(), &path);
+
+    assert!(policy.plan_start_over().unwrap().aside.is_some());
+    std::fs::remove_file(&path).unwrap();
+    policy.start_over(&Friction::Confirm).unwrap();
+
+    assert!(!aside(&path).exists());
+    assert!(!unread(&policy.access("kind-a")));
+    assert_eq!(audited(dir.path())[0]["aside"], serde_json::Value::Null);
 }
 
 #[cfg(unix)]

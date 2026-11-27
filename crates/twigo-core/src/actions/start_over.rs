@@ -1,6 +1,6 @@
 //! Starting over from the person's protection file that cannot be read
-//! (ARCHITECTURE 4.8, 6.4): the file moves aside, and the person's modes and
-//! types go with it. It acts on no context and sends nothing to a cluster,
+//! (ARCHITECTURE 4.8, 6.4): the file moves aside, where it is still there,
+//! and the person's modes and types go with it. It acts on no context and sends nothing to a cluster,
 //! so its plan has no context, no writes and no kubectl command.
 
 use twigo_ipc::IpcError;
@@ -15,12 +15,18 @@ const COMMAND: &str = "startOver";
 pub(crate) fn start_over(core: &Core) -> Result<Planned, IpcError> {
     let StartOver {
         file,
-        aside,
         reason,
+        aside,
     } = core
         .policy
         .plan_start_over()
         .map_err(|error| start_over_refused(core, &error))?;
+    let moves = match aside {
+        Some(aside) => format!(
+            "It moves {file}, which cannot be read ({reason}), to {aside}, in place of any file there."
+        ),
+        None => format!("{file}, which could not be read ({reason}), is gone, so nothing moves."),
+    };
     Ok(Planned {
         acts: Acts::StartsOver {
             done: "Started over without the modes and types you set".to_owned(),
@@ -30,9 +36,7 @@ pub(crate) fn start_over(core: &Core) -> Result<Planned, IpcError> {
         confirm: "Start Over".to_owned(),
         destructive: false,
         consequences: vec![
-            format!(
-                "It moves {file}, which cannot be read ({reason}), to {aside}, in place of any file there."
-            ),
+            moves,
             "Every context you marked before asks again: one that an admin's policy file, its kubeconfig or its provider locks keeps that lock, and any other asks what it is before its first write or exec.".to_owned(),
         ],
         affected: Vec::new(),

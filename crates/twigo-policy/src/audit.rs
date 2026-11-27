@@ -133,11 +133,12 @@ pub enum Entry<'a> {
         why: Why<'a>,
     },
     /// The person started over from their protection file that could not
-    /// be read for `reason`, through `friction`: `file` moved to `aside`.
+    /// be read for `reason`, through `friction`: `file` moved to `aside`,
+    /// none where it was gone, so nothing moved.
     StartedOver {
         file: &'a str,
-        aside: &'a str,
         reason: &'a str,
+        aside: Option<&'a str>,
         friction: &'a Friction,
     },
 }
@@ -170,6 +171,8 @@ pub enum Why<'a> {
     /// The person's protection file can be read, so there is nothing to
     /// start over from.
     ProtectionReadable,
+    /// The person's protection file that could not be read reads now.
+    Restored,
     /// The person's protection file could not be moved aside.
     Unmoved,
     /// An unlock of a context that is not locked.
@@ -192,6 +195,7 @@ impl From<&Refused> for Why<'_> {
             Refused::ProtectionUnreadable(_) => Self::ProtectionUnreadable,
             Refused::Unsaved(..) => Self::Unsaved,
             Refused::ProtectionReadable(_) => Self::ProtectionReadable,
+            Refused::Restored(_) => Self::Restored,
             Refused::Unmoved(..) => Self::Unmoved,
             Refused::NotLocked(..) => Self::NotLocked,
             Refused::Unlisted(_) => Self::Unlisted,
