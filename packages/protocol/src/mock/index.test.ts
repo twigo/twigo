@@ -138,7 +138,7 @@ test("no problem of Twigo's own files is listed, but under the problems scenario
   ]);
 });
 
-test("under protectionUnreadable the person's protection file is listed, every context is read-only and no change of protection plans", async () => {
+test("under protectionUnreadable the person's protection file is listed, none of their choices holds, every context is read-only and no change of protection plans", async () => {
   const backend = createMockBackend("protectionUnreadable");
   const listed = backend.subscribe("problems_watch", null, () => undefined);
   await vi.advanceTimersByTimeAsync(0);
@@ -151,6 +151,21 @@ test("under protectionUnreadable the person's protection file is listed, every c
     expect(access.mode).toBe("read-only");
     expect(access.source.kind).toBe("protectionUnreadable");
   }
+  expect(
+    Object.fromEntries(
+      (await watched).contexts.map(({ name, access }) => [
+        name,
+        access.environment,
+      ]),
+    ),
+  ).toEqual({
+    "prod-eu": "production",
+    staging: "staging",
+    dev: null,
+    qa: null,
+    analytics: null,
+    "kind-local": null,
+  });
   for (const request of [
     { action: "setMode", context: "dev", mode: "read-write" },
     { action: "setEnvironment", context: "dev", environment: "local" },

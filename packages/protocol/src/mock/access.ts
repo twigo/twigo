@@ -58,10 +58,8 @@ export interface Kubeconfigs {
 /** What `twigo-policy` keeps for each context, over the fixtures' kubeconfig marks. */
 export class MockAccess {
   readonly #watchers = new Set<(catalog: Catalog) => void>();
-  readonly #modes = new Map<string, Mode>(Object.entries(CHOSEN));
-  readonly #environments = new Map<string, Environment | null>(
-    Object.entries(MARKED),
-  );
+  readonly #modes: Map<string, Mode>;
+  readonly #environments: Map<string, Environment | null>;
   readonly #unlocks = new Map<string, number>();
   /** How many times a choice or an unlock changed what a context lets through, as `Policy::changes_of` counts. */
   readonly #changed = new Map<string, number>();
@@ -77,9 +75,13 @@ export class MockAccess {
     private readonly listed: Catalog = { contexts: CONTEXTS, failures: [] },
     /** Why the admin's policy file cannot be read, which makes every context read-only. */
     private readonly unreadable?: string,
-    /** Why the person's protection file cannot be read, which makes every context read-only below a policy file's entry and refuses every change. */
+    /** Why the person's protection file cannot be read, which holds none of their choices, makes every context read-only below a policy file's entry and refuses every change. */
     private readonly protectionUnreadable?: string,
-  ) {}
+  ) {
+    const read = protectionUnreadable === undefined;
+    this.#modes = new Map(read ? Object.entries(CHOSEN) : []);
+    this.#environments = new Map(read ? Object.entries(MARKED) : []);
+  }
 
   watch(onMessage: (catalog: Catalog) => void): Catalog {
     this.#watchers.add(onMessage);
