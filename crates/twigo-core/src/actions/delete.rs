@@ -22,7 +22,7 @@ use super::{
     Target, clients_for, counted, get, kind_words, object_ref, plural, sentence, shell_line,
 };
 use crate::Core;
-use crate::bus::{self, Finished, Planned, Progress};
+use crate::bus::{self, Acts, Finished, OnContext, Planned, Progress};
 
 /// The controllers that make a new pod for one that goes; a Job's or a
 /// workflow's may not.
@@ -220,13 +220,15 @@ pub(crate) async fn delete(
         } else {
             writes[0].target()
         },
-        writes,
-        context: Some(context),
-        connection,
-        space: Some(space.to_owned()),
-        risk,
-        previewed: None,
-        run: bus::Run::Sends(Box::new(move |progress| Box::pin(run.run(progress)))),
+        acts: Acts::OnContext(Box::new(OnContext {
+            writes,
+            context,
+            connection,
+            space: Some(space.to_owned()),
+            risk,
+            previewed: None,
+            run: bus::Run::Sends(Box::new(move |progress| Box::pin(run.run(progress)))),
+        })),
     })
 }
 

@@ -4,10 +4,9 @@
 //! so its plan has no context, no writes and no kubectl command.
 
 use twigo_ipc::IpcError;
-use twigo_policy::friction::Risk;
 use twigo_policy::{Entry, Refused, StartOver, Why};
 
-use crate::bus::{Planned, Run};
+use crate::bus::{Acts, Planned};
 use crate::{Core, errors};
 
 /// As the audit log names the command.
@@ -23,11 +22,9 @@ pub(crate) fn start_over(core: &Core) -> Result<Planned, IpcError> {
         .plan_start_over()
         .map_err(|error| start_over_refused(core, &error))?;
     Ok(Planned {
-        context: None,
-        connection: None,
-        space: None,
-        risk: Risk::StartOver,
-        writes: Vec::new(),
+        acts: Acts::StartsOver {
+            done: "Started over without the modes and types you set".to_owned(),
+        },
         command: COMMAND,
         question: "Start over without the modes and types you set?".to_owned(),
         confirm: "Start Over".to_owned(),
@@ -41,10 +38,6 @@ pub(crate) fn start_over(core: &Core) -> Result<Planned, IpcError> {
         affected: Vec::new(),
         command_line: None,
         doing: "Starting over".to_owned(),
-        previewed: None,
-        run: Run::StartsOver {
-            done: "Started over without the modes and types you set".to_owned(),
-        },
         target: file,
     })
 }

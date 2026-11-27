@@ -7,7 +7,7 @@ use twigo_ipc::{ContextAccess, Environment, Friction, IpcError, LockSource, Mode
 use twigo_policy::friction::{friction, keeps};
 use twigo_policy::{Change, Entry, On, Outlived, PlannedChange, Refused, UNLOCK, Why};
 
-use crate::bus::{self, Planned};
+use crate::bus::{self, Acts, OnContext, Planned};
 use crate::{Core, errors};
 
 pub(crate) async fn protection(
@@ -27,10 +27,6 @@ pub(crate) async fn protection(
         done,
     } = words(&context, &planned);
     Ok(Planned {
-        connection: core.policy.connection(&context),
-        space: None,
-        risk: planned.risk(),
-        writes: Vec::new(),
         command: command(change),
         target: context.clone(),
         question,
@@ -40,12 +36,18 @@ pub(crate) async fn protection(
         affected: Vec::new(),
         command_line: None,
         doing,
-        previewed: None,
-        run: bus::Run::Protects {
-            change: Box::new(planned),
-            done,
-        },
-        context: Some(context),
+        acts: Acts::OnContext(Box::new(OnContext {
+            connection: core.policy.connection(&context),
+            space: None,
+            risk: planned.risk(),
+            writes: Vec::new(),
+            previewed: None,
+            run: bus::Run::Protects {
+                change: Box::new(planned),
+                done,
+            },
+            context,
+        })),
     })
 }
 
@@ -186,7 +188,7 @@ fn beneath(context: &str, planned: &PlannedChange) -> Option<String> {
     let now = &planned.after;
     let unmarked = |access: &ContextAccess| access.source == ModeSource::Unmarked;
     let typed = matches!(
-        friction(&planned.risk(), Some((context, &planned.before))),
+        friction(&planned.risk(), context, &planned.before),
         Friction::Typed { .. }
     );
     let hidden = typed && keeps(&planned.before, now);
@@ -657,7 +659,7 @@ mod tests {
                 let Ok(planned) = policy.plan("kind-a", change) else {
                     return;
                 };
-                let typed = friction(&planned.risk(), Some(("kind-a", &planned.before)));
+                let typed = friction(&planned.risk(), "kind-a", &planned.before);
                 if !matches!(typed, Friction::Typed { .. })
                     || !keeps(&planned.before, &planned.after)
                 {

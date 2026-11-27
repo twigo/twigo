@@ -16,10 +16,10 @@ use std::sync::{Arc, Mutex, PoisonError};
 use tokio::sync::watch;
 use tokio::time::Instant;
 use twigo_ipc::{
-    Affected, ContextAccess, ErrorCode, Friction, IpcError, OperationEvent, Plan, PlanId,
-    PreviewId, SubscriptionId,
+    Affected, ContextAccess, ErrorCode, Friction, IpcError, OperationEvent, Plan, PlanContext,
+    PlanId, PreviewId, SubscriptionId,
 };
-use twigo_policy::friction::Risk;
+use twigo_policy::friction::{self, Risk};
 use twigo_policy::{Attributes, PlannedChange};
 
 use crate::actions::Prepared;
@@ -38,21 +38,8 @@ pub(crate) struct Previewed {
 
 /// What a command will do, as its action planned it.
 pub(crate) struct Planned {
-    /// None for what acts on no context, as starting over from the
-    /// person's protection file, which has no connection and no writes.
-    pub context: Option<String>,
-    /// The context's connection it planned for, so it runs there only: a
-    /// delete's, that of the clients it read the object with; a Reveal's,
-    /// the context's as it planned.
-    pub connection: Option<u64>,
-    /// The space whose last action it is once it starts, which holds its
-    /// undo; none for a Reveal, which changes nothing, and for an undo,
-    /// which takes its own.
-    pub space: Option<String>,
-    pub risk: Risk,
-    /// The requests it sends that change the cluster, as they go out, for
-    /// the policy to decide on before anything is asked.
-    pub writes: Vec<Attributes>,
+    /// What it acts on, and how it runs there.
+    pub acts: Acts,
     /// As the audit log names the command and its object.
     pub command: &'static str,
     pub target: String,
@@ -65,6 +52,42 @@ pub(crate) struct Planned {
     /// None for what only Twigo does, such as a change of a context's mode.
     pub command_line: Option<String>,
     pub doing: String,
+}
+
+impl Planned {
+    /// [`OnContext::previewed`], none for what acts on no context.
+    fn previewed(&self) -> Option<&(Previewed, u64)> {
+        match &self.acts {
+            Acts::OnContext(on) => on.previewed.as_ref(),
+            Acts::StartsOver { .. } => None,
+        }
+    }
+}
+
+/// What a plan acts on.
+pub(crate) enum Acts {
+    /// A context, as every command but starting over does.
+    OnContext(Box<OnContext>),
+    /// Starts over from the person's protection file at once, and says
+    /// `done`: it acts on no context, and sends nothing to a cluster.
+    StartsOver { done: String },
+}
+
+/// What a plan does on its context.
+pub(crate) struct OnContext {
+    pub context: String,
+    /// The context's connection it planned for, so it runs there only: a
+    /// delete's, that of the clients it read the object with; a Reveal's,
+    /// the context's as it planned.
+    pub connection: Option<u64>,
+    /// The space whose last action it is once it starts, which holds its
+    /// undo; none for a Reveal, which changes nothing, and for an undo,
+    /// which takes its own.
+    pub space: Option<String>,
+    pub risk: Risk,
+    /// The requests it sends that change the cluster, as they go out, for
+    /// the policy to decide on before anything is asked.
+    pub writes: Vec<Attributes>,
     /// The object of the preview it was made from, with what `start_preview`
     /// answered that preview: a newer preview of it drops the plan, or
     /// keeps it from being kept at all while it is still being built.
@@ -85,9 +108,6 @@ pub(crate) enum Run {
         change: Box<PlannedChange>,
         done: String,
     },
-    /// Starts over from the person's protection file at once, while it
-    /// still cannot be read, and says `done`; it acts on no context.
-    StartsOver { done: String },
 }
 
 /// How a run ended.
@@ -299,17 +319,28 @@ impl Bus {
         }
     }
 
-    /// Keeps a plan to run, with the friction its risk asks for where its
-    /// context lets through what `access` says, none for what acts on no
-    /// context.
+    /// Keeps a plan to run, with the friction it asks for: on its context,
+    /// what its risk asks for there, where it lets through what `access`
+    /// says of it now.
     pub(crate) fn keep(
         &self,
         ticket: Ticket,
         planned: Planned,
-        access: Option<&ContextAccess>,
+        access: impl FnOnce(&str) -> ContextAccess,
     ) -> Result<Plan, IpcError> {
-        let on = planned.context.as_deref().zip(access);
-        let friction = twigo_policy::friction::friction(&planned.risk, on);
+        let (context, friction) = match &planned.acts {
+            Acts::OnContext(on) => {
+                let access = access(&on.context);
+                let friction = friction::friction(&on.risk, &on.context, &access);
+                let context = PlanContext {
+                    name: on.context.clone(),
+                    environment: access.environment,
+                    mode: access.mode,
+                };
+                (Some(context), friction)
+            }
+            Acts::StartsOver { .. } => (None, friction::start_over()),
+        };
         let mut inner = self.inner();
         inner.next += 1;
         let id = PlanId(inner.next);
@@ -320,7 +351,7 @@ impl Bus {
                 "the page that asked for the plan is gone",
             ));
         }
-        if let Some((object, started)) = &planned.previewed
+        if let Some((object, started)) = planned.previewed()
             && window.started.get(object) != Some(started)
         {
             return Err(IpcError::new(
@@ -330,9 +361,7 @@ impl Bus {
         }
         let plan = Plan {
             id,
-            context: planned.context.clone(),
-            environment: access.and_then(|access| access.environment),
-            mode: access.map(|access| access.mode),
+            context,
             friction: friction.clone(),
             question: planned.question.clone(),
             confirm: planned.confirm.clone(),
@@ -366,7 +395,7 @@ impl Bus {
             .previews
             .retain(|_, (kept, _)| kept.object != *object);
         window.entries.retain(|_, entry| {
-            !matches!(entry, Entry::Waiting(waiting) if waiting.planned.previewed.as_ref().is_some_and(|(previewed, _)| previewed == object))
+            !matches!(entry, Entry::Waiting(waiting) if waiting.planned.previewed().is_some_and(|(previewed, _)| previewed == object))
         });
         window.started.insert(object.clone(), started);
         started

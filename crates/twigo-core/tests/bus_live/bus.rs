@@ -232,7 +232,10 @@ async fn guarded_asks_for_the_context_s_name_and_read_only_sends_nothing() {
             text: cluster.context.clone()
         }
     );
-    assert_eq!(plan.mode, Some(Mode::Guarded));
+    assert_eq!(
+        plan.context.as_ref().map(|context| context.mode),
+        Some(Mode::Guarded)
+    );
     run(&core, &plan, Some(&cluster.context)).await.unwrap();
     assert_eq!(Cluster::uid(&config_maps, "guarded").await, None);
 

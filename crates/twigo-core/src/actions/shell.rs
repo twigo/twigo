@@ -16,7 +16,7 @@ use twigo_sessions::shell::{Join, SHELL, Session, Spec};
 
 use super::{Target, clients_for, get, shell_line};
 use crate::Core;
-use crate::bus::{self, Finished, Planned};
+use crate::bus::{self, Acts, Finished, OnContext, Planned};
 use crate::terminal::Shell;
 
 const DEFAULT_CONTAINER: &str = "kubectl.kubernetes.io/default-container";
@@ -163,7 +163,26 @@ pub(crate) async fn shell(
     let exec = writes[0].clone();
     Ok(Planned {
         target: named,
-        writes,
+        acts: Acts::OnContext(Box::new(OnContext {
+            writes,
+            context,
+            connection,
+            space: None,
+            risk: Risk::Shell,
+            previewed: None,
+            run: bus::Run::Sends(Box::new(move |_| {
+                Box::pin(async move {
+                    let (core, clients) =
+                        clients_for(&this, &run_context, connection, "opened nothing").await?;
+                    let relocked =
+                        relocked(Arc::clone(&core.policy), run_context.clone(), exec).boxed();
+                    let id = core
+                        .shells
+                        .keep(ticket, Shell::Pod(Session::park(clients, spec, relocked)))?;
+                    Ok(Finished::Session { id, tty, stdin })
+                })
+            })),
+        })),
         command,
         question: read.question,
         confirm: read.confirm.to_owned(),
@@ -172,23 +191,6 @@ pub(crate) async fn shell(
         affected: Vec::new(),
         command_line: Some(kubectl),
         doing: read.doing,
-        context: Some(context),
-        connection,
-        space: None,
-        risk: Risk::Shell,
-        previewed: None,
-        run: bus::Run::Sends(Box::new(move |_| {
-            Box::pin(async move {
-                let (core, clients) =
-                    clients_for(&this, &run_context, connection, "opened nothing").await?;
-                let relocked =
-                    relocked(Arc::clone(&core.policy), run_context.clone(), exec).boxed();
-                let id = core
-                    .shells
-                    .keep(ticket, Shell::Pod(Session::park(clients, spec, relocked)))?;
-                Ok(Finished::Session { id, tty, stdin })
-            })
-        })),
     })
 }
 

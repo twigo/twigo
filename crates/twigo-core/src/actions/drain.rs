@@ -27,7 +27,7 @@ use twigo_policy::friction::Risk;
 use super::cordon::{node, patch};
 use super::{STRATEGIC_MERGE_PATCH, Target, attributes, clients_for, counted, get, same, write};
 use crate::Core;
-use crate::bus::{self, Finished, Planned, Progress};
+use crate::bus::{self, Acts, Finished, OnContext, Planned, Progress};
 
 /// How long kubectl waits before it asks again to evict a pod a budget
 /// held back (`EvictErrorRetryDelay` in `pkg/cmd/drain`).
@@ -204,13 +204,15 @@ pub(crate) async fn drain(core: &Core, space: &str, name: String) -> Result<Plan
         command_line: Some(kubectl),
         command: "drain",
         target: named,
-        writes,
-        context: Some(context),
-        connection,
-        space: Some(space.to_owned()),
-        risk,
-        previewed: None,
-        run: bus::Run::Sends(Box::new(move |progress| Box::pin(run.run(progress)))),
+        acts: Acts::OnContext(Box::new(OnContext {
+            writes,
+            context,
+            connection,
+            space: Some(space.to_owned()),
+            risk,
+            previewed: None,
+            run: bus::Run::Sends(Box::new(move |progress| Box::pin(run.run(progress)))),
+        })),
     })
 }
 

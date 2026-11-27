@@ -198,8 +198,6 @@ test("under protectionUnreadable a start over plans and runs as Rust's does: the
   const plan = await planned;
   expect(plan).toMatchObject({
     context: null,
-    environment: null,
-    mode: null,
     friction: { kind: "confirm" },
     commandLine: null,
     confirm: "Start Over",
@@ -244,7 +242,9 @@ test("under protectionUnreadable a start over plans and runs as Rust's does: the
     mode: "read-write",
   });
   await vi.advanceTimersByTimeAsync(0);
-  expect(await changed).toMatchObject({ context: "dev", mode: "guarded" });
+  expect(await changed).toMatchObject({
+    context: { name: "dev", mode: "guarded" },
+  });
   const again = backend
     .invoke("command_plan", { action: "startOver" })
     .catch((error: unknown) => error);

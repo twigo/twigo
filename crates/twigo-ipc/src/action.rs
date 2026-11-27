@@ -119,11 +119,9 @@ pub struct PlanId(pub u32);
 #[serde(rename_all = "camelCase")]
 pub struct Plan {
     pub id: PlanId,
-    /// The context it acts on, with its type and mode, none for what acts
-    /// on no context, as starting over from the person's protection file.
-    pub context: Option<String>,
-    pub environment: Option<Environment>,
-    pub mode: Option<Mode>,
+    /// The context it acts on, none for what acts on no context, as
+    /// starting over from the person's protection file.
+    pub context: Option<PlanContext>,
     pub friction: Friction,
     /// The question a dialog asks, naming the cluster: `Delete pod web-1
     /// from kind-a?`
@@ -143,6 +141,14 @@ pub struct Plan {
     /// What a toast or the status bar says while it counts down or runs:
     /// `Deleting pod web-1`.
     pub doing: String,
+}
+
+/// The context a plan acts on, with its type and mode as it was planned.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PlanContext {
+    pub name: String,
+    pub environment: Option<Environment>,
+    pub mode: Mode,
 }
 
 /// Objects that one thing happens to.

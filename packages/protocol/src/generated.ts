@@ -1597,10 +1597,10 @@ omitted: number, };
  */
 export type Plan = { id: PlanId, 
 /**
- * The context it acts on, with its type and mode, none for what acts
- * on no context, as starting over from the person's protection file.
+ * The context it acts on, none for what acts on no context, as
+ * starting over from the person's protection file.
  */
-context: string | null, environment: Environment | null, mode: Mode | null, friction: Friction, 
+context: PlanContext | null, friction: Friction, 
 /**
  * The question a dialog asks, naming the cluster: `Delete pod web-1
  * from kind-a?`
@@ -1633,6 +1633,11 @@ commandLine: string | null,
  * `Deleting pod web-1`.
  */
 doing: string, };
+
+/**
+ * The context a plan acts on, with its type and mode as it was planned.
+ */
+export type PlanContext = { name: string, environment: Environment | null, mode: Mode, };
 
 export type PlanId = number;
 

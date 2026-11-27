@@ -75,9 +75,7 @@ const REQUEST: PlanRequest = {
 
 const PLAN: Plan = {
   id: 7,
-  context: "dev",
-  environment: "development",
-  mode: "read-write",
+  context: { name: "dev", environment: "development", mode: "read-write" },
   friction: { kind: "confirm" },
   question: "Delete pod web-1 in default from dev?",
   confirm: "Delete pod",

@@ -366,6 +366,7 @@ export class Operations {
   ): Promise<{ typed: undefined } | undefined> {
     const request = JSON.stringify(asked);
     this.#countdowns.find((other) => other.request === request)?.cancel();
+    const context = plan.context?.name ?? null;
     return new Promise((resolve) => {
       const until = Date.now() + seconds * 1000;
       const keys = this.cancelKeys();
@@ -386,11 +387,10 @@ export class Operations {
         end(false);
       };
       const toast = notify.countdown({
-        tile: this.#tile(spaceOf(asked), plan.context),
+        tile: this.#tile(spaceOf(asked), context),
         icon: look.icon,
         message: plan.doing,
-        detail: (left) =>
-          along(plan.context, `sends in ${String(left)}\u00a0s`),
+        detail: (left) => along(context, `sends in ${String(left)}\u00a0s`),
         until,
         seconds,
         action: {
@@ -418,6 +418,7 @@ export class Operations {
     look: Look,
     taken: (() => void) | undefined,
   ): Promise<Outcome> {
+    const context = plan.context?.name ?? null;
     return new Promise((resolve) => {
       let ended = false;
       let begun = false;
@@ -446,10 +447,10 @@ export class Operations {
           begun &&
           this.#latest.get(space) === plan.id
         ) {
-          this.#offer(space, plan.context, look, done.text, undoUntil);
+          this.#offer(space, context, look, done.text, undoUntil);
         } else if (done !== undefined) {
           notify.success(done.text, {
-            tile: this.#tile(home, plan.context),
+            tile: this.#tile(home, context),
           });
         }
         resolve(outcome);
@@ -464,7 +465,7 @@ export class Operations {
             if (ended) return;
             this.#running.set(plan.id, {
               id: plan.id,
-              context: plan.context,
+              context,
               text: event.text,
               stop,
             });
@@ -475,7 +476,7 @@ export class Operations {
             return;
           case "stopped":
             notify.info(event.text, {
-              tile: this.#tile(home, plan.context),
+              tile: this.#tile(home, context),
             });
             end({ state: "stopped" });
             return;

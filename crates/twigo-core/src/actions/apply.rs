@@ -72,7 +72,7 @@ use super::{
     ATTEMPTS, Target, attributes, clients_for, get, kind_words, lost, sentence, shell_line, write,
 };
 use crate::Core;
-use crate::bus::{self, Finished, Planned, Previewed, Progress};
+use crate::bus::{self, Acts, Finished, OnContext, Planned, Previewed, Progress};
 
 /// What a preview prepared, sent by the plan of its id.
 pub(crate) struct Prepared {
@@ -1358,13 +1358,15 @@ pub(crate) async fn apply(
                 doing: format!("Applying {what}"),
                 command,
                 target: audit_target,
-                writes,
-                context: Some(context),
-                connection,
-                space: Some(space),
-                risk: Risk::Reviewed,
-                previewed: Some(preview_of.clone()),
-                run: bus::Run::Sends(Box::new(move |_| Box::pin(run.run()))),
+                acts: Acts::OnContext(Box::new(OnContext {
+                    writes,
+                    context,
+                    connection,
+                    space: Some(space),
+                    risk: Risk::Reviewed,
+                    previewed: Some(preview_of.clone()),
+                    run: bus::Run::Sends(Box::new(move |_| Box::pin(run.run()))),
+                })),
             }
         }
         Step::Patch(step) => {
@@ -1388,13 +1390,15 @@ pub(crate) async fn apply(
                 doing: format!("Applying {what}"),
                 command,
                 target: audit_target,
-                writes,
-                context: Some(context),
-                connection,
-                space: Some(space),
-                risk: Risk::Reviewed,
-                previewed: Some(preview_of.clone()),
-                run: bus::Run::Sends(Box::new(move |_| Box::pin(run.run()))),
+                acts: Acts::OnContext(Box::new(OnContext {
+                    writes,
+                    context,
+                    connection,
+                    space: Some(space),
+                    risk: Risk::Reviewed,
+                    previewed: Some(preview_of.clone()),
+                    run: bus::Run::Sends(Box::new(move |_| Box::pin(run.run()))),
+                })),
             }
         }
         Step::Recreate(step) => {
@@ -1446,13 +1450,15 @@ pub(crate) async fn apply(
                 doing: format!("Recreating {what}"),
                 command,
                 target: audit_target,
-                writes,
-                context: Some(context),
-                connection,
-                space: Some(space),
-                risk: Risk::Lasting,
-                previewed: Some(preview_of),
-                run: bus::Run::Sends(Box::new(move |progress| Box::pin(run.run(progress)))),
+                acts: Acts::OnContext(Box::new(OnContext {
+                    writes,
+                    context,
+                    connection,
+                    space: Some(space),
+                    risk: Risk::Lasting,
+                    previewed: Some(preview_of),
+                    run: bus::Run::Sends(Box::new(move |progress| Box::pin(run.run(progress)))),
+                })),
             }
         }
     })

@@ -10,7 +10,7 @@ use twigo_policy::redact::{secret_value, values};
 
 use super::shell_line;
 use crate::Core;
-use crate::bus::{self, Finished, Planned};
+use crate::bus::{self, Acts, Finished, OnContext, Planned};
 use crate::helm::ShownPage;
 
 pub(crate) fn reveal(
@@ -60,24 +60,26 @@ pub(crate) fn reveal(
         doing: format!("Revealing {key}"),
         command: "reveal",
         target: format!("secrets/{name} in {namespace}, key {key}"),
-        writes: Vec::new(),
-        context: Some(context),
-        connection,
-        space: None,
-        risk: Risk::Reveal,
-        previewed: None,
-        run: bus::Run::Sends(Box::new(move |_| {
-            Box::pin(async move {
-                // Read as it runs, and only while the view it is for is open.
-                let core = this
-                    .upgrade()
-                    .ok_or_else(|| IpcError::new(ErrorCode::AppQuitting, "Twigo is quitting"))?;
-                let reading = core
-                    .objects
-                    .with(&window, object, |opened| opened.reading())?;
-                let (value, binary) = secret_value(&reading.json()?, &key)?;
-                Ok(Finished::Revealed { value, binary })
-            })
+        acts: Acts::OnContext(Box::new(OnContext {
+            writes: Vec::new(),
+            context,
+            connection,
+            space: None,
+            risk: Risk::Reveal,
+            previewed: None,
+            run: bus::Run::Sends(Box::new(move |_| {
+                Box::pin(async move {
+                    // Read as it runs, and only while the view it is for is open.
+                    let core = this.upgrade().ok_or_else(|| {
+                        IpcError::new(ErrorCode::AppQuitting, "Twigo is quitting")
+                    })?;
+                    let reading = core
+                        .objects
+                        .with(&window, object, |opened| opened.reading())?;
+                    let (value, binary) = secret_value(&reading.json()?, &key)?;
+                    Ok(Finished::Revealed { value, binary })
+                })
+            })),
         })),
     })
 }
@@ -153,29 +155,31 @@ pub(crate) fn reveal_helm(
             "release {name} in {namespace}, revision {revision}, {}",
             words.place
         ),
-        writes: Vec::new(),
-        context: Some(context),
-        connection,
-        space: None,
-        risk: Risk::Reveal,
-        previewed: None,
-        run: bus::Run::Sends(Box::new(move |_| {
-            Box::pin(async move {
-                // Read as it runs, from the revision the editor shows then.
-                let core = this
-                    .upgrade()
-                    .ok_or_else(|| IpcError::new(ErrorCode::AppQuitting, "Twigo is quitting"))?;
-                let now = shown(
-                    core.releases
-                        .with(&window, release, |opened| opened.shown())?,
-                    revision,
-                )?;
-                if now.secret != secret {
-                    return Err(changed(revision));
-                }
-                let (value, binary) = now.page.revealed(&part)?;
-                Ok(Finished::Revealed { value, binary })
-            })
+        acts: Acts::OnContext(Box::new(OnContext {
+            writes: Vec::new(),
+            context,
+            connection,
+            space: None,
+            risk: Risk::Reveal,
+            previewed: None,
+            run: bus::Run::Sends(Box::new(move |_| {
+                Box::pin(async move {
+                    // Read as it runs, from the revision the editor shows then.
+                    let core = this.upgrade().ok_or_else(|| {
+                        IpcError::new(ErrorCode::AppQuitting, "Twigo is quitting")
+                    })?;
+                    let now = shown(
+                        core.releases
+                            .with(&window, release, |opened| opened.shown())?,
+                        revision,
+                    )?;
+                    if now.secret != secret {
+                        return Err(changed(revision));
+                    }
+                    let (value, binary) = now.page.revealed(&part)?;
+                    Ok(Finished::Revealed { value, binary })
+                })
+            })),
         })),
     })
 }

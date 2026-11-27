@@ -43,24 +43,22 @@ export function ConfirmHost() {
     ) : null;
   }
   const { plan, look } = asking;
-  const { context, mode } = plan;
+  const { context } = plan;
   return (
     <ConfirmDialog
       key={plan.id}
-      {...(context !== null &&
-        mode !== null && {
-          badge: (
-            <ContextBadge
-              context={context}
-              environment={plan.environment}
-              mode={mode}
-            />
-          ),
-        })}
-      {...(context !== null &&
-        plan.environment === "production" && {
-          accent: contextAccent(colors.of(context)),
-        })}
+      {...(context !== null && {
+        badge: (
+          <ContextBadge
+            context={context.name}
+            environment={context.environment}
+            mode={context.mode}
+          />
+        ),
+      })}
+      {...(context?.environment === "production" && {
+        accent: contextAccent(colors.of(context.name)),
+      })}
       question={plan.question}
       consequences={plan.consequences}
       lists={plan.affected.map(({ title, objects }) => ({

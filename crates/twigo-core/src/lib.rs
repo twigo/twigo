@@ -31,6 +31,7 @@ use std::time::Duration;
 use jiff::Timestamp;
 use kube::core::GroupVersionKind;
 use tokio::sync::watch;
+use tokio::time::Instant;
 use twigo_cache::batcher::Batcher;
 use twigo_cache::discovery::{Followed, Followers, Resources};
 use twigo_cache::hub::{Connect, Hub, Query, Resource, RowFormat};
@@ -62,7 +63,7 @@ pub use twigo_sessions::shell::Frame as ShellFrame;
 use actions::undo::Undos;
 use approvals::Approvals;
 pub use auth::AuthFollower;
-use bus::{Bus, Finished, Progress, Run, Waiting};
+use bus::{Acts, Bus, Finished, OnContext, Progress, Run, Waiting};
 use catalog::Catalog;
 use connections::Connections;
 use forward::Forwards;
@@ -441,14 +442,11 @@ impl Core {
             }
             PlanRequest::StartOver => actions::start_over(self)?,
         };
-        let access = match &planned.context {
-            Some(context) => {
-                self.authorize(context, planned.command, &planned.target, &planned.writes)?;
-                Some(self.policy.access(context))
-            }
-            None => None,
-        };
-        self.bus.keep(ticket, planned, access.as_ref())
+        if let Acts::OnContext(on) = &planned.acts {
+            self.authorize(&on.context, planned.command, &planned.target, &on.writes)?;
+        }
+        self.bus
+            .keep(ticket, planned, |context| self.policy.access(context))
     }
 
     /// Runs a plan once its friction is met, whose events go through `send`.
@@ -466,47 +464,31 @@ impl Core {
             friction: planned_friction,
             since,
         } = *waiting;
-        let on = match planned.context.clone() {
-            Some(context) => {
-                let access = self.stands(&context, &planned, &planned_friction)?;
-                Some((context, access))
-            }
-            None => None,
-        };
-        match &planned_friction {
-            Friction::Countdown { seconds }
-                if since.elapsed() < Duration::from_secs((*seconds).into()) =>
-            {
-                return Err(IpcError::new(
-                    ErrorCode::ConfirmCountdown,
-                    "the countdown has not ended",
-                ));
-            }
-            Friction::Typed { text } if request.typed.as_deref() != Some(text.as_str()) => {
-                return Err(IpcError::new(
-                    ErrorCode::ConfirmNameMismatch,
-                    format!("type {text} to confirm"),
-                ));
-            }
-            _ => {}
-        }
-        if let Some((context, _)) = &on {
-            self.authorize(context, planned.command, &planned.target, &planned.writes)?;
-        }
-        let (run, (context, access)) = match (planned.run, on) {
-            (Run::Sends(run), Some(on)) => (run, on),
-            (Run::Protects { change, done }, Some((context, _))) => {
-                self.protect(&context, &change, &planned_friction)?;
-                done_at_once(send, done);
-                return Ok(());
-            }
-            (Run::StartsOver { done }, None) => {
+        let on = match planned.acts {
+            Acts::OnContext(on) => *on,
+            Acts::StartsOver { done } => {
+                met(&planned_friction, since, request.typed.as_deref())?;
                 self.start_over(&planned_friction)?;
                 done_at_once(send, done);
                 return Ok(());
             }
-            (Run::Sends(_) | Run::Protects { .. }, None) | (Run::StartsOver { .. }, Some(_)) => {
-                unreachable!("only starting over acts on no context")
+        };
+        let access = self.stands(&on, planned.command, &planned.target, &planned_friction)?;
+        met(&planned_friction, since, request.typed.as_deref())?;
+        self.authorize(&on.context, planned.command, &planned.target, &on.writes)?;
+        let OnContext {
+            context,
+            connection,
+            space,
+            run,
+            ..
+        } = on;
+        let run = match run {
+            Run::Sends(run) => run,
+            Run::Protects { change, done } => {
+                self.protect(&context, &change, &planned_friction)?;
+                done_at_once(send, done);
+                return Ok(());
             }
         };
 
@@ -526,12 +508,7 @@ impl Core {
             Arc::clone(&self.policy),
             window.to_owned(),
         );
-        let (command, target, space, connection) = (
-            planned.command,
-            planned.target,
-            planned.space,
-            planned.connection,
-        );
+        let (command, target) = (planned.command, planned.target);
         let ticket = space.as_deref().map(|space| undos.started(space));
         tokio::spawn(async move {
             // A panic ends the plan as failed here, with the undo and the bus
@@ -571,16 +548,18 @@ impl Core {
         Ok(())
     }
 
-    /// What `context` lets through now, as a plan on it runs: refused where
-    /// it names another cluster than when `planned` was made, or asks for
-    /// more than `planned_friction` now, which the audit log records.
+    /// What a plan's context lets through now, as `on` runs there: refused
+    /// where it names another cluster than when the plan was made, or asks
+    /// for more than `planned_friction` now, which the audit log records.
     fn stands(
         &self,
-        context: &str,
-        planned: &bus::Planned,
+        on: &OnContext,
+        command: &str,
+        target: &str,
         planned_friction: &Friction,
     ) -> Result<twigo_ipc::ContextAccess, IpcError> {
-        if self.policy.connection(context) != planned.connection {
+        let context = &on.context;
+        if self.policy.connection(context) != on.connection {
             return Err(IpcError::new(
                 ErrorCode::ActionClusterChanged,
                 format!(
@@ -589,7 +568,7 @@ impl Core {
             ));
         }
         let access = self.policy.access(context);
-        let asked = friction(&planned.risk, Some((context, &access)));
+        let asked = friction(&on.risk, context, &access);
         if !covers(planned_friction, &asked) {
             self.policy.audit().record(&Entry::Refused {
                 on: Some(On {
@@ -597,8 +576,8 @@ impl Core {
                     mode: access.mode,
                     source: &access.source,
                 }),
-                command: planned.command,
-                target: &planned.target,
+                command,
+                target,
                 why: Why::Friction {
                     planned: planned_friction,
                     now: &asked,
@@ -1382,6 +1361,26 @@ impl Failures {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// Whether the person went through `friction`, which a plan kept `since`:
+/// its countdown ended, or `typed` is its text.
+fn met(friction: &Friction, since: Instant, typed: Option<&str>) -> Result<(), IpcError> {
+    match friction {
+        Friction::Countdown { seconds }
+            if since.elapsed() < Duration::from_secs((*seconds).into()) =>
+        {
+            Err(IpcError::new(
+                ErrorCode::ConfirmCountdown,
+                "the countdown has not ended",
+            ))
+        }
+        Friction::Typed { text } if typed != Some(text.as_str()) => Err(IpcError::new(
+            ErrorCode::ConfirmNameMismatch,
+            format!("type {text} to confirm"),
+        )),
+        _ => Ok(()),
     }
 }
 

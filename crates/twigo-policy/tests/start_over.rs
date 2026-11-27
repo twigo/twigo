@@ -188,7 +188,7 @@ fn unasked(policy: &Policy, actor: Actor, risk: &Risk) -> bool {
     }
     actor != Actor::Ui
         || matches!(
-            friction(risk, Some(("kind-a", &policy.access("kind-a")))),
+            friction(risk, "kind-a", &policy.access("kind-a")),
             Friction::AtOnce | Friction::Countdown { .. }
         )
 }

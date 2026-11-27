@@ -39,6 +39,7 @@ export type {
   Friction,
   OperationEvent,
   Plan,
+  PlanContext,
   PlanId,
   PlanRequest,
   ResourceRef,
