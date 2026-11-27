@@ -2697,7 +2697,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   They send nothing to a cluster, so a plan has no writes and no kubectl command, and each is refused at plan time where no source lists the context.
   Where the policy file sets the context's mode, a mode and an unlock are refused at plan time, and a type plans.
   While the person's protection file cannot be read, every change is refused at plan time and again as it runs, the type a process's ask gives included, so nothing writes over that file (4.8).
-  Starting over from it is a plan too, the one that acts on no context: it has no context, connection, writes or kubectl command, looks at the file again at plan time and as it runs, and is refused at both while the policy reads the file, where the file reads by then and where its move aside fails (4.8).
+  Starting over from it is a plan too, the one that acts on no context: it has no context, connection, writes or kubectl command, looks at the file again at plan time and as it runs, and is refused at both while the policy reads the file and where the file reads by then, and as it runs where its move aside fails (4.8).
   The person's mode and type outlive every lock that can go: the policy file's entry, a kubeconfig's `readOnly`, a kubeconfig's type and a provider's lock, each of which an edit or the provider can take away on its own.
   So a lasting change is weighed under every set of those locks taken away, the person's choices kept and the empty set being the change as it is, a context unmarked under a set counting as `guarded` there.
   No lock then hides a lowering from the friction: neither a kubeconfig's type beneath its `readOnly` nor the person's mode cleared beneath a kubeconfig's type.

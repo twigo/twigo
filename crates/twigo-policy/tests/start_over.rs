@@ -126,7 +126,7 @@ fn starting_over_moves_the_file_aside_with_its_bytes_and_the_policy_holds_no_cho
 }
 
 #[test]
-fn starting_over_is_refused_while_the_file_can_be_read_or_is_missing() {
+fn starting_over_is_refused_where_the_file_read_or_was_missing_as_twigo_started() {
     let dir = tempfile::tempdir().unwrap();
     let missing = dir.path().join("missing.json");
     let policy = opened(dir.path(), &missing);
