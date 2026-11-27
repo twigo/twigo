@@ -1,11 +1,12 @@
 //! The command bus (ARCHITECTURE 5.1, 6.4). A command that changes a cluster
 //! or shows secret-grade data is planned first: what it will do, in words and
 //! as kubectl, and the friction that what it risks asks for in the context's
-//! mode. The webview draws the friction and runs the plan by its id, with
-//! what proves the friction was met: the typed name, the countdown passed. A
-//! plan runs once, from the window it was made for, on the cluster it was
-//! planned on; the policy decides again as it starts, and the gate below
-//! every client as each request goes out.
+//! mode, or for a start over, which acts on no context, the protection file's
+//! name typed. The webview draws the friction and runs the plan by its id,
+//! with what proves the friction was met: the typed name, the countdown
+//! passed. A plan runs once, from the window it was made for, on the cluster
+//! it was planned on; the policy decides again as it starts, and the gate
+//! below every client as each request goes out.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -15,10 +16,10 @@ use std::sync::{Arc, Mutex, PoisonError};
 use tokio::sync::watch;
 use tokio::time::Instant;
 use twigo_ipc::{
-    Affected, ContextAccess, ErrorCode, Friction, IpcError, OperationEvent, Plan, PlanId,
-    PreviewId, SubscriptionId,
+    Affected, ContextAccess, ErrorCode, Friction, IpcError, OperationEvent, Plan, PlanContext,
+    PlanId, PreviewId, SubscriptionId,
 };
-use twigo_policy::friction::Risk;
+use twigo_policy::friction::{self, Risk};
 use twigo_policy::{Attributes, PlannedChange};
 
 use crate::actions::Prepared;
@@ -37,6 +38,44 @@ pub(crate) struct Previewed {
 
 /// What a command will do, as its action planned it.
 pub(crate) struct Planned {
+    /// What it acts on, and how it runs there.
+    pub acts: Acts,
+    /// As the audit log names the command and its object.
+    pub command: &'static str,
+    pub target: String,
+    pub question: String,
+    pub confirm: String,
+    /// Whether it takes something away for good.
+    pub destructive: bool,
+    pub consequences: Vec<String>,
+    pub affected: Vec<Affected>,
+    /// None for what only Twigo does, such as a change of a context's mode.
+    pub command_line: Option<String>,
+    pub doing: String,
+}
+
+impl Planned {
+    /// [`OnContext::previewed`], none for what acts on no context.
+    fn previewed(&self) -> Option<&(Previewed, u64)> {
+        match &self.acts {
+            Acts::OnContext(on) => on.previewed.as_ref(),
+            Acts::StartsOver { .. } => None,
+        }
+    }
+}
+
+/// What a plan acts on.
+pub(crate) enum Acts {
+    /// A context, as every command but starting over does.
+    OnContext(Box<OnContext>),
+    /// Starts over from the person's protection file, by its `name`, at
+    /// once, and says `done`: it acts on no context, and sends nothing to a
+    /// cluster.
+    StartsOver { name: String, done: String },
+}
+
+/// What a plan does on its context.
+pub(crate) struct OnContext {
     pub context: String,
     /// The context's connection it planned for, so it runs there only: a
     /// delete's, that of the clients it read the object with; a Reveal's,
@@ -50,18 +89,6 @@ pub(crate) struct Planned {
     /// The requests it sends that change the cluster, as they go out, for
     /// the policy to decide on before anything is asked.
     pub writes: Vec<Attributes>,
-    /// As the audit log names the command and its object.
-    pub command: &'static str,
-    pub target: String,
-    pub question: String,
-    pub confirm: String,
-    /// Whether it takes something away for good.
-    pub destructive: bool,
-    pub consequences: Vec<String>,
-    pub affected: Vec<Affected>,
-    /// None for what only Twigo does, such as a change of a context's mode.
-    pub command_line: Option<String>,
-    pub doing: String,
     /// The object of the preview it was made from, with what `start_preview`
     /// answered that preview: a newer preview of it drops the plan, or
     /// keeps it from being kept at all while it is still being built.
@@ -293,14 +320,28 @@ impl Bus {
         }
     }
 
-    /// Keeps a plan to run, with the friction `access` asks for.
+    /// Keeps a plan to run, with the friction it asks for: on its context,
+    /// what its risk asks for there, where it lets through what `access`
+    /// says of it now.
     pub(crate) fn keep(
         &self,
         ticket: Ticket,
         planned: Planned,
-        access: &ContextAccess,
+        access: impl FnOnce(&str) -> ContextAccess,
     ) -> Result<Plan, IpcError> {
-        let friction = twigo_policy::friction::friction(&planned.risk, &planned.context, access);
+        let (context, friction) = match &planned.acts {
+            Acts::OnContext(on) => {
+                let access = access(&on.context);
+                let friction = friction::friction(&on.risk, &on.context, &access);
+                let context = PlanContext {
+                    name: on.context.clone(),
+                    environment: access.environment,
+                    mode: access.mode,
+                };
+                (Some(context), friction)
+            }
+            Acts::StartsOver { name, .. } => (None, friction::start_over(name)),
+        };
         let mut inner = self.inner();
         inner.next += 1;
         let id = PlanId(inner.next);
@@ -311,7 +352,7 @@ impl Bus {
                 "the page that asked for the plan is gone",
             ));
         }
-        if let Some((object, started)) = &planned.previewed
+        if let Some((object, started)) = planned.previewed()
             && window.started.get(object) != Some(started)
         {
             return Err(IpcError::new(
@@ -321,9 +362,7 @@ impl Bus {
         }
         let plan = Plan {
             id,
-            context: planned.context.clone(),
-            environment: access.environment,
-            mode: access.mode,
+            context,
             friction: friction.clone(),
             question: planned.question.clone(),
             confirm: planned.confirm.clone(),
@@ -357,7 +396,7 @@ impl Bus {
             .previews
             .retain(|_, (kept, _)| kept.object != *object);
         window.entries.retain(|_, entry| {
-            !matches!(entry, Entry::Waiting(waiting) if waiting.planned.previewed.as_ref().is_some_and(|(previewed, _)| previewed == object))
+            !matches!(entry, Entry::Waiting(waiting) if waiting.planned.previewed().is_some_and(|(previewed, _)| previewed == object))
         });
         window.started.insert(object.clone(), started);
         started

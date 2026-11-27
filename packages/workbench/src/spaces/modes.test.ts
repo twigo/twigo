@@ -107,7 +107,7 @@ test("each source is named in words", () => {
       reason: "it is not JSON at line 1, column 2",
     }),
   ).toBe(
-    "/data/protection.json, which holds the modes and types you set, cannot be read (it is not JSON at line 1, column 2), so every context an admin's policy file sets no mode for is read-only until you restore or remove it and Twigo restarts.",
+    "/data/protection.json, which holds the modes and types you set, cannot be read (it is not JSON at line 1, column 2), so every context an admin's policy file sets no mode for is read-only until you start over, which moves it aside, or restore it and restart Twigo.",
   );
   expect(describeSource({ kind: "user", overrides: null })).toBe(
     "You set this.",

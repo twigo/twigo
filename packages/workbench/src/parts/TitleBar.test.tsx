@@ -295,9 +295,10 @@ test("under a policy file the popover names the rule and offers no way around it
   expect(screen.getByText(/prod-\* in .*policy\.json sets this/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Read-write" })).toBeNull();
   expect(screen.queryByRole("button", { name: /Unlock/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Start Over…" })).toBeNull();
 });
 
-test("while the person's protection file cannot be read the popover says why and offers no change", async () => {
+test("while the person's protection file cannot be read the popover says why and offers no change but Start Over…, which plans and runs one", async () => {
   const workbench = await testWorkbench(
     undefined,
     createMockBackend("protectionUnreadable"),
@@ -312,6 +313,17 @@ test("while the person's protection file cannot be read the popover says why and
     expect(screen.queryByRole("button", { name: offered })).toBeNull();
   }
   expect(screen.queryByRole("button", { name: /Unlock/ })).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "Start Over…" }));
+  await confirmAsking(workbench);
+  await waitFor(() => {
+    expect(workbench.catalog.find("prod-eu")?.access.source).toEqual({
+      kind: "environment",
+      environment: "production",
+    });
+  });
+  expect(screen.getByRole("button", { name: "Read-write" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Start Over…" })).toBeNull();
 });
 
 test("a context nobody marked has a quiet chip that opens the choices of any other, where the variant shows it", async () => {
@@ -321,6 +333,7 @@ test("a context nobody marked has a quiet chip that opens the choices of any oth
     screen.getByRole("button", { name: "Mode of qa: Not marked" }),
   );
   expect(screen.getByText(/Nobody has said what this context is/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Start Over…" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Staging" }));
   await screen.findByRole("button", { name: "Mode of qa: Staging · guarded" });
 });

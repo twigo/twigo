@@ -15,6 +15,7 @@ import {
   type Environment,
   type OperationEvent,
   type Plan,
+  type PlanContext,
   type PlanRequest,
 } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
@@ -51,9 +52,7 @@ const REQUEST: PlanRequest = {
 function plan(friction: Plan["friction"]): Plan {
   return {
     id: 7,
-    context: "dev",
-    environment: "development",
-    mode: "read-write",
+    context: { name: "dev", environment: "development", mode: "read-write" },
     friction,
     question: "Delete pod web-1 in default from dev?",
     confirm: "Delete pod",
@@ -842,8 +841,13 @@ test("a confirmation's dialog leads with the tile of the context's space, and ke
 
 const REVEAL: PlanRequest = { action: "reveal", object: 3, key: "token" };
 
+const QA: PlanContext = { name: "qa", environment: null, mode: "read-write" };
+
 test("a toast leads with the tile of the space the request is for, whatever context its plan names", async () => {
-  const lone = { ...plan({ kind: "countdown", seconds: 5 }), context: "qa" };
+  const lone = {
+    ...plan({ kind: "countdown", seconds: 5 }),
+    context: QA,
+  };
   const counting = await started(lone, [], true);
   expect(told("qa · sends in")).toMatch(/^DEDeleting pod/);
   act(() => {
@@ -866,7 +870,10 @@ test("a request that names no space, a Reveal, has its context stand for one, an
   await revealing.outcome;
   cleanup();
 
-  const lone = { ...plan({ kind: "countdown", seconds: 5 }), context: "qa" };
+  const lone = {
+    ...plan({ kind: "countdown", seconds: 5 }),
+    context: QA,
+  };
   const counting = await started(lone, [], true, REVEAL);
   expect(told("qa · sends in")).toMatch(/^Deleting pod/);
   act(() => {
@@ -895,7 +902,10 @@ test("a refusal the workbench reports, as a failed command's is, leads with the 
 });
 
 test("a run that ends says so led by the tile of the space it was asked for, whatever context its plan names, as done and as stopped", async () => {
-  const lone = { ...plan({ kind: "atOnce" }), context: "qa" };
+  const lone = {
+    ...plan({ kind: "atOnce" }),
+    context: QA,
+  };
   const done = await started(
     lone,
     [{ state: "done", text: "Deleted pod web-1", undoUntil: null }],
@@ -1094,5 +1104,39 @@ test("the unlock a refusal offers asks in a dialog, and runs once it is confirme
     expect(
       workbench.catalog.find("prod-eu")?.access.unlockedUntil,
     ).not.toBeNull();
+  });
+});
+
+test("starting over asks for protection.json typed in a dialog that names no context, and its run leaves each context to its locks", async () => {
+  const success = vi.spyOn(notify, "success");
+  const workbench = await testWorkbench("protectionUnreadable");
+  render(<WorkbenchView workbench={workbench} />);
+  const outcome = workbench.operations.run({ action: "startOver" }, LOOK);
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  expect(workbench.operations.asking?.plan).toMatchObject({
+    context: null,
+    friction: { kind: "typed", text: "protection.json" },
+    commandLine: null,
+  });
+  const dialog = screen.getByRole("dialog");
+  expect(dialog.textContent).toMatch(/^Start over without/);
+  expect(dialog.textContent).toContain("protection.json.unreadable");
+  const field = screen.getByLabelText("Type protection.json to confirm");
+  const button = screen.getByRole("button", { name: "Start Over" });
+  fireEvent.change(field, { target: { value: "prod-eu" } });
+  expect(button).toHaveProperty("disabled", true);
+  fireEvent.change(field, { target: { value: "protection.json" } });
+  expect(button).toHaveProperty("disabled", false);
+  fireEvent.click(button);
+  await expect(outcome).resolves.toEqual({ state: "done" });
+  expect(success.mock.calls[0]?.[0]).toBe(
+    "Started over without the modes and types you set",
+  );
+  expect(workbench.catalog.find("prod-eu")?.access.source).toEqual({
+    kind: "environment",
+    environment: "production",
+  });
+  expect(workbench.catalog.find("dev")?.access.source).toEqual({
+    kind: "unmarked",
   });
 });

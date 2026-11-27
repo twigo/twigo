@@ -12,6 +12,7 @@ import type {
   ObjectRef,
   OperationEvent,
   Plan,
+  PlanContext,
   PlanId,
   PlanRequest,
   RequestClass,
@@ -197,8 +198,16 @@ interface Write {
   readonly class?: RequestClass;
 }
 
-interface Planned {
-  readonly plan: Omit<Plan, "id" | "friction" | "mode" | "environment">;
+/** What a command will do, as Rust's `bus::Planned` says: on a context, or a start over, which acts on none. */
+type Planned = PlannedOn | StartingOver;
+
+/** What a plan says, beside the context it acts on and its friction. */
+type Words = Omit<Plan, "id" | "friction" | "context">;
+
+/** A plan on a context, as Rust's `bus::OnContext`. */
+interface PlannedOn {
+  readonly context: string;
+  readonly plan: Words;
   readonly risk: Risk;
   /** What the gate reads of the write it sends, none for a Reveal. */
   readonly write?: Write;
@@ -210,6 +219,17 @@ interface Planned {
   readonly previewed?: string;
   /** Throws once what the plan was made against has changed, which refuses it. */
   readonly stands?: () => void;
+  readonly run: Run;
+}
+
+/** Starting over from the person's protection file, which acts on no context, as Rust's `Acts::StartsOver`. */
+interface StartingOver {
+  readonly context: null;
+  /** The file's name, which the person types. */
+  readonly name: string;
+  readonly plan: Words;
+  /** Throws once there is nothing to start over from. */
+  readonly stands: () => void;
   readonly run: Run;
 }
 
@@ -378,6 +398,8 @@ export interface BusHost {
     | "changes"
     | "refuse"
     | "refuseUnreadable"
+    | "startingOver"
+    | "startOver"
     | "setMode"
     | "setEnvironment"
     | "unlock"
@@ -523,8 +545,11 @@ export class MockBus {
         this.#previews.delete(id);
       }
     }
-    for (const [id, waiting] of this.#waiting) {
-      if (waiting.planned.previewed === `${context}/${target}`) {
+    for (const [id, { planned }] of this.#waiting) {
+      if (
+        planned.context !== null &&
+        planned.previewed === `${context}/${target}`
+      ) {
         this.#waiting.delete(id);
       }
     }
@@ -706,8 +731,8 @@ export class MockBus {
     this.#previews.delete(preview);
     const words = recreate ? "Recreated" : "Applied";
     return {
+      context,
       plan: {
-        context,
         question: recreate
           ? `Delete ${what} on ${context} and create it from your edit?`
           : `Apply your changes to ${what} on ${context}?`,
@@ -731,18 +756,26 @@ export class MockBus {
 
   plan(request: PlanRequest): Plan {
     const planned = this.#planned(request);
-    const { context } = planned.plan;
-    const access = this.host.access(context);
-    this.#authorize(context, access, planned);
-    const friction = frictionOf(planned.risk, context, access);
+    const { context, friction } = this.#weigh(planned);
     const id: PlanId = ++this.#next;
     this.#waiting.set(id, { planned, friction, since: Date.now() });
+    return { id, ...planned.plan, context, friction };
+  }
+
+  /** The context a plan acts on as it stands now, refused where the gate refuses its write there, and the friction it asks for, as `Bus::keep` names it. */
+  #weigh(planned: Planned): {
+    context: PlanContext | null;
+    friction: Friction;
+  } {
+    if (planned.context === null) {
+      return { context: null, friction: { kind: "typed", text: planned.name } };
+    }
+    const { context: name, risk } = planned;
+    const access = this.host.access(name);
+    this.#authorize(name, access, planned);
     return {
-      id,
-      ...planned.plan,
-      mode: access.mode,
-      environment: access.environment,
-      friction,
+      context: { name, environment: access.environment, mode: access.mode },
+      friction: frictionOf(risk, name, access),
     };
   }
 
@@ -784,6 +817,8 @@ export class MockBus {
         });
       case "unlock":
         return this.#protection(request.context, { unlock: true });
+      case "startOver":
+        return this.#startOver();
     }
   }
 
@@ -796,12 +831,16 @@ export class MockBus {
       throw new IpcError("bus.not-waiting", `no plan ${id} waits to run`);
     this.#waiting.delete(id);
     const { planned, friction, since } = waiting;
-    const { context } = planned.plan;
-    const access = this.host.access(context);
-    if (!covers(friction, frictionOf(planned.risk, context, access))) {
+    const on = planned.context === null ? undefined : planned;
+    const access = on && this.host.access(on.context);
+    if (
+      on &&
+      access &&
+      !covers(friction, frictionOf(on.risk, on.context, access))
+    ) {
       throw new IpcError(
         "action.mode-changed",
-        `${context} is ${access.mode} now, which asks for more than you confirmed, so Twigo sent nothing`,
+        `${on.context} is ${access.mode} now, which asks for more than you confirmed, so Twigo sent nothing`,
       );
     }
     if (
@@ -816,9 +855,9 @@ export class MockBus {
         `type ${friction.text} to confirm`,
       );
     }
-    this.#authorize(context, access, planned);
+    if (on && access) this.#authorize(on.context, access, on);
     planned.stands?.();
-    const { space } = planned;
+    const space = on?.space;
     if (space !== undefined) {
       this.#latest.set(space, id);
       this.#undos.delete(space);
@@ -837,7 +876,7 @@ export class MockBus {
     this.#stopping.set(id, () => {
       if (ended) return;
       end(undefined);
-      onMessage({ state: "stopped", text: planned.stopped ?? "Stopped" });
+      onMessage({ state: "stopped", text: on?.stopped ?? "Stopped" });
     });
     const tell = (event: Told) => {
       if (ended) return;
@@ -873,7 +912,7 @@ export class MockBus {
   #authorize(
     context: string,
     access: ContextAccess,
-    { write }: Pick<Planned, "write">,
+    { write }: Pick<PlannedOn, "write">,
   ): void {
     if (!write) return;
     const unmarked = access.source.kind === "unmarked";
@@ -1123,8 +1162,8 @@ export class MockBus {
       stopped: several
         ? `Stopped waiting for ${what}, which are still being deleted`
         : `Stopped waiting for ${what}, which is still being deleted`,
+      context,
       plan: {
-        context,
         question: `Delete ${what}${place} from ${context}?`,
         confirm: several ? `Delete ${what}` : `Delete ${kind.words}`,
         destructive: true,
@@ -1193,8 +1232,8 @@ export class MockBus {
     const line = (words: string) =>
       `kubectl --context ${context} scale deployments.apps ${name} ${words}${inNamespace(namespace)}`;
     return {
+      context,
       plan: {
-        context,
         question: `Scale ${what} in ${ns} to ${String(replicas)} on ${context}?`,
         confirm: `Scale to ${String(replicas)}`,
         destructive: zero,
@@ -1280,8 +1319,8 @@ export class MockBus {
     const pods = this.#deployment(cluster, target);
     const what = `deployment ${name}`;
     return {
+      context,
       plan: {
-        context,
         question: `Restart ${what} in ${namespace ?? ""} on ${context}?`,
         confirm: "Restart deployment",
         destructive: false,
@@ -1325,8 +1364,8 @@ export class MockBus {
     const { verb, doing, done } = words(unschedulable);
     const back = words(!unschedulable);
     return {
+      context,
       plan: {
-        context,
         question: `${capital(verb)} node ${name} on ${context}?`,
         confirm: `${capital(verb)} node`,
         destructive: false,
@@ -1383,8 +1422,8 @@ export class MockBus {
     const total = counted(pods.length, "pod");
     return {
       stopped: `Stopped draining node ${name}, which stays cordoned; it evicted 0 of ${total}`,
+      context,
       plan: {
-        context,
         question: `Drain node ${name} on ${context}?`,
         confirm: "Drain node",
         destructive: true,
@@ -1446,8 +1485,8 @@ export class MockBus {
     ).join("");
     const job = `${name.slice(0, 50).replace(/[-.]+$/, "")}-manual-${suffix}`;
     return {
+      context,
       plan: {
-        context,
         question: `Trigger cron job ${name} in ${namespace} on ${context} now?`,
         confirm: "Trigger cron job",
         destructive: false,
@@ -1568,8 +1607,8 @@ export class MockBus {
           ? stopping()
           : { ...AT_ONCE, consequences: ["It starts its pods again."] };
     return {
+      context,
       plan: {
-        context,
         question: `${verb} ${what} in ${namespace ?? ""} on ${context}?`,
         confirm: `${verb} ${kind}`,
         destructive: asked.destructive ?? asked.risk.kind === "lasting",
@@ -1658,8 +1697,8 @@ export class MockBus {
     const { id, revert } = slot;
     const asked = revert.asks();
     return {
+      context: revert.context,
       plan: {
-        context: revert.context,
         question: revert.question,
         confirm: "Undo",
         destructive: asked.destructive ?? asked.risk.kind === "lasting",
@@ -1711,8 +1750,8 @@ export class MockBus {
     const { tty, stdin } = this.host.joins(kind);
     const flags = stdin ? (tty ? " -it" : " -i") : "";
     return {
+      context,
       plan: {
-        context,
         question: attach
           ? `Attach to the main process of ${where}?`
           : `Open a shell in ${where}?`,
@@ -1776,8 +1815,8 @@ export class MockBus {
     const changes = protection.changes(context);
     const said = words(context, change, before, after, beneath);
     return {
+      context,
       plan: {
-        context,
         question: said.question,
         confirm: said.confirm,
         destructive: false,
@@ -1813,6 +1852,41 @@ export class MockBus {
     };
   }
 
+  /** Starting over from the person's protection file that cannot be read, as Rust's `actions::start_over` plans it, looked at again as it runs. */
+  #startOver(): Planned {
+    const { protection } = this.host;
+    const { file, name, reason, aside } = protection.startingOver();
+    return {
+      context: null,
+      name,
+      plan: {
+        question: "Start over without the modes and types you set?",
+        confirm: "Start Over",
+        destructive: false,
+        consequences: [
+          aside === null
+            ? `${file}, which could not be read (${reason}), is gone, so nothing moves.`
+            : `It moves ${file}, which cannot be read (${reason}), to ${aside}, in place of any file there.`,
+          "Every context you marked before asks again: one that an admin's policy file, its kubeconfig or its provider locks keeps that lock, and any other asks what it is before its first write or exec.",
+        ],
+        affected: [],
+        commandLine: null,
+        doing: "Starting over",
+      },
+      stands: () => {
+        protection.startingOver();
+      },
+      run: (tell) => {
+        protection.startOver();
+        tell({
+          state: "done",
+          text: "Started over without the modes and types you set",
+          undoUntil: null,
+        });
+      },
+    };
+  }
+
   #revealHelm(id: number, revision: number, part: HelmPart): Planned {
     const { release, context } = this.host.release(id);
     const { value, binary } = release.reveal(revision, part);
@@ -1825,8 +1899,8 @@ export class MockBus {
       value,
     );
     return {
+      context,
       plan: {
-        context,
         question,
         confirm: "Reveal",
         destructive: false,
@@ -1851,8 +1925,8 @@ export class MockBus {
       ? `'go-template={{index .data "${key}"}}'`
       : `'go-template={{index .data "${key}" | base64decode}}'`;
     return {
+      context,
       plan: {
-        context,
         question: `Reveal ${key} of secret ${name} in ${namespace} from ${context}?`,
         confirm: "Reveal value",
         destructive: false,

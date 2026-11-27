@@ -19,12 +19,12 @@ mod served;
 pub use actor::Actor;
 pub use approval::Approval;
 pub use attributes::Attributes;
-pub use audit::{Audit, By, Entry, Why};
+pub use audit::{Audit, By, Entry, On, Why};
 pub use file::PolicyFile;
 pub use gate::{Gate, GateLayer, Gated, RecheckLayer, Rechecked};
 pub use policy::{
-    Beneath, Change, Metadata, Outlived, PlannedChange, Policy, ProviderLock, Refused, TypeLock,
-    UNLOCK,
+    Beneath, Change, Metadata, Outlived, PlannedChange, Policy, ProviderLock, Refused, StartOver,
+    TypeLock, UNLOCK,
 };
 pub use protection::{Choices, Protection};
 pub use served::{Served, Server, api_service};

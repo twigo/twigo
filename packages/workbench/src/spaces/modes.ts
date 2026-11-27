@@ -131,7 +131,7 @@ export function modeLock(lookup: Lookup): string | undefined {
 /**
  * Whether nothing in the UI changes the mode or lifts it: the admin's file
  * holds it, or the person's protection file cannot be read, which holds
- * the context read-only until Twigo restarts.
+ * the context read-only until the person starts over or Twigo restarts.
  */
 export function unchangeable(source: ModeSource): boolean {
   return source.kind === "policyFile" || source.kind === "protectionUnreadable";
@@ -157,7 +157,7 @@ export function describeSource(source: ModeSource): string {
         ? `${source.file} cannot be read${source.reason ? ` (${source.reason})` : ""}, so every context is read-only until an admin fixes it and Twigo restarts.`
         : `${source.pattern} in ${source.file} sets this. Twigo cannot change or unlock it.`;
     case "protectionUnreadable":
-      return `${source.file}, which holds the modes and types you set, cannot be read (${source.reason}), so every context an admin's policy file sets no mode for is read-only until you restore or remove it and Twigo restarts.`;
+      return `${source.file}, which holds the modes and types you set, cannot be read (${source.reason}), so every context an admin's policy file sets no mode for is read-only until you start over, which moves it aside, or restore it and restart Twigo.`;
     case "user":
       return source.overrides === null
         ? "You set this."

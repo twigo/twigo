@@ -11,10 +11,11 @@ use twigo_ipc::{
     BlockReason, Environment, ErrorCode, ErrorKind, Execute, Friction, IpcError, Mode, ModeSource,
     OperationEvent, PlanId, PlanRequest, ShellEnd, ShellEvent, ShellKind, ShellTarget,
 };
+use twigo_log::problems;
 use twigo_policy::Attributes;
 use twigo_policy::friction::Risk;
 
-use super::{Finished, Planned, Previewed, Progress, Run};
+use super::{Acts, Finished, OnContext, Planned, Previewed, Progress, Run};
 use crate::actions::Prepared;
 use crate::{Core, ShellFrame, Started};
 
@@ -52,17 +53,28 @@ type Runs = Arc<Mutex<u32>>;
 fn planned(core: &Core, risk: Risk, runs: &Runs) -> Planned {
     let runs = Arc::clone(runs);
     Planned {
-        context: "kind-a".to_owned(),
-        connection: core.policy.connection("kind-a"),
-        space: Some("kind-a".to_owned()),
-        risk,
-        writes: vec![Attributes::action(
-            "delete",
-            "configmaps",
-            None,
-            Some("a"),
-            Some("m"),
-        )],
+        acts: Acts::OnContext(Box::new(OnContext {
+            context: "kind-a".to_owned(),
+            connection: core.policy.connection("kind-a"),
+            space: Some("kind-a".to_owned()),
+            risk,
+            writes: vec![Attributes::action(
+                "delete",
+                "configmaps",
+                None,
+                Some("a"),
+                Some("m"),
+            )],
+            previewed: None,
+            run: Run::Sends(Box::new(move |progress: Progress| {
+                Box::pin(async move {
+                    *runs.lock().unwrap() += 1;
+                    progress.running("Waiting for config map m to go");
+                    progress.stopped().await;
+                    Ok(Finished::stopped("stopped".to_owned()))
+                })
+            })),
+        })),
         command: "delete",
         target: "configmaps/m in a".to_owned(),
         question: "Delete config map m in a from kind-a?".to_owned(),
@@ -72,24 +84,23 @@ fn planned(core: &Core, risk: Risk, runs: &Runs) -> Planned {
         affected: Vec::new(),
         command_line: Some("kubectl --context kind-a delete configmaps m -n a".to_owned()),
         doing: "Deleting config map m".to_owned(),
-        previewed: None,
-        run: Run::Sends(Box::new(move |progress: Progress| {
-            Box::pin(async move {
-                *runs.lock().unwrap() += 1;
-                progress.running("Waiting for config map m to go");
-                progress.stopped().await;
-                Ok(Finished::stopped("stopped".to_owned()))
-            })
-        })),
     }
+}
+
+fn on_context(planned: &mut Planned) -> &mut OnContext {
+    let Acts::OnContext(on) = &mut planned.acts else {
+        panic!("a plan on no context");
+    };
+    on
 }
 
 async fn new_plan(core: &Core, window: &str, risk: Risk, runs: &Runs) -> twigo_ipc::Plan {
     core.catalog.contexts().await;
     let ticket = core.bus.ticket(window);
-    let access = core.policy.access("kind-a");
     core.bus
-        .keep(ticket, planned(core, risk, runs), &access)
+        .keep(ticket, planned(core, risk, runs), |context| {
+            core.policy.access(context)
+        })
         .unwrap()
 }
 
@@ -385,10 +396,11 @@ async fn a_plan_asked_for_by_a_page_that_reloaded_is_not_kept() {
     core.catalog.contexts().await;
     let ticket = core.bus.ticket("main");
     core.drop_window("main");
-    let access = core.policy.access("kind-a");
     let refused = core
         .bus
-        .keep(ticket, planned(&core, Risk::Lasting, &runs), &access)
+        .keep(ticket, planned(&core, Risk::Lasting, &runs), |context| {
+            core.policy.access(context)
+        })
         .unwrap_err();
     assert_eq!(refused.kind, ErrorKind::Unavailable);
 }
@@ -899,10 +911,10 @@ async fn plan_started(
 ) -> Result<twigo_ipc::Plan, twigo_ipc::IpcError> {
     core.catalog.contexts().await;
     let ticket = core.bus.ticket(window);
-    let access = core.policy.access("kind-a");
     let mut planned = planned(core, Risk::Reviewed, runs);
-    planned.previewed = Some((object.clone(), started));
-    core.bus.keep(ticket, planned, &access)
+    on_context(&mut planned).previewed = Some((object.clone(), started));
+    core.bus
+        .keep(ticket, planned, |context| core.policy.access(context))
 }
 
 #[tokio::test]
@@ -1198,7 +1210,10 @@ async fn lowering_protection_asks_for_the_name_and_the_log_records_the_change_on
         text: "kind-prod".to_owned(),
     };
     assert_eq!(plan.friction, typed);
-    assert_eq!(plan.mode, Mode::ReadOnly);
+    assert_eq!(
+        plan.context.as_ref().map(|context| context.mode),
+        Some(Mode::ReadOnly)
+    );
     assert_eq!(plan.confirm, "Make read-write");
     assert_eq!(plan.command_line, None);
     assert!(plan.affected.is_empty());
@@ -1264,7 +1279,10 @@ async fn clearing_a_mark_asks_for_the_name_so_two_steps_lower_no_more_than_one()
         environment: None,
     };
     let plan = core.command_plan("main", clear()).await.unwrap();
-    assert_eq!(plan.mode, Mode::Guarded);
+    assert_eq!(
+        plan.context.as_ref().map(|context| context.mode),
+        Some(Mode::Guarded)
+    );
     assert_eq!(
         plan.friction,
         Friction::Typed {
@@ -1371,8 +1389,18 @@ async fn a_choice_is_kept_in_the_protection_file_through_a_restart_and_a_state_s
     assert_eq!(chosen(&set_aside), held);
 }
 
+static UNREADABLE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+fn listed() -> bool {
+    problems::watch()
+        .borrow()
+        .iter()
+        .any(|problem| problem.code == ErrorCode::ProtectionUnreadable)
+}
+
 #[tokio::test]
 async fn a_protection_file_that_cannot_be_read_refuses_a_plan_with_its_code_and_the_log_says_why() {
+    let _unreadable = UNREADABLE.lock().await;
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("protection.json"), "{ not json").unwrap();
     let core = running_with(dir.path(), PRODUCTION);
@@ -1395,6 +1423,217 @@ async fn a_protection_file_that_cannot_be_read_refuses_a_plan_with_its_code_and_
     assert_eq!(
         std::fs::read_to_string(dir.path().join("protection.json")).unwrap(),
         "{ not json"
+    );
+}
+
+#[tokio::test]
+async fn starting_over_asks_for_the_file_s_name_on_no_context_and_its_run_records_its_line_and_clears_the_problem()
+ {
+    let _unreadable = UNREADABLE.lock().await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("protection.json");
+    std::fs::write(&path, "{ not json").unwrap();
+    let core = running_with(dir.path(), PRODUCTION);
+    core.catalog.contexts().await;
+    let ModeSource::ProtectionUnreadable { reason, .. } = core.policy.access("kind-prod").source
+    else {
+        panic!("{:?}", core.policy.access("kind-prod"));
+    };
+    assert!(listed());
+
+    let plan = core
+        .command_plan("main", PlanRequest::StartOver)
+        .await
+        .unwrap();
+    let typed = Friction::Typed {
+        text: "protection.json".to_owned(),
+    };
+    assert_eq!(plan.friction, typed);
+    assert_eq!((plan.context, plan.command_line), (None, None));
+    let (told, send) = events();
+    let request = Execute {
+        plan: plan.id,
+        typed: Some("kind-prod".to_owned()),
+    };
+    let refused = core
+        .command_execute("main", request, send)
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code, ErrorCode::ConfirmNameMismatch);
+    assert!(told.lock().unwrap().is_empty());
+    assert!(path.exists());
+    let plan = core
+        .command_plan("main", PlanRequest::StartOver)
+        .await
+        .unwrap();
+    let file = path.display().to_string();
+    let aside = dir
+        .path()
+        .join("protection.json.unreadable")
+        .display()
+        .to_string();
+    assert!(
+        plan.consequences
+            .iter()
+            .any(|said| said.contains(&file) && said.contains(&aside) && said.contains(&reason)),
+        "{:?}",
+        plan.consequences
+    );
+    let (told, send) = events();
+    let request = Execute {
+        plan: plan.id,
+        typed: Some("protection.json".to_owned()),
+    };
+    core.command_execute("main", request, send).await.unwrap();
+    assert!(matches!(
+        told.lock().unwrap().as_slice(),
+        [OperationEvent::Done { .. }]
+    ));
+
+    let access = core.policy.access("kind-prod");
+    assert_eq!(
+        (access.mode, access.source),
+        (
+            Mode::ReadOnly,
+            ModeSource::Environment {
+                environment: Environment::Production
+            }
+        )
+    );
+    assert!(!listed());
+    assert_eq!(std::fs::read_to_string(&aside).unwrap(), "{ not json");
+    assert_eq!(
+        audit(dir.path()),
+        [json!({
+            "event": "startedOver",
+            "file": file,
+            "aside": aside,
+            "reason": reason,
+            "friction": { "kind": "typed", "text": "protection.json" },
+        })]
+    );
+
+    let refused = core
+        .command_plan("main", PlanRequest::StartOver)
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code, ErrorCode::ProtectionReadable);
+    assert_eq!(
+        audit(dir.path())[1],
+        json!({
+            "event": "refused",
+            "command": "startOver",
+            "target": file,
+            "why": { "kind": "protectionReadable" },
+        })
+    );
+}
+
+#[tokio::test]
+async fn a_protection_file_restored_by_hand_refuses_a_start_over_at_plan_and_at_run_with_its_code()
+{
+    let _unreadable = UNREADABLE.lock().await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("protection.json");
+    std::fs::write(&path, "{ not json").unwrap();
+    let core = running_with(dir.path(), PRODUCTION);
+    core.catalog.contexts().await;
+    let restored = r#"{"version": 1, "modes": {"kind-prod": "guarded"}, "environments": {}}"#;
+
+    std::fs::write(&path, restored).unwrap();
+    let refused = core
+        .command_plan("main", PlanRequest::StartOver)
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code, ErrorCode::ProtectionRestored);
+    std::fs::write(&path, "{ not json").unwrap();
+    let plan = core
+        .command_plan("main", PlanRequest::StartOver)
+        .await
+        .unwrap();
+    std::fs::write(&path, restored).unwrap();
+    let (told, send) = events();
+    let request = Execute {
+        plan: plan.id,
+        typed: Some("protection.json".to_owned()),
+    };
+    let refused = core
+        .command_execute("main", request, send)
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code, ErrorCode::ProtectionRestored);
+
+    assert!(told.lock().unwrap().is_empty());
+    assert!(listed());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), restored);
+    assert!(matches!(
+        core.policy.access("kind-prod").source,
+        ModeSource::ProtectionUnreadable { .. }
+    ));
+    let line = json!({
+        "event": "refused",
+        "command": "startOver",
+        "target": path.display().to_string(),
+        "why": { "kind": "restored" },
+    });
+    assert_eq!(audit(dir.path()), [line.clone(), line]);
+}
+
+#[tokio::test]
+async fn a_protection_file_removed_by_hand_is_started_over_from_with_nothing_moved_and_the_problem_cleared()
+ {
+    let _unreadable = UNREADABLE.lock().await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("protection.json");
+    std::fs::write(&path, "{ not json").unwrap();
+    let core = running_with(dir.path(), PRODUCTION);
+    core.catalog.contexts().await;
+    let ModeSource::ProtectionUnreadable { reason, .. } = core.policy.access("kind-prod").source
+    else {
+        panic!("{:?}", core.policy.access("kind-prod"));
+    };
+
+    std::fs::remove_file(&path).unwrap();
+    let plan = core
+        .command_plan("main", PlanRequest::StartOver)
+        .await
+        .unwrap();
+    assert!(
+        !plan
+            .consequences
+            .iter()
+            .any(|said| said.contains("protection.json.unreadable")),
+        "{:?}",
+        plan.consequences
+    );
+    let (told, send) = events();
+    let request = Execute {
+        plan: plan.id,
+        typed: Some("protection.json".to_owned()),
+    };
+    core.command_execute("main", request, send).await.unwrap();
+
+    assert!(matches!(
+        told.lock().unwrap().as_slice(),
+        [OperationEvent::Done { .. }]
+    ));
+    assert!(!listed());
+    assert!(!dir.path().join("protection.json.unreadable").exists());
+    assert_eq!(
+        core.policy.access("kind-prod").source,
+        ModeSource::Environment {
+            environment: Environment::Production
+        }
+    );
+    assert_eq!(
+        audit(dir.path()),
+        [json!({
+            "event": "startedOver",
+            "file": path.display().to_string(),
+            "reason": reason,
+            "aside": null,
+            "friction": { "kind": "typed", "text": "protection.json" },
+        })]
     );
 }
 
@@ -1800,15 +2039,17 @@ async fn a_plan_whose_run_panics_ends_failed_with_its_line_and_is_not_kept() {
     let core = running(dir.path()).await;
     let runs = Runs::default();
     let mut planned = planned(&core, Risk::Lasting, &runs);
-    planned.run = Run::Sends(Box::new(|progress: Progress| {
+    on_context(&mut planned).run = Run::Sends(Box::new(|progress: Progress| {
         Box::pin(async move {
             progress.running("Deleting config map m");
             panic!("a run's bug");
         })
     }));
     let ticket = core.bus.ticket("main");
-    let access = core.policy.access("kind-a");
-    let plan = core.bus.keep(ticket, planned, &access).unwrap();
+    let plan = core
+        .bus
+        .keep(ticket, planned, |context| core.policy.access(context))
+        .unwrap();
     let (told, send) = events();
     let request = Execute {
         plan: plan.id,
@@ -1845,7 +2086,7 @@ async fn a_failed_command_leaves_its_code_and_none_of_the_server_s_words_in_the_
     let core = running(dir.path()).await;
     let runs = Runs::default();
     let mut planned = planned(&core, Risk::Lasting, &runs);
-    planned.run = Run::Sends(Box::new(|_: Progress| {
+    on_context(&mut planned).run = Run::Sends(Box::new(|_: Progress| {
         Box::pin(async {
             Err(IpcError::new(
                 ErrorCode::ServerInvalid,
@@ -1854,8 +2095,10 @@ async fn a_failed_command_leaves_its_code_and_none_of_the_server_s_words_in_the_
         })
     }));
     let ticket = core.bus.ticket("main");
-    let access = core.policy.access("kind-a");
-    let plan = core.bus.keep(ticket, planned, &access).unwrap();
+    let plan = core
+        .bus
+        .keep(ticket, planned, |context| core.policy.access(context))
+        .unwrap();
     let (_told, send) = events();
     let request = Execute {
         plan: plan.id,

@@ -11,7 +11,10 @@ export function useOperationEntries(): readonly StatusEntry[] {
     text: running.text,
     icon: LoaderCircle,
     spin: true,
-    tooltip: `${running.context}: stop waiting`,
+    tooltip:
+      running.context === null
+        ? "Stop waiting"
+        : `${running.context}: stop waiting`,
     run: running.stop,
   }));
 }

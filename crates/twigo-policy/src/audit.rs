@@ -9,6 +9,7 @@
 //!
 //! It also records each change of a context's protection, a command's, the
 //! type an unmarked ask's answer gave, or the catalog's, each unlock's end,
+//! each start over from the person's protection file that could not be read,
 //! each credential plugin a person trusted, and each command of a person's
 //! that the policy refused before anything was sent.
 
@@ -122,16 +123,33 @@ pub enum Entry<'a> {
         program: Option<&'a str>,
     },
     /// The policy refused a command of a person's before anything was sent,
-    /// named as `confirmed` names one. `mode` and `source` are what the
-    /// policy read of the context.
+    /// named as `confirmed` names one, with the context it acts on as the
+    /// policy read it, none for what acts on no context.
     Refused {
-        context: &'a str,
+        #[serde(flatten)]
+        on: Option<On<'a>>,
         command: &'a str,
         target: &'a str,
-        mode: Mode,
-        source: &'a ModeSource,
         why: Why<'a>,
     },
+    /// The person started over from their protection file that could not
+    /// be read for `reason`, through `friction`: `file` moved to `aside`,
+    /// none where it was gone, so nothing moved.
+    StartedOver {
+        file: &'a str,
+        reason: &'a str,
+        aside: Option<&'a str>,
+        friction: &'a Friction,
+    },
+}
+
+/// The context a refused command acts on, with the mode and source the
+/// policy read of it.
+#[derive(Debug, Serialize)]
+pub struct On<'a> {
+    pub context: &'a str,
+    pub mode: Mode,
+    pub source: &'a ModeSource,
 }
 
 /// Why the policy refused a command.
@@ -150,6 +168,13 @@ pub enum Why<'a> {
     ProtectionUnreadable,
     /// The person's protection file could not be written.
     Unsaved,
+    /// The person's protection file can be read, so there is nothing to
+    /// start over from.
+    ProtectionReadable,
+    /// The person's protection file that could not be read reads now.
+    Restored,
+    /// The person's protection file could not be moved aside.
+    Unmoved,
     /// An unlock of a context that is not locked.
     NotLocked,
     /// No source lists the context.
@@ -169,6 +194,9 @@ impl From<&Refused> for Why<'_> {
             Refused::PolicyFile(..) | Refused::PolicyFileUnreadable(_) => Self::PolicyFile,
             Refused::ProtectionUnreadable(_) => Self::ProtectionUnreadable,
             Refused::Unsaved(..) => Self::Unsaved,
+            Refused::ProtectionReadable(_) => Self::ProtectionReadable,
+            Refused::Restored(_) => Self::Restored,
+            Refused::Unmoved(..) => Self::Unmoved,
             Refused::NotLocked(..) => Self::NotLocked,
             Refused::Unlisted(_) => Self::Unlisted,
             Refused::Changed(_) => Self::Changed,
@@ -282,11 +310,13 @@ impl Audit {
     /// The gate refused a command of a person's before it sent anything.
     pub fn gate_refused(&self, context: &str, command: &str, target: &str, blocked: &Blocked) {
         self.record(&Entry::Refused {
-            context,
+            on: Some(On {
+                context,
+                mode: blocked.mode,
+                source: &blocked.source,
+            }),
             command,
             target,
-            mode: blocked.mode,
-            source: &blocked.source,
             why: Why::Gate {
                 reason: blocked.reason,
             },

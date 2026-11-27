@@ -104,6 +104,11 @@ pub enum PlanRequest {
     /// Lets a `read-only` context through as `guarded` for 15 minutes.
     /// Refused under the admin's policy file.
     Unlock { context: String },
+    /// Moves the person's protection file that cannot be read aside, where
+    /// it is still there, and starts with no mode or type they set, so
+    /// every context is what its locks say, or unmarked. Refused while the
+    /// file can be read.
+    StartOver,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
@@ -115,9 +120,9 @@ pub struct PlanId(pub u32);
 #[serde(rename_all = "camelCase")]
 pub struct Plan {
     pub id: PlanId,
-    pub context: String,
-    pub environment: Option<Environment>,
-    pub mode: Mode,
+    /// The context it acts on, none for what acts on no context, as
+    /// starting over from the person's protection file.
+    pub context: Option<PlanContext>,
     pub friction: Friction,
     /// The question a dialog asks, naming the cluster: `Delete pod web-1
     /// from kind-a?`
@@ -137,6 +142,14 @@ pub struct Plan {
     /// What a toast or the status bar says while it counts down or runs:
     /// `Deleting pod web-1`.
     pub doing: String,
+}
+
+/// The context a plan acts on, with its type and mode as it was planned.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PlanContext {
+    pub name: String,
+    pub environment: Option<Environment>,
+    pub mode: Mode,
 }
 
 /// Objects that one thing happens to.

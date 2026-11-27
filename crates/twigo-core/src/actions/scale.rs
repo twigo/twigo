@@ -23,7 +23,7 @@ use super::{
     ATTEMPTS, MERGE_PATCH, Target, clients_for, get, kind_words, lost, patch_as_of, same, sentence,
 };
 use crate::Core;
-use crate::bus::{self, Finished, Planned};
+use crate::bus::{self, Acts, Finished, OnContext, Planned};
 use twigo_kube::client::Clients;
 
 pub(crate) async fn scale(
@@ -106,13 +106,15 @@ pub(crate) async fn scale(
         command_line: Some(kubectl),
         command: "scale",
         target: named,
-        writes: vec![attributes],
-        context,
-        connection,
-        space: Some(space.to_owned()),
-        risk,
-        previewed: None,
-        run: bus::Run::Sends(Box::new(move |_| Box::pin(run.run()))),
+        acts: Acts::OnContext(Box::new(OnContext {
+            writes: vec![attributes],
+            context,
+            connection,
+            space: Some(space.to_owned()),
+            risk,
+            previewed: None,
+            run: bus::Run::Sends(Box::new(move |_| Box::pin(run.run()))),
+        })),
     })
 }
 

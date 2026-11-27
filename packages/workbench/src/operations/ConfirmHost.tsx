@@ -7,8 +7,9 @@ import { environmentChoices, environmentLines } from "./environmentChoices";
 /**
  * The dialog of the plan the person is asked to confirm (ARCHITECTURE 6.4),
  * in its context's colour: the context's type and name first, a strip along
- * the top where the context is production. Where a command met a context
- * nobody marked, the dialog that asks what it is comes first.
+ * the top where the context is production, and neither for a plan on no
+ * context. Where a command met a context nobody marked, the dialog that asks
+ * what it is comes first.
  */
 export function ConfirmHost() {
   const { operations, colors } = useWorkbench();
@@ -42,18 +43,22 @@ export function ConfirmHost() {
     ) : null;
   }
   const { plan, look } = asking;
-  const accent = contextAccent(colors.of(plan.context));
+  const { context } = plan;
   return (
     <ConfirmDialog
       key={plan.id}
-      badge={
-        <ContextBadge
-          context={plan.context}
-          environment={plan.environment}
-          mode={plan.mode}
-        />
-      }
-      {...(plan.environment === "production" && { accent })}
+      {...(context !== null && {
+        badge: (
+          <ContextBadge
+            context={context.name}
+            environment={context.environment}
+            mode={context.mode}
+          />
+        ),
+      })}
+      {...(context?.environment === "production" && {
+        accent: contextAccent(colors.of(context.name)),
+      })}
       question={plan.question}
       consequences={plan.consequences}
       lists={plan.affected.map(({ title, objects }) => ({

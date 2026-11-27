@@ -30,7 +30,8 @@ pub use access::{
     ModeSource, RequestClass,
 };
 pub use action::{
-    Affected, Execute, Friction, OperationEvent, Plan, PlanId, PlanRequest, ResourceRef,
+    Affected, Execute, Friction, OperationEvent, Plan, PlanContext, PlanId, PlanRequest,
+    ResourceRef,
 };
 pub use apply::{
     ApplyConflict, ApplyPreviewed, ApplyRequest, ApplyStrategy, OpenedEdit, PreviewId,

@@ -5,9 +5,9 @@
 
 use twigo_ipc::{ContextAccess, Environment, Friction, IpcError, LockSource, Mode, ModeSource};
 use twigo_policy::friction::{friction, keeps};
-use twigo_policy::{Change, Entry, Outlived, PlannedChange, Refused, UNLOCK, Why};
+use twigo_policy::{Change, Entry, On, Outlived, PlannedChange, Refused, UNLOCK, Why};
 
-use crate::bus::{self, Planned};
+use crate::bus::{self, Acts, OnContext, Planned};
 use crate::{Core, errors};
 
 pub(crate) async fn protection(
@@ -27,10 +27,6 @@ pub(crate) async fn protection(
         done,
     } = words(&context, &planned);
     Ok(Planned {
-        connection: core.policy.connection(&context),
-        space: None,
-        risk: planned.risk(),
-        writes: Vec::new(),
         command: command(change),
         target: context.clone(),
         question,
@@ -40,12 +36,18 @@ pub(crate) async fn protection(
         affected: Vec::new(),
         command_line: None,
         doing,
-        previewed: None,
-        run: bus::Run::Protects {
-            change: Box::new(planned),
-            done,
-        },
-        context,
+        acts: Acts::OnContext(Box::new(OnContext {
+            connection: core.policy.connection(&context),
+            space: None,
+            risk: planned.risk(),
+            writes: Vec::new(),
+            previewed: None,
+            run: bus::Run::Protects {
+                change: Box::new(planned),
+                done,
+            },
+            context,
+        })),
     })
 }
 
@@ -62,11 +64,13 @@ fn command(change: Change) -> &'static str {
 pub(crate) fn refused(core: &Core, context: &str, change: Change, error: &Refused) -> IpcError {
     let access = core.policy.access(context);
     core.policy.audit().record(&Entry::Refused {
-        context,
+        on: Some(On {
+            context,
+            mode: access.mode,
+            source: &access.source,
+        }),
         command: command(change),
         target: context,
-        mode: access.mode,
-        source: &access.source,
         why: Why::from(error),
     });
     errors::refused(error)

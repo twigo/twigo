@@ -114,6 +114,7 @@ test("every registered command appears in the palette", async () => {
       (id) =>
         id !== "k8s.logs.open" &&
         id !== "k8s.shell.open" &&
+        id !== "workbench.action.startOverProtection" &&
         (!/^helm\.revisions?\./.test(id) ||
           id === "helm.revisions.clearMarks") &&
         (!id.startsWith("k8s.forward.") || id === "k8s.forward.stopAll"),

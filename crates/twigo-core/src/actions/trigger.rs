@@ -13,7 +13,7 @@ use twigo_policy::friction::Risk;
 
 use super::{Target, attributes, clients_for, get, write};
 use crate::Core;
-use crate::bus::{self, Finished, Planned};
+use crate::bus::{self, Acts, Finished, OnContext, Planned};
 
 /// What a Job's name may hold: a label carries it, so 63 characters.
 const NAME_LENGTH: usize = 63;
@@ -79,13 +79,15 @@ pub(crate) async fn trigger(
         command_line: Some(kubectl),
         command: "trigger",
         target: named,
-        writes: vec![create],
-        context,
-        connection,
-        space: Some(space.to_owned()),
-        risk: Risk::Lasting,
-        previewed: None,
-        run: bus::Run::Sends(Box::new(move |_| Box::pin(run.run()))),
+        acts: Acts::OnContext(Box::new(OnContext {
+            writes: vec![create],
+            context,
+            connection,
+            space: Some(space.to_owned()),
+            risk: Risk::Lasting,
+            previewed: None,
+            run: bus::Run::Sends(Box::new(move |_| Box::pin(run.run()))),
+        })),
     })
 }
 

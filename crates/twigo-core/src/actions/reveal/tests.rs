@@ -219,7 +219,7 @@ async fn a_reveal_asks_for_a_confirmation_outside_read_write() {
             unlocked_until: None,
         };
         let ticket = over.core.bus.ticket("main");
-        let plan = over.core.bus.keep(ticket, planned, &access).unwrap();
+        let plan = over.core.bus.keep(ticket, planned, |_| access).unwrap();
         assert_eq!(plan.friction, friction, "{mode:?}");
     }
 }
