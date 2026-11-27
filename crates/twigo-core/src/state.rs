@@ -24,7 +24,6 @@ use serde_json::value::RawValue;
 use twigo_ipc::{ErrorCode, ForwardId, IpcError, Space, StateEntry, StateSnapshot};
 use twigo_log::problems;
 use twigo_panic::{Reporter, inject};
-use twigo_policy::Choices;
 
 use crate::forward::Saved;
 
@@ -43,11 +42,6 @@ const MISSING: SignedDuration = SignedDuration::from_hours(90 * 24);
 /// aside, and the store starts empty.
 const VERSION: u32 = 1;
 
-/// What the person chose for each context's mode (ARCHITECTURE 6.4), the one
-/// key no webview writes, as the webview only shows a mode.
-/// @todo: move the mode to settings.json once the settings files come in M3
-const CHOICES: &str = "policy/choices";
-
 /// A space's forwards and the local port each target's port had last
 /// (ARCHITECTURE 4.6), which only the port-forward manager writes.
 const FORWARDS: &str = "forwards";
@@ -56,7 +50,7 @@ const FORWARDS: &str = "forwards";
 /// twice across restarts.
 const LAST_FORWARD: &str = "forwards/last";
 
-const RESERVED: [&str; 3] = [CHOICES, FORWARDS, LAST_FORWARD];
+const RESERVED: [&str; 2] = [FORWARDS, LAST_FORWARD];
 
 /// The webview's key for the namespaces a space is on
 /// (`packages/workbench/src/spaces/store.ts`), which the problem report
@@ -243,27 +237,6 @@ impl State {
                 .map(|space| (space.id.clone(), text(&space.state)))
                 .collect(),
         }
-    }
-
-    /// What the person chose for each context's mode; nothing, when the
-    /// value does not read back.
-    pub fn choices(&self) -> Choices {
-        let data = self.inner.lock();
-        let Some(value) = data.file.app.get(CHOICES) else {
-            return Choices::default();
-        };
-        serde_json::from_str(value.get()).unwrap_or_else(|error| {
-            tracing::warn!(%error, "could not read the contexts' modes from the state");
-            Choices::default()
-        })
-    }
-
-    pub fn set_choices(&self, choices: &Choices) {
-        let value = serde_json::value::to_raw_value(choices)
-            .expect("maps of strings and plain enums serialize to JSON");
-        let mut data = self.inner.lock();
-        data.file.app.insert(CHOICES.to_owned(), value);
-        self.changed(&mut data);
     }
 
     /// A space's forwards; none where it has none or they do not read back.
@@ -565,7 +538,7 @@ fn set_aside(path: &Path, reason: &dyn std::fmt::Display) -> File {
     }
     problems::report(IpcError::new(
         ErrorCode::StateSetAside,
-        "Twigo could not read its saved state, so it started without it: the modes and locks you set, your spaces and your forwards are gone",
+        "Twigo could not read its saved state, so it started without it: your spaces and your forwards are gone",
     ));
     File {
         version: VERSION,

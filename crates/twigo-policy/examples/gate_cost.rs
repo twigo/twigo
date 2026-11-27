@@ -18,7 +18,7 @@ use http::{Request, Response};
 use serde_json::json;
 use tower::{Layer, Service, ServiceExt, service_fn};
 use twigo_ipc::Mode;
-use twigo_policy::{Actor, Audit, Choices, Metadata, Policy, PolicyFile};
+use twigo_policy::{Actor, Audit, Metadata, Policy, PolicyFile, Protection};
 
 const ITERATIONS: u32 = 1_000_000;
 const COLD_CALLS: usize = 1_000;
@@ -136,7 +136,7 @@ async fn main() {
     let policy = Policy::new(
         PolicyFile::default(),
         |_| Some(Metadata::default()),
-        Choices::default(),
+        Protection::default(),
         Audit::off(),
     );
     policy.set_mode("c", Some(Mode::Guarded)).expect("a mode");

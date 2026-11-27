@@ -1226,10 +1226,7 @@ async fn lowering_protection_asks_for_the_name_and_the_log_records_the_change_on
         }]
     );
     assert_eq!(core.policy.access("kind-prod").mode, Mode::ReadWrite);
-    assert_eq!(
-        core.state.choices().modes.get("kind-prod"),
-        Some(&Mode::ReadWrite)
-    );
+    assert_eq!(kept(dir.path())["modes"]["kind-prod"], "read-write");
     let text = std::fs::read_to_string(dir.path().join("audit.jsonl")).unwrap();
     let lines: Vec<Value> = text
         .lines()
@@ -1312,7 +1309,7 @@ async fn a_protection_plan_runs_only_while_the_context_stands_as_it_was_planned(
         Err(ErrorKind::Conflict)
     );
     assert_eq!(core.policy.access("kind-prod"), unlocked);
-    assert!(core.state.choices().modes.is_empty());
+    assert_eq!(kept(dir.path()), Value::Null);
     assert_eq!(
         audit(dir.path()),
         [json!({
@@ -1324,6 +1321,80 @@ async fn a_protection_plan_runs_only_while_the_context_stands_as_it_was_planned(
             "source": { "kind": "environment", "environment": "production" },
             "why": { "kind": "changed" },
         })]
+    );
+}
+
+fn kept(dir: &Path) -> Value {
+    std::fs::read(dir.join("protection.json"))
+        .map(|bytes| serde_json::from_slice(&bytes).unwrap())
+        .unwrap_or(Value::Null)
+}
+
+#[tokio::test]
+async fn a_choice_is_kept_in_the_protection_file_through_a_restart_and_a_state_set_aside() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running_with(dir.path(), PRODUCTION);
+    let plan = core
+        .command_plan("main", set_mode(Mode::ReadWrite))
+        .await
+        .unwrap();
+    execute(&core, "main", plan.id, Some("kind-prod"))
+        .await
+        .unwrap();
+    core.state.open_space("kind-prod");
+    core.state.flush().unwrap();
+    drop(core);
+    assert_eq!(
+        kept(dir.path())["modes"],
+        json!({"kind-prod": "read-write"})
+    );
+    let state = std::fs::read_to_string(dir.path().join("state.json")).unwrap();
+    assert!(state.contains("kind-prod"), "{state}");
+    assert!(!state.contains("read-write"), "{state}");
+
+    let chosen = |core: &Core| {
+        let access = core.policy.access("kind-prod");
+        (access.mode, access.source)
+    };
+    let restarted = running_with(dir.path(), PRODUCTION);
+    restarted.catalog.contexts().await;
+    let held = chosen(&restarted);
+    assert_eq!(held.0, Mode::ReadWrite);
+    assert!(matches!(held.1, ModeSource::User { .. }), "{held:?}");
+    drop(restarted);
+
+    std::fs::write(dir.path().join("state.json"), "{ not json").unwrap();
+    let set_aside = running_with(dir.path(), PRODUCTION);
+    set_aside.catalog.contexts().await;
+    assert!(set_aside.state.spaces().is_empty());
+    assert!(dir.path().join("state.json.unreadable").exists());
+    assert_eq!(chosen(&set_aside), held);
+}
+
+#[tokio::test]
+async fn a_protection_file_that_cannot_be_read_refuses_a_plan_with_its_code_and_the_log_says_why() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("protection.json"), "{ not json").unwrap();
+    let core = running_with(dir.path(), PRODUCTION);
+    core.catalog.contexts().await;
+    let access = core.policy.access("kind-prod");
+    assert_eq!(access.mode, Mode::ReadOnly);
+    assert!(
+        matches!(access.source, ModeSource::ProtectionUnreadable { .. }),
+        "{access:?}"
+    );
+    let refused = core
+        .command_plan("main", set_mode(Mode::ReadOnly))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code, ErrorCode::ProtectionUnreadable);
+    let lines = audit(dir.path());
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert_eq!(lines[0]["event"], "refused");
+    assert_eq!(lines[0]["why"], json!({ "kind": "protectionUnreadable" }));
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("protection.json")).unwrap(),
+        "{ not json"
     );
 }
 

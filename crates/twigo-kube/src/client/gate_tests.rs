@@ -11,7 +11,7 @@ use http_body_util::Full;
 use jiff::SignedDuration;
 use tokio::sync::Notify;
 use twigo_ipc::{BlockReason, ErrorKind, Mode, ModeSource, RequestClass};
-use twigo_policy::{Audit, Choices, Metadata, Policy, PolicyFile};
+use twigo_policy::{Audit, Metadata, Policy, PolicyFile, Protection};
 
 use super::*;
 use crate::errors;
@@ -63,7 +63,7 @@ fn audited(mode: Mode, audit: Audit) -> Arc<Policy> {
     let policy = Policy::new(
         PolicyFile::default(),
         |_| Some(Metadata::default()),
-        Choices::default(),
+        Protection::default(),
         audit,
     );
     policy.set_mode("c", Some(mode)).unwrap();

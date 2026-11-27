@@ -10,7 +10,7 @@ use twigo_ipc::{
     KubeconfigOfferAnswer, KubeconfigOfferEvent, Mode, NewTerminal, OpenShell, ProxyWhy, ShellAck,
     ShellEnd, ShellEvent, ShellInput, SubscriptionId, TerminalKind,
 };
-use twigo_policy::{Audit, Choices, Metadata, Policy, PolicyFile};
+use twigo_policy::{Audit, Choices, Metadata, Policy, PolicyFile, Protection};
 
 use super::kind;
 use crate::{Core, ShellFrame, Started};
@@ -270,12 +270,12 @@ fn a_terminal_goes_through_the_proxy_where_the_policy_file_or_the_mode_says() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("policy.json");
     std::fs::write(&file, r#"{"terminal": {"usePolicyProxy": ["prod-*"]}}"#).unwrap();
-    let local = Choices {
+    let local = Protection::holding(Choices {
         environments: ["prod-eu", "dev"]
             .map(|context| (context.to_owned(), Some(Environment::Local)))
             .into(),
         ..Choices::default()
-    };
+    });
     let policy = Policy::new(
         PolicyFile::read(&file),
         |_| {

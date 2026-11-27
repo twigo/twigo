@@ -69,7 +69,7 @@ export {
   chipLabel,
   describeAccess,
   modeLabel,
-  setByPolicyFile,
+  unchangeable,
 } from "./spaces/modes";
 export { ALL_NAMESPACES, scopeNames, scopeWords } from "./spaces/scope";
 export { WorkbenchView } from "./WorkbenchView";

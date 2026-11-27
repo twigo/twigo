@@ -79,6 +79,8 @@ const PINNED: &[(ErrorCode, &str, ErrorKind)] = &[
     (PolicyFileSetsMode, "policy.file-sets-mode", Permissions),
     (PolicyNotLocked, "policy.not-locked", InvalidInput),
     (PolicyChanged, "policy.changed", Conflict),
+    (ProtectionUnreadable, "protection.unreadable", Permissions),
+    (ProtectionUnsaved, "protection.unsaved", Internal),
     (AnswerUndecodable, "answer.undecodable", Internal),
     (
         DiscoveryNotAggregated,

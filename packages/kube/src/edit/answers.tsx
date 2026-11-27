@@ -7,7 +7,7 @@ import {
   chipLabel,
   describeAccess,
   ErrorBanner,
-  setByPolicyFile,
+  unchangeable,
   useChanges,
   useWorkbench,
 } from "@twigo/workbench";
@@ -219,7 +219,7 @@ function Immutable({
   const found = workbench.spaces.list.find(({ id }) => id === space);
   const access = found && accessOfSpace(workbench.catalog, found);
   const policed =
-    access?.mode === "read-only" && setByPolicyFile(access.source)
+    access?.mode === "read-only" && unchangeable(access.source)
       ? access
       : undefined;
   return (
@@ -277,7 +277,7 @@ function Ready({
     <div className="flex h-full min-h-0 flex-col">
       {lock !== undefined && access && (
         <Banner tone="info" icon={Lock} title={lock}>
-          {setByPolicyFile(access.source)
+          {unchangeable(access.source)
             ? `The dry run and this diff work, and Apply is not offered. ${describeAccess(access)}`
             : "The dry run and this diff work. Apply is refused until the context is unlocked."}
         </Banner>

@@ -129,19 +129,8 @@ impl PolicyFile {
     /// The state the text sets, or why it cannot: where it does not parse,
     /// since the file's own words may name what the admin keeps private.
     fn parse(text: &str) -> Result<State, String> {
-        let shape: Shape = serde_json::from_str(text).map_err(|error| {
-            let what = match error.classify() {
-                Category::Io => "cannot be read",
-                Category::Syntax => "is not JSON",
-                Category::Data => "says something the policy file does not",
-                Category::Eof => "ends too early",
-            };
-            format!(
-                "it {what} at line {}, column {}",
-                error.line(),
-                error.column()
-            )
-        })?;
+        let shape: Shape =
+            serde_json::from_str(text).map_err(|error| unparsed(&error, "the policy file"))?;
         let glob = |pattern: &str| {
             Pattern::new(pattern).map_err(|error| {
                 format!(
@@ -216,6 +205,22 @@ impl PolicyFile {
             State::Unreadable(_) => true,
         }
     }
+}
+
+/// Where a file of Twigo's, `file` in words, does not parse, which says
+/// nothing of what it holds.
+pub(crate) fn unparsed(error: &serde_json::Error, file: &str) -> String {
+    let what = match error.classify() {
+        Category::Io => "cannot be read".to_owned(),
+        Category::Syntax => "is not JSON".to_owned(),
+        Category::Data => format!("says something {file} does not"),
+        Category::Eof => "ends too early".to_owned(),
+    };
+    format!(
+        "it {what} at line {}, column {}",
+        error.line(),
+        error.column()
+    )
 }
 
 fn matches(pattern: &Pattern, context: &str) -> bool {

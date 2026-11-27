@@ -100,6 +100,15 @@ test("each source is named in words", () => {
   ).toBe(
     "/etc/twigo/policy.json cannot be read (it is not JSON at line 3, column 1), so every context is read-only until an admin fixes it and Twigo restarts.",
   );
+  expect(
+    describeSource({
+      kind: "protectionUnreadable",
+      file: "/data/protection.json",
+      reason: "it is not JSON at line 1, column 2",
+    }),
+  ).toBe(
+    "/data/protection.json, which holds the modes and types you set, cannot be read (it is not JSON at line 1, column 2), so every context is read-only until you restore or remove it and Twigo restarts.",
+  );
   expect(describeSource({ kind: "user", overrides: null })).toBe(
     "You set this.",
   );
@@ -321,6 +330,40 @@ test("a policy file that cannot be read makes every context read-only, and each 
   expect(access && describeAccess(access)).toBe(
     "/Library/Application Support/Twigo/policy.json cannot be read (it is not JSON at line 3, column 1), so every context is read-only until an admin fixes it and Twigo restarts.",
   );
+});
+
+test("a protection file that cannot be read makes every context read-only, says why and takes no change", async () => {
+  const error = vi.spyOn(notify, "error");
+  const workbench = await testWorkbench(
+    undefined,
+    createMockBackend("protectionUnreadable"),
+  );
+  const { commands, keys, catalog } = workbench;
+  await act(() => Promise.resolve());
+  const access = catalog.find("dev")?.access;
+  expect(access?.mode).toBe("read-only");
+  expect(access && describeAccess(access)).toContain(
+    "protection.json, which holds the modes and types you set, cannot be read",
+  );
+
+  await act(() =>
+    commands.execute(SET_CONTEXT_MODE, keys.lookup(null), {
+      context: "dev",
+      value: "read-write",
+    }),
+  );
+  await act(() =>
+    commands.execute(SET_CONTEXT_ENVIRONMENT, keys.lookup(null), {
+      context: "dev",
+      value: "development",
+    }),
+  );
+  await act(() => commands.execute(UNLOCK_CONTEXT, keys.lookup(null)));
+  expect(catalog.find("dev")?.access).toEqual(access);
+  expect(error).toHaveBeenCalledTimes(3);
+  for (const [message] of error.mock.calls) {
+    expect(toastWords(message)).toContain("protection.json cannot be read");
+  }
 });
 
 test("a policy file's entry cannot be changed and says who set it", async () => {

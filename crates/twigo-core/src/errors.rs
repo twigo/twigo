@@ -42,6 +42,8 @@ pub(crate) fn refused(error: &Refused) -> IpcError {
     let code = match error {
         Refused::PolicyFile(..) => ErrorCode::PolicyFileSetsMode,
         Refused::PolicyFileUnreadable(_) => ErrorCode::PolicyFileUnreadable,
+        Refused::ProtectionUnreadable(_) => ErrorCode::ProtectionUnreadable,
+        Refused::Unsaved(..) => ErrorCode::ProtectionUnsaved,
         Refused::NotLocked(..) => ErrorCode::PolicyNotLocked,
         Refused::Unlisted(context) => return unlisted(context),
         Refused::Changed(_) => ErrorCode::PolicyChanged,

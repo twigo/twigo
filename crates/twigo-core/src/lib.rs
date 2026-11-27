@@ -55,7 +55,7 @@ use twigo_kube::openapi::{self, Document};
 use twigo_netmon::Event;
 use twigo_panic::{Fatal, Reporter, Reports, Supervisor};
 use twigo_policy::friction::{covers, friction};
-use twigo_policy::{Audit, Change, Entry, PlannedChange, Policy, Why};
+use twigo_policy::{Audit, Change, Entry, PlannedChange, Policy, Protection, Why};
 use twigo_sessions::logs::Session;
 pub use twigo_sessions::shell::Frame as ShellFrame;
 
@@ -87,9 +87,6 @@ pub struct Core {
     pub policy: Arc<Policy>,
     proxy: Arc<Proxy>,
     approvals: Arc<Approvals>,
-    /// Held while a change of the person's choices is made and stored, so an
-    /// earlier copy of them never lands after a later one.
-    choosing: Mutex<()>,
     lists: Subscriptions<Batcher>,
     objects: Subscriptions<Opened>,
     releases: Subscriptions<helm::Opened>,
@@ -130,10 +127,11 @@ pub enum ClientsError {
 }
 
 impl Core {
-    /// The core whose state, trusted plugins, audit log, processes'
-    /// kubeconfigs and terminals' directories live in `data`, the app's data
-    /// directory, its clusters' discovery in `cache`, its cache directory,
-    /// and whose admin's policy is the file at `policy_file`.
+    /// The core whose state, trusted plugins, the person's protection, audit
+    /// log, processes' kubeconfigs and terminals' directories live in
+    /// `data`, the app's data directory, its clusters' discovery in `cache`,
+    /// its cache directory, and whose admin's policy is the file at
+    /// `policy_file`.
     pub fn new(data: &Path, cache: &Path, policy_file: &Path) -> Arc<Self> {
         Self::with_hub(data, cache, policy_file, |core| Hub::new(connect(core)))
     }
@@ -161,7 +159,7 @@ impl Core {
         let policy = Policy::new(
             PolicyFile::read(policy_file),
             catalog.metadata(),
-            state.choices(),
+            Protection::read(&data.join("protection.json")),
             Audit::open(&data.join("audit.jsonl")),
         );
         let catalog = catalog
@@ -180,7 +178,6 @@ impl Core {
                 policy,
                 proxy: Arc::new(Proxy::new(data.join("proxy"))),
                 approvals,
-                choosing: Mutex::default(),
                 lists: Subscriptions::new("list"),
                 objects: Subscriptions::new("object"),
                 releases: Subscriptions::new("release"),
@@ -592,22 +589,17 @@ impl Core {
     }
 
     /// Makes a change of protection a person confirmed through `friction`,
-    /// while the context stands as it was planned, and keeps the choices it
-    /// leaves; the policy records it in the audit log, in place of the
-    /// bus's lines.
+    /// while the context stands as it was planned; the policy keeps it and
+    /// records it in the audit log, in place of the bus's lines.
     fn protect(
         &self,
         context: &str,
         change: &PlannedChange,
         friction: &Friction,
     ) -> Result<(), IpcError> {
-        let _choosing = self.choosing.lock().expect("choosing lock");
-        let choices = self
-            .policy
+        self.policy
             .change(context, change, friction)
-            .map_err(|error| actions::refused(self, context, change.change, &error))?;
-        self.state.set_choices(&choices);
-        Ok(())
+            .map_err(|error| actions::refused(self, context, change.change, &error))
     }
 
     /// Builds an edit's apply configuration and dry-runs it (ARCHITECTURE
@@ -1080,11 +1072,7 @@ impl Core {
     /// typed, and for one that does not fit the ask; a type given to an
     /// unmarked context's ask is kept with the person's choices.
     pub fn answer_approval(&self, window: &str, answer: AnswerApproval) -> Result<(), IpcError> {
-        let _choosing = self.choosing.lock().expect("choosing lock");
-        if let Some(choices) = self.approvals.answer(window, answer)? {
-            self.state.set_choices(&choices);
-        }
-        Ok(())
+        self.approvals.answer(window, answer)
     }
 
     /// Ends the lists, open objects and releases, logs sessions, shells and

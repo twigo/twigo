@@ -65,9 +65,8 @@ Findings that belong to no step yet.
 - Applying an edit (`twigo_core::actions::apply`, ARCHITECTURE 6.5):
   - A window reloaded during a recreate's wait stops it with the object gone and nothing created, which the audit log records but the page cannot show.
 - Modes (`twigo_policy`, ARCHITECTURE 6.4):
-  - The mode a person chooses and the type they mark live in the app's state (`policy/choices`, `crates/twigo-core/src/state.rs`): `@todo` to move them to `settings.json` once the settings files come in M3, with nothing of this left behind.
   - The policy file is read once, as the app starts, so an admin's change takes a restart.
-  - A type a person marks stays over the kubeconfig's, with no way back to it but marking the same type, which hides a later change of the kubeconfig's: the settings files of M3 can say which is which.
+  - A type a person marks stays over the kubeconfig's, with no way back to it but marking the same type, which hides a later change of the kubeconfig's.
   - The accepted mockup also shows the type in the context picker and on the cluster's home; so far the title bar shows it, and so do the dialogs that confirm or ask on a context (`ContextBadge`, `packages/workbench/src/operations/ContextBadge.tsx`).
   - A CronJob's resume asks even when it missed no run while suspended: telling which needs its schedule read in its time zone, as its next run does.
 - A countdown's toast behind three newer ones is hidden by sonner (`visibleToasts`) and takes no focus, so only ⌘Z cancels it until they go: keep a waiting countdown in front.

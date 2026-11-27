@@ -146,6 +146,10 @@ pub enum Why<'a> {
     Gate { reason: BlockReason },
     /// The admin's policy file sets the context's mode.
     PolicyFile,
+    /// The person's protection file cannot be read.
+    ProtectionUnreadable,
+    /// The person's protection file could not be written.
+    Unsaved,
     /// An unlock of a context that is not locked.
     NotLocked,
     /// No source lists the context.
@@ -163,6 +167,8 @@ impl From<&Refused> for Why<'_> {
     fn from(refused: &Refused) -> Self {
         match refused {
             Refused::PolicyFile(..) | Refused::PolicyFileUnreadable(_) => Self::PolicyFile,
+            Refused::ProtectionUnreadable(_) => Self::ProtectionUnreadable,
+            Refused::Unsaved(..) => Self::Unsaved,
             Refused::NotLocked(..) => Self::NotLocked,
             Refused::Unlisted(_) => Self::Unlisted,
             Refused::Changed(_) => Self::Changed,

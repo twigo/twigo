@@ -22,7 +22,7 @@ use twigo_ipc::{
     AnswerApproval, ApprovalAnswer, ApprovalAsk, ApprovalDetail, ApprovalEvent, ApprovalId,
     BlockReason, Blocked, Environment, ErrorCode, IpcError, Mode, ModeSource,
 };
-use twigo_policy::{Actor, Approval, Attributes, Choices, Entry, Policy};
+use twigo_policy::{Actor, Approval, Attributes, Entry, Policy};
 
 use crate::catalog::Contexts;
 use crate::errors;
@@ -433,12 +433,8 @@ impl Approvals {
         state.followers.insert(window.into(), follower);
     }
 
-    /// The person's answer; the choices to keep where it marked a context.
-    pub(crate) fn answer(
-        &self,
-        window: &str,
-        answer: AnswerApproval,
-    ) -> Result<Option<Choices>, IpcError> {
+    /// The person's answer.
+    pub(crate) fn answer(&self, window: &str, answer: AnswerApproval) -> Result<(), IpcError> {
         let mut state = self.state();
         let Some(pending) = state.asks.get(&answer.id.0) else {
             return Err(IpcError::new(
@@ -489,7 +485,7 @@ impl Approvals {
                 ));
             }
             ApprovalAnswer::Mark { environment } => {
-                return self.mark(state, answer.id, environment).map(Some);
+                return self.mark(state, answer.id, environment);
             }
             ApprovalAnswer::Deny | ApprovalAnswer::Once | ApprovalAnswer::Lasting => {}
         }
@@ -527,26 +523,25 @@ impl Approvals {
         for (audited, answer) in ended {
             self.audit(&audited, answer);
         }
-        Ok(None)
+        Ok(())
     }
 
     /// Marks the context of an unmarked ask as `environment`, while its
     /// request still waits and nothing has marked the context meanwhile; the
-    /// policy records it, naming the process. The request, and every other
-    /// ask on the context, then meets the gate anew.
+    /// policy keeps it and records it, naming the process. The request, and
+    /// every other ask on the context, then meets the gate anew.
     fn mark(
         &self,
         mut state: MutexGuard<'_, State>,
         id: ApprovalId,
         environment: Environment,
-    ) -> Result<Choices, IpcError> {
+    ) -> Result<(), IpcError> {
         let pending = state.asks.get(&id.0).expect("found by the caller");
         if pending.resolve.is_closed() {
             let pending = state.asks.remove(&id.0).expect("found above");
             return Err(self.gone(state, id, &pending.window, &pending.audited));
         }
-        let choices = self
-            .policy
+        self.policy
             .mark(
                 &pending.ask.context,
                 pending.connection,
@@ -559,7 +554,7 @@ impl Approvals {
         // A request that went meanwhile has nothing left to decide: the
         // context is marked all the same, as the person said.
         let _ = pending.resolve.send(Resolution::Marked);
-        Ok(choices)
+        Ok(())
     }
 
     /// Refuses an answer that no request waits for: the window that asked
@@ -879,7 +874,7 @@ mod tests {
         let policy = Policy::new(
             twigo_policy::PolicyFile::default(),
             |_| Some(twigo_policy::Metadata::default()),
-            twigo_policy::Choices::default(),
+            twigo_policy::Protection::default(),
             twigo_policy::Audit::open(&audit),
         );
         let (_catalog, catalog) = watch::channel(None);
@@ -936,7 +931,7 @@ mod tests {
         let policy = Policy::new(
             twigo_policy::PolicyFile::default(),
             |_| Some(twigo_policy::Metadata::default()),
-            twigo_policy::Choices::default(),
+            twigo_policy::Protection::default(),
             twigo_policy::Audit::open(&audit),
         );
         let (_catalog, catalog) = watch::channel(None);
@@ -981,7 +976,7 @@ mod tests {
         let policy = Policy::new(
             twigo_policy::PolicyFile::default(),
             |_| Some(twigo_policy::Metadata::default()),
-            twigo_policy::Choices::default(),
+            twigo_policy::Protection::default(),
             twigo_policy::Audit::off(),
         );
         let (_catalog, catalog) = watch::channel(None);
@@ -1128,7 +1123,7 @@ mod tests {
         let policy = Policy::new(
             twigo_policy::PolicyFile::default(),
             |_| Some(twigo_policy::Metadata::default()),
-            twigo_policy::Choices::default(),
+            twigo_policy::Protection::default(),
             twigo_policy::Audit::open(&audit),
         );
         let (_catalog, catalog) = watch::channel(None);
@@ -1176,7 +1171,7 @@ mod tests {
         let policy = Policy::new(
             twigo_policy::PolicyFile::default(),
             |_| Some(twigo_policy::Metadata::default()),
-            twigo_policy::Choices::default(),
+            twigo_policy::Protection::default(),
             twigo_policy::Audit::off(),
         );
         let (_catalog, catalog) = watch::channel(None);

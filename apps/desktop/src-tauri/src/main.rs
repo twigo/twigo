@@ -1019,8 +1019,9 @@ fn main() {
         .setup({
             let fatal = fatal.clone();
             move |app| {
-                // Before `Core::new` reads the policy, the state and the trust
-                // file, so what it says of them is logged.
+                // Before `Core::new` reads the policy, the state, the trust
+                // file and the person's protection, so what it says of them is
+                // logged.
                 let facts = Facts::detect(
                     env!("CARGO_PKG_VERSION"),
                     option_env!("TWIGO_COMMIT"),
