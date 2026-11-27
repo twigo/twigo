@@ -104,9 +104,10 @@ pub enum PlanRequest {
     /// Lets a `read-only` context through as `guarded` for 15 minutes.
     /// Refused under the admin's policy file.
     Unlock { context: String },
-    /// Moves the person's protection file that cannot be read aside and
-    /// starts with no mode or type they set, so every context is what its
-    /// locks say, or unmarked. Refused while the file can be read.
+    /// Moves the person's protection file that cannot be read aside, where
+    /// it is still there, and starts with no mode or type they set, so
+    /// every context is what its locks say, or unmarked. Refused while the
+    /// file can be read.
     StartOver,
 }
 
