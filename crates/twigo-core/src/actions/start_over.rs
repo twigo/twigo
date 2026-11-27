@@ -1,7 +1,8 @@
 //! Starting over from the person's protection file that cannot be read
 //! (ARCHITECTURE 4.8, 6.4): the file moves aside, where it is still there,
-//! and the person's modes and types go with it. It acts on no context and sends nothing to a cluster,
-//! so its plan has no context, no writes and no kubectl command.
+//! and the person's modes and types go with it. It acts on no context and
+//! sends nothing to a cluster, so its plan has no context, no writes and no
+//! kubectl command.
 
 use twigo_ipc::IpcError;
 use twigo_policy::{Entry, Refused, StartOver, Why};
