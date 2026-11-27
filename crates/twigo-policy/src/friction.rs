@@ -72,10 +72,16 @@ pub fn friction(risk: &Risk, context: &str, access: &ContextAccess) -> Friction 
     }
 }
 
-/// The friction of starting over from the person's protection file that
-/// cannot be read, which acts on no context: a dialog asks.
-pub fn start_over() -> Friction {
-    Friction::Confirm
+/// The friction of starting over from the person's protection file named
+/// `file`. It leaves every context the file held `read-only` unmarked or
+/// at what its locks say, the admin's entries aside, and a change that
+/// leaves a context unmarked weighs as one to `read-write`, which from
+/// `read-only` asks for the name typed (ARCHITECTURE 6.4): it acts on no
+/// context, so the name is the file's.
+pub fn start_over(file: &str) -> Friction {
+    Friction::Typed {
+        text: file.to_owned(),
+    }
 }
 
 /// Whether a change from `from` to `to` leaves the context at least as

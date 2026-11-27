@@ -196,7 +196,9 @@ pub enum Refused {
 /// a plan shows it and the audit log records it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartOver {
+    /// The file, and its name, which the person types.
     pub file: String,
+    pub name: String,
     /// Why Twigo could not read it as it started, in words that quote
     /// nothing of it.
     pub reason: String,

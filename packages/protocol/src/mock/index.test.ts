@@ -198,7 +198,7 @@ test("under protectionUnreadable a start over plans and runs as Rust's does: the
   const plan = await planned;
   expect(plan).toMatchObject({
     context: null,
-    friction: { kind: "confirm" },
+    friction: { kind: "typed", text: "protection.json" },
     commandLine: null,
     confirm: "Start Over",
   });
@@ -206,7 +206,7 @@ test("under protectionUnreadable a start over plans and runs as Rust's does: the
   const events: OperationEvent[] = [];
   const ran = backend.subscribe(
     "command_execute",
-    { plan: plan.id, typed: null },
+    { plan: plan.id, typed: "protection.json" },
     (event) => events.push(event),
   );
   await vi.advanceTimersByTimeAsync(0);
@@ -288,7 +288,7 @@ test("under protectionRemoved the person removed the file by hand, so a start ov
   const events: OperationEvent[] = [];
   const ran = backend.subscribe(
     "command_execute",
-    { plan: plan.id, typed: null },
+    { plan: plan.id, typed: "protection.json" },
     (event) => events.push(event),
   );
   await vi.advanceTimersByTimeAsync(0);

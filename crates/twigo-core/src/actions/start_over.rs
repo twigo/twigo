@@ -15,6 +15,7 @@ const COMMAND: &str = "startOver";
 pub(crate) fn start_over(core: &Core) -> Result<Planned, IpcError> {
     let StartOver {
         file,
+        name,
         reason,
         aside,
     } = core
@@ -29,6 +30,7 @@ pub(crate) fn start_over(core: &Core) -> Result<Planned, IpcError> {
     };
     Ok(Planned {
         acts: Acts::StartsOver {
+            name,
             done: "Started over without the modes and types you set".to_owned(),
         },
         command: COMMAND,

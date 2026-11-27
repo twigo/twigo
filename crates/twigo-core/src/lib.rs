@@ -466,7 +466,7 @@ impl Core {
         } = *waiting;
         let on = match planned.acts {
             Acts::OnContext(on) => *on,
-            Acts::StartsOver { done } => {
+            Acts::StartsOver { done, .. } => {
                 met(&planned_friction, since, request.typed.as_deref())?;
                 self.start_over(&planned_friction)?;
                 done_at_once(send, done);

@@ -1427,7 +1427,7 @@ async fn a_protection_file_that_cannot_be_read_refuses_a_plan_with_its_code_and_
 }
 
 #[tokio::test]
-async fn starting_over_asks_in_a_dialog_on_no_context_and_its_run_records_its_line_and_clears_the_problem()
+async fn starting_over_asks_for_the_file_s_name_on_no_context_and_its_run_records_its_line_and_clears_the_problem()
  {
     let _unreadable = UNREADABLE.lock().await;
     let dir = tempfile::tempdir().unwrap();
@@ -1445,8 +1445,27 @@ async fn starting_over_asks_in_a_dialog_on_no_context_and_its_run_records_its_li
         .command_plan("main", PlanRequest::StartOver)
         .await
         .unwrap();
-    assert_eq!(plan.friction, Friction::Confirm);
+    let typed = Friction::Typed {
+        text: "protection.json".to_owned(),
+    };
+    assert_eq!(plan.friction, typed);
     assert_eq!((plan.context, plan.command_line), (None, None));
+    let (told, send) = events();
+    let request = Execute {
+        plan: plan.id,
+        typed: Some("kind-prod".to_owned()),
+    };
+    let refused = core
+        .command_execute("main", request, send)
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code, ErrorCode::ConfirmNameMismatch);
+    assert!(told.lock().unwrap().is_empty());
+    assert!(path.exists());
+    let plan = core
+        .command_plan("main", PlanRequest::StartOver)
+        .await
+        .unwrap();
     let file = path.display().to_string();
     let aside = dir
         .path()
@@ -1463,7 +1482,7 @@ async fn starting_over_asks_in_a_dialog_on_no_context_and_its_run_records_its_li
     let (told, send) = events();
     let request = Execute {
         plan: plan.id,
-        typed: None,
+        typed: Some("protection.json".to_owned()),
     };
     core.command_execute("main", request, send).await.unwrap();
     assert!(matches!(
@@ -1490,7 +1509,7 @@ async fn starting_over_asks_in_a_dialog_on_no_context_and_its_run_records_its_li
             "file": file,
             "aside": aside,
             "reason": reason,
-            "friction": { "kind": "confirm" },
+            "friction": { "kind": "typed", "text": "protection.json" },
         })]
     );
 
@@ -1536,7 +1555,7 @@ async fn a_protection_file_restored_by_hand_refuses_a_start_over_at_plan_and_at_
     let (told, send) = events();
     let request = Execute {
         plan: plan.id,
-        typed: None,
+        typed: Some("protection.json".to_owned()),
     };
     let refused = core
         .command_execute("main", request, send)
@@ -1590,7 +1609,7 @@ async fn a_protection_file_removed_by_hand_is_started_over_from_with_nothing_mov
     let (told, send) = events();
     let request = Execute {
         plan: plan.id,
-        typed: None,
+        typed: Some("protection.json".to_owned()),
     };
     core.command_execute("main", request, send).await.unwrap();
 
@@ -1613,7 +1632,7 @@ async fn a_protection_file_removed_by_hand_is_started_over_from_with_nothing_mov
             "file": path.display().to_string(),
             "reason": reason,
             "aside": null,
-            "friction": { "kind": "confirm" },
+            "friction": { "kind": "typed", "text": "protection.json" },
         })]
     );
 }

@@ -186,6 +186,12 @@ impl Unreadable {
         };
         Ok(StartOver {
             file: self.file(),
+            name: self
+                .path
+                .file_name()
+                .unwrap_or(self.path.as_os_str())
+                .to_string_lossy()
+                .into_owned(),
             reason: self.reason.clone(),
             aside,
         })

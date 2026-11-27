@@ -1,12 +1,12 @@
 //! The command bus (ARCHITECTURE 5.1, 6.4). A command that changes a cluster
 //! or shows secret-grade data is planned first: what it will do, in words and
 //! as kubectl, and the friction that what it risks asks for in the context's
-//! mode, or alone for what acts on no context. The webview draws the
-//! friction and runs the plan by its id, with what proves the friction was
-//! met: the typed name, the countdown passed. A plan runs once, from the
-//! window it was made for, on the cluster it was planned on; the policy
-//! decides again as it starts, and the gate below every client as each
-//! request goes out.
+//! mode, or for a start over, which acts on no context, the protection file's
+//! name typed. The webview draws the friction and runs the plan by its id,
+//! with what proves the friction was met: the typed name, the countdown
+//! passed. A plan runs once, from the window it was made for, on the cluster
+//! it was planned on; the policy decides again as it starts, and the gate
+//! below every client as each request goes out.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -68,9 +68,10 @@ impl Planned {
 pub(crate) enum Acts {
     /// A context, as every command but starting over does.
     OnContext(Box<OnContext>),
-    /// Starts over from the person's protection file at once, and says
-    /// `done`: it acts on no context, and sends nothing to a cluster.
-    StartsOver { done: String },
+    /// Starts over from the person's protection file, by its `name`, at
+    /// once, and says `done`: it acts on no context, and sends nothing to a
+    /// cluster.
+    StartsOver { name: String, done: String },
 }
 
 /// What a plan does on its context.
@@ -339,7 +340,7 @@ impl Bus {
                 };
                 (Some(context), friction)
             }
-            Acts::StartsOver { .. } => (None, friction::start_over()),
+            Acts::StartsOver { name, .. } => (None, friction::start_over(name)),
         };
         let mut inner = self.inner();
         inner.next += 1;

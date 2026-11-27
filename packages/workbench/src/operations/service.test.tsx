@@ -1107,7 +1107,7 @@ test("the unlock a refusal offers asks in a dialog, and runs once it is confirme
   });
 });
 
-test("starting over asks in a dialog that names no context, and its run leaves each context to its locks", async () => {
+test("starting over asks for protection.json typed in a dialog that names no context, and its run leaves each context to its locks", async () => {
   const success = vi.spyOn(notify, "success");
   const workbench = await testWorkbench("protectionUnreadable");
   render(<WorkbenchView workbench={workbench} />);
@@ -1115,15 +1115,19 @@ test("starting over asks in a dialog that names no context, and its run leaves e
   await act(() => vi.advanceTimersByTimeAsync(0));
   expect(workbench.operations.asking?.plan).toMatchObject({
     context: null,
-    friction: { kind: "confirm" },
+    friction: { kind: "typed", text: "protection.json" },
     commandLine: null,
   });
   const dialog = screen.getByRole("dialog");
   expect(dialog.textContent).toMatch(/^Start over without/);
   expect(dialog.textContent).toContain("protection.json.unreadable");
-  act(() => {
-    workbench.operations.asking?.confirm(undefined);
-  });
+  const field = screen.getByLabelText("Type protection.json to confirm");
+  const button = screen.getByRole("button", { name: "Start Over" });
+  fireEvent.change(field, { target: { value: "prod-eu" } });
+  expect(button).toHaveProperty("disabled", true);
+  fireEvent.change(field, { target: { value: "protection.json" } });
+  expect(button).toHaveProperty("disabled", false);
+  fireEvent.click(button);
   await expect(outcome).resolves.toEqual({ state: "done" });
   expect(success.mock.calls[0]?.[0]).toBe(
     "Started over without the modes and types you set",

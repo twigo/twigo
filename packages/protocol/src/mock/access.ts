@@ -223,7 +223,12 @@ export class MockAccess {
   }
 
   /** What a start over from the person's protection file would do now, as `Policy::plan_start_over` looks at the file again: refused while the policy reads it and where it reads by now, and nothing moves where it is gone. */
-  startingOver(): { file: string; reason: string; aside: string | null } {
+  startingOver(): {
+    file: string;
+    name: string;
+    reason: string;
+    aside: string | null;
+  } {
     const unread = this.#protectionUnreadable;
     if (unread === undefined) {
       throw new IpcError(
@@ -239,6 +244,7 @@ export class MockAccess {
     }
     return {
       file: PROTECTION_FILE,
+      name: PROTECTION_FILE.slice(PROTECTION_FILE.lastIndexOf("/") + 1),
       reason: unread.reason,
       aside: unread.now === "removed" ? null : `${PROTECTION_FILE}.unreadable`,
     };

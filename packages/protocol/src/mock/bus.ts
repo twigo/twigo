@@ -225,6 +225,8 @@ interface PlannedOn {
 /** Starting over from the person's protection file, which acts on no context, as Rust's `Acts::StartsOver`. */
 interface StartingOver {
   readonly context: null;
+  /** The file's name, which the person types. */
+  readonly name: string;
   readonly plan: Words;
   /** Throws once there is nothing to start over from. */
   readonly stands: () => void;
@@ -766,7 +768,7 @@ export class MockBus {
     friction: Friction;
   } {
     if (planned.context === null) {
-      return { context: null, friction: { kind: "confirm" } };
+      return { context: null, friction: { kind: "typed", text: planned.name } };
     }
     const { context: name, risk } = planned;
     const access = this.host.access(name);
@@ -1853,9 +1855,10 @@ export class MockBus {
   /** Starting over from the person's protection file that cannot be read, as Rust's `actions::start_over` plans it, looked at again as it runs. */
   #startOver(): Planned {
     const { protection } = this.host;
-    const { file, reason, aside } = protection.startingOver();
+    const { file, name, reason, aside } = protection.startingOver();
     return {
       context: null,
+      name,
       plan: {
         question: "Start over without the modes and types you set?",
         confirm: "Start Over",

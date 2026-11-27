@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use twigo_ipc::{ContextAccess, Environment, Friction, Mode, ModeSource};
-use twigo_policy::friction::{Risk, friction};
+use twigo_ipc::{BlockReason, ContextAccess, Environment, Friction, Mode, ModeSource};
+use twigo_policy::friction::{self, Risk};
 use twigo_policy::{
     Actor, Attributes, Audit, Change, Metadata, Policy, PolicyFile, Protection, ProviderLock,
     Refused, TypeLock,
@@ -51,6 +51,10 @@ fn unread(access: &ContextAccess) -> bool {
     matches!(access.source, ModeSource::ProtectionUnreadable { .. })
 }
 
+fn typed() -> Friction {
+    friction::start_over("protection.json")
+}
+
 fn marked() -> Change {
     Change::Type {
         environment: Some(Environment::Production),
@@ -72,7 +76,7 @@ fn starting_over_moves_the_file_aside_with_its_bytes_and_the_policy_holds_no_cho
     assert_eq!(planned.file, path.display().to_string());
     assert_eq!(planned.aside, Some(aside(&path).display().to_string()));
     assert!(!planned.reason.is_empty());
-    policy.start_over(&Friction::Confirm).unwrap();
+    policy.start_over(&typed()).unwrap();
 
     assert!(!path.exists());
     assert_eq!(std::fs::read_to_string(aside(&path)).unwrap(), UNREADABLE);
@@ -133,7 +137,7 @@ fn starting_over_is_refused_while_the_file_can_be_read_or_is_missing() {
         Err(Refused::ProtectionReadable(_))
     ));
     assert!(matches!(
-        policy.start_over(&Friction::Confirm),
+        policy.start_over(&typed()),
         Err(Refused::ProtectionReadable(_))
     ));
     assert!(!missing.exists());
@@ -147,7 +151,7 @@ fn starting_over_is_refused_while_the_file_can_be_read_or_is_missing() {
     let held = std::fs::read(&path).unwrap();
     let policy = opened(dir.path(), &path);
     assert!(matches!(
-        policy.start_over(&Friction::Confirm),
+        policy.start_over(&typed()),
         Err(Refused::ProtectionReadable(_))
     ));
     assert_eq!(std::fs::read(&path).unwrap(), held);
@@ -177,7 +181,7 @@ fn a_file_restored_by_hand_refuses_a_start_over_at_plan_and_at_run_and_reads_at_
     policy.plan_start_over().unwrap();
     std::fs::write(&path, restored).unwrap();
     assert!(matches!(
-        policy.start_over(&Friction::Confirm),
+        policy.start_over(&typed()),
         Err(Refused::Restored(_))
     ));
 
@@ -210,7 +214,7 @@ fn a_file_removed_by_hand_is_started_over_from_with_nothing_moved() {
     let planned = policy.plan_start_over().unwrap();
     assert_eq!(planned.aside, None);
     assert_eq!(planned.reason, reason);
-    policy.start_over(&Friction::Confirm).unwrap();
+    policy.start_over(&typed()).unwrap();
 
     assert!(!path.exists());
     assert!(!aside(&path).exists());
@@ -224,7 +228,7 @@ fn a_file_removed_by_hand_is_started_over_from_with_nothing_moved() {
             "file": path.display().to_string(),
             "reason": reason,
             "aside": null,
-            "friction": { "kind": "confirm" },
+            "friction": { "kind": "typed", "text": "protection.json" },
         })]
     );
     let planned = policy.plan("kind-a", marked()).unwrap();
@@ -243,7 +247,7 @@ fn a_file_removed_between_the_plan_and_the_run_is_started_over_from_with_nothing
 
     assert!(policy.plan_start_over().unwrap().aside.is_some());
     std::fs::remove_file(&path).unwrap();
-    policy.start_over(&Friction::Confirm).unwrap();
+    policy.start_over(&typed()).unwrap();
 
     assert!(!aside(&path).exists());
     assert!(!unread(&policy.access("kind-a")));
@@ -266,7 +270,7 @@ fn a_start_over_whose_move_fails_is_refused_and_changes_nothing() {
     changes.borrow_and_update();
 
     std::fs::set_permissions(&kept, std::fs::Permissions::from_mode(0o500)).unwrap();
-    let refused = policy.start_over(&Friction::Confirm);
+    let refused = policy.start_over(&typed());
     std::fs::set_permissions(&kept, std::fs::Permissions::from_mode(0o700)).unwrap();
     assert!(matches!(refused, Err(Refused::Unmoved(..))), "{refused:?}");
 
@@ -282,23 +286,41 @@ fn a_start_over_whose_move_fails_is_refused_and_changes_nothing() {
     assert!(policy.plan_start_over().is_ok());
 }
 
+fn write() -> Attributes {
+    Attributes::action("delete", "configmaps", None, Some("a"), Some("m"))
+}
+
+fn exec() -> Attributes {
+    Attributes::action("create", "pods", Some("exec"), Some("a"), Some("p"))
+}
+
 fn unasked(policy: &Policy, actor: Actor, risk: &Risk) -> bool {
     let attributes = match risk {
-        Risk::Shell => Attributes::action("create", "pods", Some("exec"), Some("a"), Some("p")),
-        _ => Attributes::action("delete", "configmaps", None, Some("a"), Some("m")),
+        Risk::Shell => exec(),
+        _ => write(),
     };
     if policy.authorize("kind-a", &attributes, actor).is_err() {
         return false;
     }
     actor != Actor::Ui
         || matches!(
-            friction(risk, "kind-a", &policy.access("kind-a")),
+            friction::friction(risk, "kind-a", &policy.access("kind-a")),
             Friction::AtOnce | Friction::Countdown { .. }
         )
 }
 
+const ACTORS: [Actor; 6] = [
+    Actor::Ui,
+    Actor::Terminal,
+    Actor::Helm,
+    Actor::Mcp,
+    Actor::Extension { secrets: true },
+    Actor::Agent,
+];
+
 #[test]
-fn after_a_start_over_no_context_lets_a_write_through_without_an_answer_that_it_did_not_before() {
+fn after_a_start_over_only_an_admin_s_entry_leaves_a_context_read_write_and_no_write_or_exec_passes_unasked_that_did_not()
+ {
     let dir = tempfile::tempdir().unwrap();
     let mut files = vec![PolicyFile::default()];
     for (name, text) in [
@@ -311,14 +333,6 @@ fn after_a_start_over_no_context_lets_a_write_through_without_an_answer_that_it_
         std::fs::write(&path, text).unwrap();
         files.push(PolicyFile::read(&path));
     }
-    let actors = [
-        Actor::Ui,
-        Actor::Terminal,
-        Actor::Helm,
-        Actor::Mcp,
-        Actor::Extension { secrets: true },
-        Actor::Agent,
-    ];
     let risks = [
         Risk::Reversible,
         Risk::Replaced,
@@ -329,7 +343,7 @@ fn after_a_start_over_no_context_lets_a_write_through_without_an_answer_that_it_
         Risk::Reviewed,
         Risk::Shell,
     ];
-    let mut checked = 0;
+    let (mut checked, mut read_write, mut unmarked) = (0, 0, 0);
     for (index, file) in files.iter().enumerate() {
         for read_only in [false, true] {
             for provider in [
@@ -355,7 +369,7 @@ fn after_a_start_over_no_context_lets_a_write_through_without_an_answer_that_it_
                         Audit::off(),
                     );
                     let verdicts = |policy: &Policy| {
-                        actors
+                        ACTORS
                             .iter()
                             .flat_map(|actor| {
                                 risks.iter().map(|risk| unasked(policy, *actor, risk))
@@ -363,17 +377,85 @@ fn after_a_start_over_no_context_lets_a_write_through_without_an_answer_that_it_
                             .collect::<Vec<_>>()
                     };
                     let before = verdicts(&policy);
-                    policy.start_over(&Friction::Confirm).unwrap();
+                    policy.start_over(&typed()).unwrap();
                     let after = verdicts(&policy);
-                    let case = format!("{index} {metadata:?}: {:?}", policy.access("kind-a"));
-                    assert!(!unread(&policy.access("kind-a")), "{case}");
+                    let access = policy.access("kind-a");
+                    let case = format!("{index} {metadata:?}: {access:?}");
+                    assert!(!unread(&access), "{case}");
                     for (before, after) in before.iter().zip(&after) {
                         assert!(!after || *before, "{case}");
+                    }
+                    if access.mode == Mode::ReadWrite {
+                        assert!(
+                            matches!(
+                                access.source,
+                                ModeSource::PolicyFile {
+                                    pattern: Some(_),
+                                    ..
+                                }
+                            ),
+                            "{case}"
+                        );
+                        read_write += 1;
+                    }
+                    if access.source == ModeSource::Unmarked {
+                        for actor in ACTORS {
+                            for attributes in [write(), exec()] {
+                                let refused =
+                                    policy.authorize("kind-a", &attributes, actor).unwrap_err();
+                                assert_eq!(refused.reason, BlockReason::Unmarked, "{case}");
+                            }
+                        }
+                        unmarked += 1;
                     }
                     checked += 1;
                 }
             }
         }
     }
-    assert_eq!(checked, 5 * 2 * 3 * 3);
+    assert_eq!((checked, read_write, unmarked), (5 * 2 * 3 * 3, 18, 1));
+}
+
+#[test]
+fn a_forward_that_read_only_refused_under_an_admin_s_allow_port_forward_false_passes_after_a_start_over_where_the_context_is_unmarked_or_guarded()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    let admin = dir.path().join("policy.json");
+    std::fs::write(&admin, r#"{"readOnly": {"allowPortForward": false}}"#).unwrap();
+    let path = dir.path().join("protection.json");
+    std::fs::write(&path, UNREADABLE).unwrap();
+    let policy = Policy::new(
+        PolicyFile::read(&admin),
+        |context| match context {
+            "kind-typed" => Some(Metadata {
+                environment: Some(TypeLock::Staging),
+                ..Metadata::default()
+            }),
+            "kind-locked" => Some(Metadata {
+                read_only: true,
+                ..Metadata::default()
+            }),
+            _ => Some(Metadata::default()),
+        },
+        Protection::read(&path),
+        Audit::off(),
+    );
+    let forward = Attributes::action("create", "pods", Some("portforward"), Some("a"), Some("p"));
+    let passes = |context: &str| {
+        ACTORS
+            .iter()
+            .map(|actor| policy.authorize(context, &forward, *actor).is_ok())
+            .collect::<Vec<_>>()
+    };
+    for context in ["kind-a", "kind-typed", "kind-locked"] {
+        assert_eq!(passes(context), [false; 6], "{context}");
+    }
+
+    policy.start_over(&typed()).unwrap();
+
+    assert_eq!(policy.access("kind-a").source, ModeSource::Unmarked);
+    assert_eq!(passes("kind-a"), [true; 6]);
+    assert_eq!(policy.access("kind-typed").mode, Mode::Guarded);
+    assert_eq!(passes("kind-typed"), [true; 6]);
+    assert_eq!(passes("kind-locked"), [false; 6]);
 }
