@@ -17,6 +17,8 @@ paths:
   The fixtures are hand-written to the writer's bytes, not recorded responses: prettier leaves them alone.
 - Before the first release a change of a kept file's format, a wire type it holds included (`Mode`, `Environment`, `ForwardTarget`, `ForwardId`, `Gvr`), changes its fixture with it.
 - From the first release on a change keeps reading each released version through a migration and that version's own fixture, and only then does a struct for disk split from the wire's.
-- A file that protects reads closed: `protection.json` makes every context the policy file sets no mode for `read-only` and `trust.json` trusts nothing when it cannot be read, is not JSON, has an unknown key, a value that does not read back or an unknown version.
-- Nothing writes a file it could not read: a protective one refuses every change until the next start, the others move aside first.
+- A file that protects reads closed when it cannot be read, is not JSON, has an unknown key, a value that does not read back or an unknown version, and what it may do next goes by what its loss does:
+  - `protection.json`, whose loss would loosen protection, makes every context the policy file sets no mode for `read-only` and is never written before the next start, so every change of protection is refused until then;
+  - `trust.json`, whose loss only tightens, trusts nothing and may start anew: it moves aside, the next trust writes a new file, and where the move failed that write replaces it, which costs only a plugin asking again.
+- `state.json` fails open: it moves aside and the app starts without it, and where the move failed the next save replaces it.
 - A choice holds only once its file holds it: write, then hold; after a write that fails, read the file back and refuse what it does not hold.

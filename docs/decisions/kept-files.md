@@ -25,9 +25,10 @@ A lost key cost the person their locks: a context they had made `read-only` over
 - **A file that protects reads closed**: the person's protection and the trust file.
   A file that cannot be read, is not JSON, has a key nothing reads, holds a value that does not read back or has a version this build does not know gives the strictest reading: `protection.json` makes every context `read-only`, below a policy file's entry, and `trust.json` trusts nothing.
   `state.json` keeps failing open, as it holds only what the UI leaves behind: it moves aside and the app starts without it.
-- **Nothing writes a file it could not read.**
-  While `protection.json` cannot be read every change of protection is refused, so a newer build's file outlives a downgrade and reads again once that build runs; it is read again only at the next start.
-  A `trust.json` or a `state.json` that cannot be read moves aside as `<name>.unreadable` with its bytes, so what is written next starts a new file.
+- **What a file that cannot be read may do next goes by what its loss does.**
+  `protection.json`, whose loss would loosen protection, is never written before the next start: while it cannot be read every change of protection is refused, so a newer build's file outlives a downgrade and reads again once that build runs; it is read again only at the next start.
+  `trust.json`, whose loss only tightens, may start anew: it moves aside as `trust.json.unreadable` with its bytes and takes new trust at once, and where the move fails the next trust writes over it.
+  `state.json` moves aside as `state.json.unreadable` in the same way, and the next save starts a new file, or replaces it where the move failed.
 - **A choice holds only once its file holds it.**
   The policy writes `protection.json` before it holds a change, and refuses one the file does not hold: a write that fails is read back, since its last step, the directory's fsync, comes after the new file is in place.
   So no choice holds that the next start would not read, and none is refused that it would.
@@ -37,7 +38,8 @@ A lost key cost the person their locks: a context they had made `read-only` over
 - A fixture pins the bytes the reader takes and the writer gives, which is what a released file depends on, with no second type to keep in step until a format has shipped.
 - A protective file read open loses protection silently: an unknown key skipped is a lock the writer meant that does not hold, and a value dropped is a context back at a looser default.
   Read closed, the same mistake shows as every context the policy file sets no mode for `read-only`, which the person sees in the popover, the blocked toasts and the problems, and gets out of by restoring or removing the file.
-- A file rewritten after it could not be read would replace what a newer build wrote with what an older one knows, so a downgrade and an upgrade back would lose the person's choices.
+- A `protection.json` rewritten after it could not be read would replace what a newer build wrote with what an older one knows, so a downgrade and an upgrade back would lose the person's choices, and a context they had made stricter than its locks say would come back looser.
+- A `trust.json` lost the same way only has each plugin ask again before it runs, so starting it anew leaves nothing looser than the person set, and spares them a file to restore before any plugin can be trusted.
 - A choice held before it is written lasts for the run only, and the person believes a lock holds that the next start does not have.
 
 ## Consequences
