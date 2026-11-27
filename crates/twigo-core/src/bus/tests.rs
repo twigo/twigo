@@ -1398,6 +1398,33 @@ async fn a_protection_file_that_cannot_be_read_refuses_a_plan_with_its_code_and_
     );
 }
 
+#[tokio::test]
+async fn a_choice_that_cannot_be_saved_is_refused_with_its_code_and_the_log_says_why() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running_with(dir.path(), PRODUCTION);
+    let plan = core
+        .command_plan("main", set_mode(Mode::ReadOnly))
+        .await
+        .unwrap();
+    std::fs::create_dir(dir.path().join("protection.json")).unwrap();
+    let before = core.policy.access("kind-prod");
+    let (_, send) = events();
+    let request = Execute {
+        plan: plan.id,
+        typed: None,
+    };
+    let refused = core
+        .command_execute("main", request, send)
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code, ErrorCode::ProtectionUnsaved);
+    assert_eq!(core.policy.access("kind-prod"), before);
+    let lines = audit(dir.path());
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert_eq!(lines[0]["event"], "refused");
+    assert_eq!(lines[0]["why"], json!({ "kind": "unsaved" }));
+}
+
 fn audit(dir: &Path) -> Vec<Value> {
     std::fs::read_to_string(dir.join("audit.jsonl"))
         .unwrap()
