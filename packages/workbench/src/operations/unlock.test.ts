@@ -40,6 +40,7 @@ test.each<ModeSource>([
 test.each<ModeSource>([
   { kind: "policyFile", file: "/etc/twigo/policy.json", pattern: "prod-*" },
   { kind: "unlisted" },
+  { kind: "moved" },
 ])("a lock set by %o offers nothing", (source) => {
   expect(unlockAction(operationsOf(vi.fn()), refusal(source))).toBe(undefined);
 });

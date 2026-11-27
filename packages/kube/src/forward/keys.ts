@@ -1,10 +1,19 @@
-import type { Forward } from "@twigo/protocol";
+import type { Blocked, Forward } from "@twigo/protocol";
 import { canUnlock, type Lookup } from "@twigo/workbench";
 import { listensOn, webOf } from "./words";
 
 /**
+ * Whether a start may get past what a forward failed on: the clients it
+ * builds reach the cluster the context names now and meet that one's mode,
+ * and an unlock lifts any lock it reaches.
+ */
+function startMayPass(blocked: Blocked): boolean {
+  return blocked.source.kind === "moved" || canUnlock(blocked);
+}
+
+/**
  * What a forward's commands read: that there is one, and what its state lets
- * be done to it. A forward that failed on a lock the person cannot lift may
+ * be done to it. A forward that failed on a lock no start may get past may
  * neither start nor move until the lock goes.
  */
 export function forwardKeys(
@@ -14,7 +23,7 @@ export function forwardKeys(
   const locked =
     state.state === "failed" &&
     state.error.blocked !== undefined &&
-    !canUnlock(state.error.blocked);
+    !startMayPass(state.error.blocked);
   const listens = listensOn(forward).length > 0;
   return {
     forward: true,

@@ -6,14 +6,16 @@ import type { Operations } from "./service";
 /**
  * Whether the person may lift what the gate refused with (ARCHITECTURE
  * 6.4): a read-only context unlocks for 15 minutes, unless a policy file set
- * it or no source lists the context.
+ * it or no source lists the context; an unlock never reaches clients of a
+ * cluster the context no longer names.
  */
 export function canUnlock(blocked: Blocked): boolean {
   return (
     blocked.reason === "mode" &&
     blocked.mode === "read-only" &&
     blocked.source.kind !== "policyFile" &&
-    blocked.source.kind !== "unlisted"
+    blocked.source.kind !== "unlisted" &&
+    blocked.source.kind !== "moved"
   );
 }
 

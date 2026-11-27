@@ -43,6 +43,11 @@ pub enum Environment {
     rename_all_fields = "camelCase"
 )]
 pub enum ModeSource {
+    /// No source lists it now, so nothing says what it lets through.
+    Unlisted,
+    /// Only in what a request was blocked by: its name means another cluster
+    /// now than the clients the request came through reach.
+    Moved,
     /// The admin's file, which the UI cannot change or unlock. `pattern` is
     /// the entry that matched the context; none when the file cannot be
     /// read, which locks every context, and `reason` says why in words that
@@ -55,11 +60,6 @@ pub enum ModeSource {
         #[ts(optional)]
         reason: Option<String>,
     },
-    /// No source lists it now, so nothing says what it lets through.
-    Unlisted,
-    /// Only in what a request was blocked by: its name means another cluster
-    /// now than the clients the request came through reach.
-    Moved,
     /// The person's choice for this context, through a confirmed command.
     /// `overrides` is the lock it sets aside: what the kubeconfig, the
     /// provider or the type would give, where that is stricter.
