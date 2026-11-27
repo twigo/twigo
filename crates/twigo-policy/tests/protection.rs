@@ -228,6 +228,49 @@ fn a_choice_that_cannot_be_saved_is_refused_and_not_held() {
     assert!(policy.authorize("kind-a", &write(), Actor::Ui).is_err());
 }
 
+#[cfg(unix)]
+#[test]
+fn a_choice_whose_save_fails_holds_only_where_the_file_reads_back_as_written() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let written = |environment| {
+        let path = dir.path().join(format!("{environment:?}.json"));
+        opened(dir.path(), &path)
+            .set_environment("kind-a", Some(environment))
+            .unwrap();
+        std::fs::read(path).unwrap()
+    };
+    let (production, development) = (
+        written(Environment::Production),
+        written(Environment::Development),
+    );
+    let kept = dir.path().join("kept");
+    std::fs::create_dir(&kept).unwrap();
+    let path = kept.join("protection.json");
+    let policy = opened(dir.path(), &path);
+    std::fs::write(&path, &production).unwrap();
+    std::fs::set_permissions(&kept, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let marked = Change::Type {
+        environment: Some(Environment::Development),
+    };
+
+    let planned = policy.plan("kind-a", marked).unwrap();
+    let refused = policy.change("kind-a", &planned, &Friction::AtOnce);
+    assert!(matches!(refused, Err(Refused::Unsaved(..))), "{refused:?}");
+    assert_eq!(policy.access("kind-a").source, ModeSource::Unmarked);
+
+    std::fs::write(&path, &development).unwrap();
+    let planned = policy.plan("kind-a", marked).unwrap();
+    let held = policy.change("kind-a", &planned, &Friction::AtOnce);
+    std::fs::set_permissions(&kept, std::fs::Permissions::from_mode(0o700)).unwrap();
+    held.unwrap();
+    let access = policy.access("kind-a");
+    assert_eq!(access.environment, Some(Environment::Development));
+    assert_eq!(access.mode, Mode::ReadWrite);
+    assert_eq!(std::fs::read(&path).unwrap(), development);
+}
+
 const KEPT: &str = include_str!("kept/protection.json");
 
 fn kept(path: &Path) -> Arc<Policy> {

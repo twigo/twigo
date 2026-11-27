@@ -124,15 +124,24 @@ impl Kept {
         Refused::ProtectionUnreadable(self.file())
     }
 
-    /// Writes `choices`, which the policy holds only once they are written.
+    /// Writes `choices`, which the policy holds only once the file holds
+    /// them.
     pub(crate) fn keep(&self, choices: &Choices) -> Result<(), Refused> {
         let Some(path) = &self.path else {
             return Ok(());
         };
-        write(path, choices).map_err(|error| {
-            tracing::error!(path = %path.display(), %error, "could not save the person's protection");
-            Refused::Unsaved(self.file(), error.kind())
-        })
+        let json = json(choices);
+        let Err(error) = write(path, &json) else {
+            return Ok(());
+        };
+        // The save's last step, the directory's fsync, comes after the
+        // rename, so a failed save may have put the file in place.
+        if std::fs::read(path).is_ok_and(|held| held == json) {
+            tracing::warn!(path = %path.display(), %error, "the save of the person's protection failed, but the file holds what it wrote");
+            return Ok(());
+        }
+        tracing::error!(path = %path.display(), %error, "could not save the person's protection");
+        Err(Refused::Unsaved(self.file(), error.kind()))
     }
 
     fn file(&self) -> String {
@@ -179,13 +188,16 @@ fn parse(bytes: &[u8]) -> Result<Choices, String> {
     })
 }
 
-fn write(path: &Path, choices: &Choices) -> io::Result<()> {
-    let json = serde_json::to_vec_pretty(&File {
+fn json(choices: &Choices) -> Vec<u8> {
+    serde_json::to_vec_pretty(&File {
         version: VERSION,
         modes: choices.modes.clone(),
         environments: choices.environments.clone(),
     })
-    .expect("maps of strings and plain enums serialize to JSON");
+    .expect("maps of strings and plain enums serialize to JSON")
+}
+
+fn write(path: &Path, json: &[u8]) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -198,6 +210,6 @@ fn write(path: &Path, choices: &Choices) -> io::Result<()> {
         options.preserve_mode(false).mode(0o600);
     }
     let mut file = options.open(path)?;
-    file.write_all(&json)?;
+    file.write_all(json)?;
     file.commit()
 }

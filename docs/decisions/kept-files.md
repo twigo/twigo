@@ -29,7 +29,8 @@ A lost key cost the person their locks: a context they had made `read-only` over
   While `protection.json` cannot be read every change of protection is refused, so a newer build's file outlives a downgrade and reads again once that build runs; it is read again only at the next start.
   A `trust.json` or a `state.json` that cannot be read moves aside as `<name>.unreadable` with its bytes, so what is written next starts a new file.
 - **A choice holds only once its file holds it.**
-  The policy writes `protection.json` before it holds a change, and refuses one it could not write, so no choice holds that the next start would not read.
+  The policy writes `protection.json` before it holds a change, and refuses one the file does not hold: a write that fails is read back, since its last step, the directory's fsync, comes after the new file is in place.
+  So no choice holds that the next start would not read, and none is refused that it would.
 
 ## Why
 
