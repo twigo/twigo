@@ -27,6 +27,7 @@ A lost key cost the person their locks: a context they had made `read-only` over
   `state.json` keeps failing open, as it holds only what the UI leaves behind: it moves aside and the app starts without it.
 - **What a file that cannot be read may do next goes by what its loss does.**
   `protection.json`, whose loss would loosen protection, is never written before the next start: while it cannot be read every change of protection is refused, so a newer build's file outlives a downgrade and reads again once that build runs; it is read again only at the next start.
+  The person may start over instead, a plan of the command bus that asks in a dialog: it moves the file aside as `protection.json.unreadable` with its bytes, in place of one an earlier start over left, and the policy then holds no choice and reads open, so the next choice writes a new file; where the move fails it is refused and nothing changes.
   `trust.json`, whose loss only tightens, may start anew: it moves aside as `trust.json.unreadable` with its bytes and takes new trust at once, and where the move fails the next trust writes over it.
   `state.json` moves aside as `state.json.unreadable` in the same way, and the next save starts a new file, or replaces it where the move failed.
 - **A choice holds only once its file holds it.**
@@ -41,16 +42,18 @@ A lost key cost the person their locks: a context they had made `read-only` over
 - A `protection.json` rewritten after it could not be read would replace what a newer build wrote with what an older one knows, so a downgrade and an upgrade back would lose the person's choices, and a context they had made stricter than its locks say would come back looser.
 - A `trust.json` lost the same way only has each plugin ask again before it runs, so starting it anew leaves nothing looser than the person set, and spares them a file to restore before any plugin can be trusted.
 - A choice held before it is written lasts for the run only, and the person believes a lock holds that the next start does not have.
+- Starting over spares the person a file manager and a restart to get out of read-only, and opens nothing without another answer: with their choices gone a context an admin's entry sets keeps that mode, and any other is `read-only` or `guarded` by its kubeconfig, its type there or its provider, or unmarked, which asks what it is before its first write or exec, so a dialog is its friction rather than a name typed.
+  The file moves rather than goes, so what a newer build wrote is still there to restore.
 
 ## Consequences
 
-- A person whose `protection.json` cannot be read has every context the policy file sets no mode for `read-only` until they restore or remove the file and restart Twigo: no command starts it over yet.
+- A person whose `protection.json` cannot be read has every context the policy file sets no mode for `read-only` until they start over, after which every context they marked asks again, or restore the file and restart Twigo.
 - A change of `Mode`, `Environment`, `ForwardTarget`, `ForwardId` or of a kept file's own structs fails a fixture test, and whoever makes it decides there whether the disk format changes.
 - A `trust.json` or a `state.json` whose move aside fails says so in the log, and the next write replaces it.
 - The modes and types that `state.json` kept under `policy/choices` before this change are not read: before users exist there is no import.
 
 ## Where it is implemented
 
-- `crates/twigo-policy/src/protection.rs` and `crates/twigo-policy/tests/kept/protection.json`.
+- `crates/twigo-policy/src/protection.rs` and `crates/twigo-policy/tests/kept/protection.json`; the start over in `crates/twigo-policy/src/policy.rs` and `crates/twigo-core/src/actions/start_over.rs`.
 - `crates/twigo-core/src/trust.rs` and `crates/twigo-core/tests/kept/trust.json`.
 - `crates/twigo-core/src/state.rs`, `crates/twigo-core/src/forward/saved.rs` and `crates/twigo-core/tests/kept/state.json`.

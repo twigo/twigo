@@ -135,7 +135,7 @@ pub(crate) async fn cordon(
         command: verb,
         target: named,
         writes: vec![attributes],
-        context,
+        context: Some(context),
         connection,
         space: Some(space.to_owned()),
         risk: Risk::Reversible,

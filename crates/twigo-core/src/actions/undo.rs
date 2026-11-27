@@ -236,7 +236,7 @@ pub(crate) async fn undo(core: &Core, space: &str) -> Result<Planned, IpcError> 
     let (this, space) = (core.this.clone(), space.to_owned());
     let destructive = risk == Risk::Lasting && revert.asks != Asks::Resume;
     Ok(Planned {
-        context: revert.target.context.clone(),
+        context: Some(revert.target.context.clone()),
         connection,
         // It takes its own undo as it runs, and leaves a later one standing.
         space: None,

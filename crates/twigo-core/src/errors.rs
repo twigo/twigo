@@ -44,6 +44,8 @@ pub(crate) fn refused(error: &Refused) -> IpcError {
         Refused::PolicyFileUnreadable(_) => ErrorCode::PolicyFileUnreadable,
         Refused::ProtectionUnreadable(_) => ErrorCode::ProtectionUnreadable,
         Refused::Unsaved(..) => ErrorCode::ProtectionUnsaved,
+        Refused::ProtectionReadable(_) => ErrorCode::ProtectionReadable,
+        Refused::Unmoved(..) => ErrorCode::ProtectionUnmoved,
         Refused::NotLocked(..) => ErrorCode::PolicyNotLocked,
         Refused::Unlisted(context) => return unlisted(context),
         Refused::Changed(_) => ErrorCode::PolicyChanged,

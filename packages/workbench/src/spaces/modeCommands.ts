@@ -1,4 +1,4 @@
-import { Lock, LockOpen, Shield, Tag } from "lucide-react";
+import { Lock, LockOpen, RotateCcw, Shield, Tag } from "lucide-react";
 import type { Environment, Mode, Space } from "@twigo/protocol";
 import type { QuickPickItem } from "../quickaccess/registry";
 import type { Workbench } from "../services";
@@ -15,6 +15,7 @@ export const SET_CONTEXT_MODE = "workbench.action.setContextMode";
 export const SET_CONTEXT_ENVIRONMENT = "workbench.action.setContextEnvironment";
 export const UNLOCK_CONTEXT = "workbench.action.unlockContext";
 export const RELOCK_CONTEXT = "workbench.action.relockContext";
+export const START_OVER_PROTECTION = "workbench.action.startOverProtection";
 
 const NONE = "none";
 
@@ -32,7 +33,9 @@ function isSetArgs<T>(args: unknown): args is SetArgs<T> {
  * A context's mode and type (ARCHITECTURE 6.4). Rust owns them: a change that
  * lowers protection is a plan of the command bus, which draws the friction
  * Rust names and is in the audit log, and the catalog's watch says what
- * follows. A relock only tightens, so it goes as it is.
+ * follows. A relock only tightens, so it goes as it is. Starting over from
+ * the person's protection file that cannot be read is such a plan too, on no
+ * context, which the problem's notice and the access popover offer.
  */
 export function registerContextModes(workbench: Workbench): void {
   const { commands, menus, spaces, catalog, quickAccess, backend, operations } =
@@ -170,6 +173,20 @@ export function registerContextModes(workbench: Workbench): void {
       const context = contextOf(args);
       if (context) await backend.invoke("context_relock", context);
     },
+  });
+
+  commands.register({
+    id: START_OVER_PROTECTION,
+    title: "Start Over…",
+    category: "Space",
+    icon: RotateCcw,
+    run: async () => {
+      await operations.run({ action: "startOver" }, { icon: RotateCcw });
+    },
+  });
+  menus.append("commandPalette", {
+    command: START_OVER_PROTECTION,
+    when: "false",
   });
 
   menus.append("space/context", {

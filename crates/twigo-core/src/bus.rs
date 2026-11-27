@@ -1,11 +1,12 @@
 //! The command bus (ARCHITECTURE 5.1, 6.4). A command that changes a cluster
 //! or shows secret-grade data is planned first: what it will do, in words and
 //! as kubectl, and the friction that what it risks asks for in the context's
-//! mode. The webview draws the friction and runs the plan by its id, with
-//! what proves the friction was met: the typed name, the countdown passed. A
-//! plan runs once, from the window it was made for, on the cluster it was
-//! planned on; the policy decides again as it starts, and the gate below
-//! every client as each request goes out.
+//! mode, or alone for what acts on no context. The webview draws the
+//! friction and runs the plan by its id, with what proves the friction was
+//! met: the typed name, the countdown passed. A plan runs once, from the
+//! window it was made for, on the cluster it was planned on; the policy
+//! decides again as it starts, and the gate below every client as each
+//! request goes out.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -37,7 +38,9 @@ pub(crate) struct Previewed {
 
 /// What a command will do, as its action planned it.
 pub(crate) struct Planned {
-    pub context: String,
+    /// None for what acts on no context, as starting over from the
+    /// person's protection file, which has no connection and no writes.
+    pub context: Option<String>,
     /// The context's connection it planned for, so it runs there only: a
     /// delete's, that of the clients it read the object with; a Reveal's,
     /// the context's as it planned.
@@ -82,6 +85,9 @@ pub(crate) enum Run {
         change: Box<PlannedChange>,
         done: String,
     },
+    /// Starts over from the person's protection file at once, while it
+    /// still cannot be read, and says `done`; it acts on no context.
+    StartsOver { done: String },
 }
 
 /// How a run ended.
@@ -293,14 +299,17 @@ impl Bus {
         }
     }
 
-    /// Keeps a plan to run, with the friction `access` asks for.
+    /// Keeps a plan to run, with the friction its risk asks for where its
+    /// context lets through what `access` says, none for what acts on no
+    /// context.
     pub(crate) fn keep(
         &self,
         ticket: Ticket,
         planned: Planned,
-        access: &ContextAccess,
+        access: Option<&ContextAccess>,
     ) -> Result<Plan, IpcError> {
-        let friction = twigo_policy::friction::friction(&planned.risk, &planned.context, access);
+        let on = planned.context.as_deref().zip(access);
+        let friction = twigo_policy::friction::friction(&planned.risk, on);
         let mut inner = self.inner();
         inner.next += 1;
         let id = PlanId(inner.next);
@@ -322,8 +331,8 @@ impl Bus {
         let plan = Plan {
             id,
             context: planned.context.clone(),
-            environment: access.environment,
-            mode: access.mode,
+            environment: access.and_then(|access| access.environment),
+            mode: access.map(|access| access.mode),
             friction: friction.clone(),
             question: planned.question.clone(),
             confirm: planned.confirm.clone(),

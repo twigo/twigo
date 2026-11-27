@@ -104,7 +104,7 @@ pub(crate) async fn restart(
         command: "restart",
         target: named,
         writes: vec![attributes],
-        context,
+        context: Some(context),
         connection,
         space: Some(space.to_owned()),
         risk: Risk::Lasting,

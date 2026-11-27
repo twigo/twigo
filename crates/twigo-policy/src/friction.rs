@@ -37,16 +37,30 @@ pub enum Risk {
     /// An unlock, which ends by itself and leaves every write in `guarded`
     /// asking for the context's name.
     Unlock,
+    /// Starting over from the person's protection file that cannot be read,
+    /// which acts on no context. A dialog is enough, as it leaves nothing
+    /// writable without another answer that was not before: the person's
+    /// choices are gone, so a context an admin's entry sets keeps that mode,
+    /// and any other is `read-only` or `guarded` by its kubeconfig, its type
+    /// there or its provider, or unmarked, which asks what it is before its
+    /// first write or exec, a kubeconfig's Development or Local included
+    /// (D16).
+    StartOver,
 }
 
-/// The friction of `risk` on `context`. A `read-only` context blocks a
-/// write before its friction matters, and asks the most of anything else.
-pub fn friction(risk: &Risk, context: &str, access: &ContextAccess) -> Friction {
+/// The friction of `risk` on `context`, whose access is `access`, or on no
+/// context, which has no mode to raise it and no name to type, so a dialog
+/// asks. A `read-only` context blocks a write before its friction matters,
+/// and asks the most of anything else.
+pub fn friction(risk: &Risk, on: Option<(&str, &ContextAccess)>) -> Friction {
+    let Some((context, access)) = on else {
+        return Friction::Confirm;
+    };
     let typed_context = || Friction::Typed {
         text: context.to_owned(),
     };
     match (risk, access.mode) {
-        (Risk::Unlock, _) => Friction::Confirm,
+        (Risk::Unlock | Risk::StartOver, _) => Friction::Confirm,
         (Risk::Protection(_), _) if access.source == ModeSource::Unmarked => Friction::AtOnce,
         (Risk::Protection(views), _) if views.iter().all(|(from, to)| keeps(from, to)) => {
             Friction::AtOnce
@@ -186,7 +200,7 @@ mod tests {
         ];
         for (risk, mode, environment, expected) in cases {
             assert_eq!(
-                friction(&risk, "kind-a", &access(mode, environment)),
+                friction(&risk, Some(("kind-a", &access(mode, environment)))),
                 expected,
                 "{risk:?} in {mode:?} {environment:?}"
             );
@@ -233,13 +247,13 @@ mod tests {
         for (before, after, expected) in cases {
             let risk = Risk::Protection(vec![(before.clone(), after.clone())]);
             assert_eq!(
-                friction(&risk, "kind-a", before),
+                friction(&risk, Some(("kind-a", before))),
                 expected,
                 "from {before:?} to {after:?}"
             );
         }
         for before in [read_only, unlocked] {
-            let unlock = friction(&Risk::Unlock, "kind-a", &before);
+            let unlock = friction(&Risk::Unlock, Some(("kind-a", &before)));
             assert_eq!(unlock, Friction::Confirm, "{before:?}");
         }
     }
@@ -277,7 +291,7 @@ mod tests {
         for (before, after, expected) in cases {
             let risk = Risk::Protection(vec![held.clone(), (before.clone(), after.clone())]);
             assert_eq!(
-                friction(&risk, "kind-a", &locked),
+                friction(&risk, Some(("kind-a", &locked))),
                 expected,
                 "from {before:?} to {after:?} beneath the lock"
             );
@@ -287,13 +301,13 @@ mod tests {
             (locked.clone(), guarded.clone()),
             (unmarked.clone(), guarded),
         ]);
-        assert_eq!(friction(&lowered, "kind-a", &locked), typed);
+        assert_eq!(friction(&lowered, Some(("kind-a", &locked))), typed);
         let between = Risk::Protection(vec![
             held,
             (production, staging.clone()),
             (unmarked, staging),
         ]);
-        assert_eq!(friction(&between, "kind-a", &locked), typed);
+        assert_eq!(friction(&between, Some(("kind-a", &locked))), typed);
     }
 
     #[test]

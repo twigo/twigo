@@ -57,19 +57,26 @@ type Risk =
   | { readonly kind: "reveal" }
   | { readonly kind: "reviewed" }
   | { readonly kind: "unlock" }
+  | { readonly kind: "startOver" }
   | {
       /** A lasting change of the context's protection, as it is first, then under each set of the locks that can go taken away. */
       readonly kind: "protection";
       readonly steps: readonly Step[];
     };
 
-/** `twigo_policy::friction::friction`. */
-function frictionOf(
-  risk: Risk,
-  context: string,
-  access: ContextAccess,
-): Friction {
-  if (risk.kind === "unlock") return { kind: "confirm" };
+/** The context a plan acts on, with what it lets through now. */
+interface On {
+  readonly context: string;
+  readonly access: ContextAccess;
+}
+
+/** `twigo_policy::friction::friction`: a plan on no context asks in a dialog. */
+function frictionOf(risk: Risk, on: On | undefined): Friction {
+  if (on === undefined) return { kind: "confirm" };
+  const { context, access } = on;
+  if (risk.kind === "unlock" || risk.kind === "startOver") {
+    return { kind: "confirm" };
+  }
   if (risk.kind === "protection") {
     return lowering(context, access, risk.steps);
   }
@@ -378,6 +385,8 @@ export interface BusHost {
     | "changes"
     | "refuse"
     | "refuseUnreadable"
+    | "startingOver"
+    | "startOver"
     | "setMode"
     | "setEnvironment"
     | "unlock"
@@ -731,19 +740,25 @@ export class MockBus {
 
   plan(request: PlanRequest): Plan {
     const planned = this.#planned(request);
-    const { context } = planned.plan;
-    const access = this.host.access(context);
-    this.#authorize(context, access, planned);
-    const friction = frictionOf(planned.risk, context, access);
+    const on = this.#on(planned);
+    if (on) this.#authorize(on.context, on.access, planned);
+    const friction = frictionOf(planned.risk, on);
     const id: PlanId = ++this.#next;
     this.#waiting.set(id, { planned, friction, since: Date.now() });
     return {
       id,
       ...planned.plan,
-      mode: access.mode,
-      environment: access.environment,
+      mode: on?.access.mode ?? null,
+      environment: on?.access.environment ?? null,
       friction,
     };
+  }
+
+  /** The context a plan acts on as it stands now, none for what acts on no context. */
+  #on({ plan: { context } }: Planned): On | undefined {
+    return context === null
+      ? undefined
+      : { context, access: this.host.access(context) };
   }
 
   #planned(request: PlanRequest): Planned {
@@ -784,6 +799,8 @@ export class MockBus {
         });
       case "unlock":
         return this.#protection(request.context, { unlock: true });
+      case "startOver":
+        return this.#startOver();
     }
   }
 
@@ -796,12 +813,11 @@ export class MockBus {
       throw new IpcError("bus.not-waiting", `no plan ${id} waits to run`);
     this.#waiting.delete(id);
     const { planned, friction, since } = waiting;
-    const { context } = planned.plan;
-    const access = this.host.access(context);
-    if (!covers(friction, frictionOf(planned.risk, context, access))) {
+    const on = this.#on(planned);
+    if (on && !covers(friction, frictionOf(planned.risk, on))) {
       throw new IpcError(
         "action.mode-changed",
-        `${context} is ${access.mode} now, which asks for more than you confirmed, so Twigo sent nothing`,
+        `${on.context} is ${on.access.mode} now, which asks for more than you confirmed, so Twigo sent nothing`,
       );
     }
     if (
@@ -816,7 +832,7 @@ export class MockBus {
         `type ${friction.text} to confirm`,
       );
     }
-    this.#authorize(context, access, planned);
+    if (on) this.#authorize(on.context, on.access, planned);
     planned.stands?.();
     const { space } = planned;
     if (space !== undefined) {
@@ -1809,6 +1825,39 @@ export class MockBus {
         else if ("mode" in change) protection.setMode(context, change.mode);
         else protection.setEnvironment(context, change.environment);
         tell({ state: "done", text: said.done, undoUntil: null });
+      },
+    };
+  }
+
+  /** Starting over from the person's protection file that cannot be read, as Rust's `actions::start_over` plans it. */
+  #startOver(): Planned {
+    const { protection } = this.host;
+    const { file, aside, reason } = protection.startingOver();
+    return {
+      plan: {
+        context: null,
+        question: "Start over without the modes and types you set?",
+        confirm: "Start Over",
+        destructive: false,
+        consequences: [
+          `It moves ${file}, which cannot be read (${reason}), to ${aside}, in place of any file there.`,
+          "Every context you marked before asks again: one that an admin's policy file, its kubeconfig or its provider locks keeps that lock, and any other asks what it is before its first write or exec.",
+        ],
+        affected: [],
+        commandLine: null,
+        doing: "Starting over",
+      },
+      risk: { kind: "startOver" },
+      stands: () => {
+        protection.startingOver();
+      },
+      run: (tell) => {
+        protection.startOver();
+        tell({
+          state: "done",
+          text: "Started over without the modes and types you set",
+          undoUntil: null,
+        });
       },
     };
   }

@@ -221,7 +221,7 @@ pub(crate) async fn delete(
             writes[0].target()
         },
         writes,
-        context,
+        context: Some(context),
         connection,
         space: Some(space.to_owned()),
         risk,

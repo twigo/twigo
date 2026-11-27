@@ -163,7 +163,8 @@ type ListScenario = "live" | ViewState["state"] | CauseScenario;
  * `policyFileUnreadable`: live lists while that file cannot be read, so every
  * context is read-only and says why, `protectionUnreadable`: live lists while
  * the person's protection file cannot be read, so every context is read-only,
- * says why, takes no change and is listed in the problems,
+ * says why, takes no change and is listed in the problems until a start over
+ * moves the file aside,
  * `viewer`: live lists for a person who may only read, `protection`: live
  * lists with `qa`, which nobody marked, and `analytics`, whose kubeconfig says
  * read-only and which the person made read-write, open on the rail,
@@ -298,7 +299,7 @@ const PROBLEMS = [
 const PROTECTION_UNREADABLE = [
   wire(
     "protection.unreadable",
-    "Twigo could not read protection.json, which holds the modes and types you set, so every context an admin's policy file sets no mode for is read-only until you restore or remove that file and restart Twigo",
+    "Twigo could not read protection.json, which holds the modes and types you set, so every context an admin's policy file sets no mode for is read-only until you start over, which moves that file aside, or restore it and restart Twigo",
   ),
 ];
 
@@ -1166,7 +1167,12 @@ export function createMockBackend(
         }, 2 * SAVE_WORKS_MS);
         return UNSAVED;
       }
-      if (scenario === "protectionUnreadable") return PROTECTION_UNREADABLE;
+      if (scenario === "protectionUnreadable") {
+        access.onStartOver(() => {
+          onMessage([]);
+        });
+        return access.protectionReads ? [] : PROTECTION_UNREADABLE;
+      }
       return scenario === "problems" ? PROBLEMS : [];
     },
     resources_watch: (id, onMessage) => {

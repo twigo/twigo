@@ -7,8 +7,8 @@
 //! It reads closed, as the admin's policy file does, and is read once, as
 //! the app starts: a file that cannot be read keeps `read-only` every
 //! context the admin's policy file sets no mode for, and takes no change
-//! until the next start, so it is never written over and a newer build's
-//! file outlives a downgrade.
+//! until the person starts over, which moves it aside, or the next start, so
+//! it is never written over and a newer build's file outlives a downgrade.
 //!
 //! ```json
 //! {
@@ -78,7 +78,7 @@ impl Protection {
             tracing::error!(path = %path.display(), %reason, "could not read the person's protection, so every context the policy file sets no mode for is read-only");
             problems::report(IpcError::new(
                 ErrorCode::ProtectionUnreadable,
-                "Twigo could not read protection.json, which holds the modes and types you set, so every context an admin's policy file sets no mode for is read-only until you restore or remove that file and restart Twigo",
+                "Twigo could not read protection.json, which holds the modes and types you set, so every context an admin's policy file sets no mode for is read-only until you start over, which moves that file aside, or restore it and restart Twigo",
             ));
         }
         Self {
@@ -126,6 +126,36 @@ impl Kept {
         Refused::ProtectionUnreadable(self.file())
     }
 
+    /// Why starting over is refused while the file can be read, or is not
+    /// there.
+    pub(crate) fn readable(&self) -> Refused {
+        Refused::ProtectionReadable(self.file())
+    }
+
+    /// Where the file moves as the person starts over.
+    pub(crate) fn aside(&self) -> String {
+        self.path
+            .as_deref()
+            .map(|path| aside(path).display().to_string())
+            .unwrap_or_default()
+    }
+
+    /// Moves the file that could not be read aside, in place of one an
+    /// earlier start over left there, so that the next choice writes a new
+    /// file; a move that fails changes nothing.
+    pub(crate) fn set_aside(&self) -> Result<(), Refused> {
+        let Some(path) = &self.path else {
+            return Ok(());
+        };
+        if let Err(error) = std::fs::rename(path, aside(path)) {
+            tracing::error!(path = %path.display(), %error, "could not move the person's protection file aside, so Twigo did not start over");
+            return Err(Refused::Unmoved(self.file(), error.kind()));
+        }
+        tracing::warn!(path = %path.display(), "the person started over without their protection file, which moved to a file of its name with .unreadable");
+        problems::clear(ErrorCode::ProtectionUnreadable);
+        Ok(())
+    }
+
     /// Writes `choices`, which the policy holds only once the file holds
     /// them.
     pub(crate) fn keep(&self, choices: &Choices) -> Result<(), Refused> {
@@ -146,7 +176,7 @@ impl Kept {
         Err(Refused::Unsaved(self.file(), error.kind()))
     }
 
-    fn file(&self) -> String {
+    pub(crate) fn file(&self) -> String {
         self.path
             .as_ref()
             .map(|path| path.display().to_string())
@@ -171,6 +201,10 @@ impl Default for Protection {
     fn default() -> Self {
         Self::nowhere()
     }
+}
+
+fn aside(path: &Path) -> PathBuf {
+    path.with_extension("json.unreadable")
 }
 
 fn parse(bytes: &[u8]) -> Result<Choices, String> {

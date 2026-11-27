@@ -1096,3 +1096,35 @@ test("the unlock a refusal offers asks in a dialog, and runs once it is confirme
     ).not.toBeNull();
   });
 });
+
+test("starting over asks in a dialog that names no context, and its run leaves each context to its locks", async () => {
+  const success = vi.spyOn(notify, "success");
+  const workbench = await testWorkbench("protectionUnreadable");
+  render(<WorkbenchView workbench={workbench} />);
+  const outcome = workbench.operations.run({ action: "startOver" }, LOOK);
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  expect(workbench.operations.asking?.plan).toMatchObject({
+    context: null,
+    environment: null,
+    mode: null,
+    friction: { kind: "confirm" },
+    commandLine: null,
+  });
+  const dialog = screen.getByRole("dialog");
+  expect(dialog.textContent).toMatch(/^Start over without/);
+  expect(dialog.textContent).toContain("protection.json.unreadable");
+  act(() => {
+    workbench.operations.asking?.confirm(undefined);
+  });
+  await expect(outcome).resolves.toEqual({ state: "done" });
+  expect(success.mock.calls[0]?.[0]).toBe(
+    "Started over without the modes and types you set",
+  );
+  expect(workbench.catalog.find("prod-eu")?.access.source).toEqual({
+    kind: "environment",
+    environment: "production",
+  });
+  expect(workbench.catalog.find("dev")?.access.source).toEqual({
+    kind: "unmarked",
+  });
+});

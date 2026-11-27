@@ -7,6 +7,7 @@ import type {
   ListQuery,
   ObjectBatch,
   ObjectParts,
+  OperationEvent,
   Overview,
   Row,
   Section,
@@ -177,6 +178,78 @@ test("under protectionUnreadable the person's protection file is listed, none of
     await vi.advanceTimersByTimeAsync(0);
     expect(await refused).toMatchObject({ code: "protection.unreadable" });
   }
+});
+
+test("under protectionUnreadable a start over plans and runs as Rust's does: the contexts read their kubeconfig's types, take changes again and the problem leaves the list", async () => {
+  const backend = createMockBackend("protectionUnreadable");
+  const problems: string[][] = [];
+  const listed = backend.subscribe("problems_watch", null, (next) =>
+    problems.push(next.map(({ code }) => code)),
+  );
+  let contexts: Context[] = [];
+  const watched = backend.subscribe("contexts_watch", null, (next) => {
+    contexts = next.contexts;
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  await Promise.all([listed, watched]);
+
+  const planned = backend.invoke("command_plan", { action: "startOver" });
+  await vi.advanceTimersByTimeAsync(0);
+  const plan = await planned;
+  expect(plan).toMatchObject({
+    context: null,
+    environment: null,
+    mode: null,
+    friction: { kind: "confirm" },
+    commandLine: null,
+    confirm: "Start Over",
+  });
+  expect(plan.consequences[0]).toContain("protection.json.unreadable");
+  const events: OperationEvent[] = [];
+  const ran = backend.subscribe(
+    "command_execute",
+    { plan: plan.id, typed: null },
+    (event) => events.push(event),
+  );
+  await vi.advanceTimersByTimeAsync(0);
+  await ran;
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(events).toEqual([
+    {
+      state: "done",
+      text: "Started over without the modes and types you set",
+      undoUntil: null,
+    },
+  ]);
+  expect(problems).toEqual([[]]);
+  expect(
+    Object.fromEntries(
+      contexts.map(({ name, access }) => [
+        name,
+        [access.mode, access.source.kind, access.environment],
+      ]),
+    ),
+  ).toEqual({
+    "prod-eu": ["read-only", "environment", "production"],
+    staging: ["guarded", "environment", "staging"],
+    dev: ["guarded", "unmarked", null],
+    qa: ["guarded", "unmarked", null],
+    analytics: ["read-only", "kubeconfig", null],
+    "kind-local": ["guarded", "unmarked", null],
+  });
+
+  const changed = backend.invoke("command_plan", {
+    action: "setMode",
+    context: "dev",
+    mode: "read-write",
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(await changed).toMatchObject({ context: "dev", mode: "guarded" });
+  const again = backend
+    .invoke("command_plan", { action: "startOver" })
+    .catch((error: unknown) => error);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(await again).toMatchObject({ code: "protection.readable" });
 });
 
 test("under problemsCleared the state cannot be saved until a save works, and a later save fails again", async () => {

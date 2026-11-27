@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Lock, LockOpen, ShieldAlert, Tag } from "lucide-react";
+import { Lock, LockOpen, RotateCcw, ShieldAlert, Tag } from "lucide-react";
 import type { ContextAccess, Environment, Mode } from "@twigo/protocol";
 import {
   Button,
@@ -18,6 +18,7 @@ import {
   RELOCK_CONTEXT,
   SET_CONTEXT_ENVIRONMENT,
   SET_CONTEXT_MODE,
+  START_OVER_PROTECTION,
   UNLOCK_CONTEXT,
   type SetArgs,
 } from "../spaces/modeCommands";
@@ -244,6 +245,19 @@ function ModeDetails({
           </>
         )}
       </div>
+      {unread && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="justify-self-start"
+          onClick={() => {
+            run(START_OVER_PROTECTION, undefined);
+          }}
+        >
+          <RotateCcw aria-hidden className="size-3.5" />
+          Start Over…
+        </Button>
+      )}
       {access.mode === "read-only" && !locked && (
         <Button
           size="sm"

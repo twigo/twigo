@@ -197,6 +197,12 @@ error_codes! {
     ProtectionUnreadable = "protection.unreadable", Permissions;
     /// A change of protection could not be saved, so it was not made.
     ProtectionUnsaved = "protection.unsaved", Internal;
+    /// The person's protection file can be read, or is not there, so there
+    /// is nothing to start over from.
+    ProtectionReadable = "protection.readable", InvalidInput;
+    /// The person's protection file that cannot be read could not be moved
+    /// aside, so Twigo did not start over.
+    ProtectionUnmoved = "protection.unmoved", Internal;
 
     // What the server or the cluster answered that Twigo cannot use.
     AnswerUndecodable = "answer.undecodable", Internal;

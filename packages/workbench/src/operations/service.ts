@@ -52,7 +52,8 @@ export interface Marking {
 /** A run under way that said it waits, for the status bar. */
 export interface Running {
   readonly id: number;
-  readonly context: string;
+  /** Null for what acts on no context. */
+  readonly context: string | null;
   readonly text: string;
   readonly stop: () => void;
 }
@@ -60,6 +61,11 @@ export interface Running {
 /** The space a request is for; a Reveal, a shell and a change of protection name none. */
 function spaceOf(request: PlanRequest): string | undefined {
   return "space" in request ? request.space : undefined;
+}
+
+/** What a toast's detail says of a run, after its context where it acts on one. */
+function along(context: string | null, text: string): string {
+  return context === null ? text : `${context} · ${text}`;
 }
 
 /** A space's undo while it lasts. */
@@ -131,12 +137,12 @@ export class Operations {
   /**
    * What leads a toast about a run: the tile of its space, which stays
    * whichever space is shown. A request that names no space, a Reveal or a
-   * shell, has its context stand for one.
+   * shell, has its context stand for one, and one on no context has none.
    */
-  #tile(space: string | undefined, context: string | undefined) {
+  #tile(space: string | undefined, context: string | null | undefined) {
     if (space !== undefined) return spaceMark(this.spaces.get(space));
     return spaceMark(
-      context === undefined ? undefined : this.spaces.ofContext(context),
+      context == null ? undefined : this.spaces.ofContext(context),
     );
   }
 
@@ -383,7 +389,8 @@ export class Operations {
         tile: this.#tile(spaceOf(asked), plan.context),
         icon: look.icon,
         message: plan.doing,
-        detail: (left) => `${plan.context} · sends in ${String(left)}\u00a0s`,
+        detail: (left) =>
+          along(plan.context, `sends in ${String(left)}\u00a0s`),
         until,
         seconds,
         action: {
@@ -527,7 +534,7 @@ export class Operations {
   /** Offers a space's undo until it ends, its toast going with it. */
   #offer(
     space: string,
-    context: string,
+    context: string | null,
     look: Look,
     text: string,
     until: number,
@@ -537,7 +544,7 @@ export class Operations {
       tile: this.#tile(space, context),
       icon: CircleCheck,
       message: text,
-      detail: (left) => `${context} · undo for ${String(left)}\u00a0s`,
+      detail: (left) => along(context, `undo for ${String(left)}\u00a0s`),
       until,
       seconds: Math.max(1, Math.round((until - Date.now()) / 1000)),
       action: {

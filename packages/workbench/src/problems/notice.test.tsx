@@ -18,9 +18,31 @@ test("each problem raises one warning, in Rust's words, keyed by its code, with 
   const [message, options] = warning.mock.calls[0] ?? [];
   expect(toastWords(message)).toContain("could not read its saved state");
   expect(options?.key).toBe("problem:state.set-aside");
-  expect(options?.action?.label).toBe("Reveal Log File");
-  expect(options?.more?.map(({ label }) => label)).toEqual(["Report…"]);
   expect(warning.mock.calls[1]?.[1]?.key).toBe("problem:audit.off");
+  for (const [, offered] of warning.mock.calls) {
+    expect(offered?.action?.label).toBe("Reveal Log File");
+    expect(offered?.more?.map(({ label }) => label)).toEqual(["Report…"]);
+  }
+});
+
+test("the problem of a protection file that cannot be read offers Start Over…, which plans one, with Reveal Log File and Report… under more", async () => {
+  const warning = vi.spyOn(notify, "warning");
+  const workbench = await testWorkbench("protectionUnreadable");
+  const invoke = vi.spyOn(workbench.backend, "invoke");
+  await act(() => workbench.problems.watch());
+  expect(warning).toHaveBeenCalledTimes(1);
+  const options = warning.mock.calls[0]?.[1];
+  expect(options?.key).toBe("problem:protection.unreadable");
+  expect(options?.action?.label).toBe("Start Over…");
+  expect(options?.more?.map(({ label }) => label)).toEqual([
+    "Reveal Log File",
+    "Report…",
+  ]);
+  await act(async () => {
+    options?.action?.run();
+    await Promise.resolve();
+  });
+  expect(invoke).toHaveBeenCalledWith("command_plan", { action: "startOver" });
 });
 
 test("Report… opens the report and Reveal Log File shows the file", async () => {

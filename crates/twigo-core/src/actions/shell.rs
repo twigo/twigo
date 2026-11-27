@@ -172,7 +172,7 @@ pub(crate) async fn shell(
         affected: Vec::new(),
         command_line: Some(kubectl),
         doing: read.doing,
-        context,
+        context: Some(context),
         connection,
         space: None,
         risk: Risk::Shell,

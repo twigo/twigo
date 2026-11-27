@@ -453,7 +453,7 @@ fn a_policy_file_entry_refuses_a_mode_and_an_unlock_and_holds_its_mode_under_a_t
     let planned = policy.plan("prod-eu", local).unwrap();
     assert_eq!(planned.after.mode, Mode::ReadOnly);
     assert_eq!(planned.after.source, planned.before.source);
-    let typed = friction(&planned.risk(), "prod-eu", &planned.before);
+    let typed = friction(&planned.risk(), Some(("prod-eu", &planned.before)));
     policy.change("prod-eu", &planned, &typed).unwrap();
     let access = policy.access("prod-eu");
     assert_eq!(access.environment, Some(Environment::Local));
@@ -962,7 +962,7 @@ fn a_lasting_change_asks_for_the_name_where_any_set_of_the_locks_that_can_go_sho
             Friction::AtOnce
         };
         assert_eq!(
-            friction(&planned.risk(), context, &planned.before),
+            friction(&planned.risk(), Some((context, &planned.before))),
             expected,
             "{context}: {change:?}"
         );

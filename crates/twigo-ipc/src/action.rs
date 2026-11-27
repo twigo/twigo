@@ -104,6 +104,10 @@ pub enum PlanRequest {
     /// Lets a `read-only` context through as `guarded` for 15 minutes.
     /// Refused under the admin's policy file.
     Unlock { context: String },
+    /// Moves the person's protection file that cannot be read aside and
+    /// starts with no mode or type they set, so every context is what its
+    /// locks say, or unmarked. Refused while the file can be read.
+    StartOver,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
@@ -115,9 +119,11 @@ pub struct PlanId(pub u32);
 #[serde(rename_all = "camelCase")]
 pub struct Plan {
     pub id: PlanId,
-    pub context: String,
+    /// The context it acts on, with its type and mode, none for what acts
+    /// on no context, as starting over from the person's protection file.
+    pub context: Option<String>,
     pub environment: Option<Environment>,
-    pub mode: Mode,
+    pub mode: Option<Mode>,
     pub friction: Friction,
     /// The question a dialog asks, naming the cluster: `Delete pod web-1
     /// from kind-a?`

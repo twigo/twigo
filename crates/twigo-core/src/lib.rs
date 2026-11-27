@@ -55,7 +55,7 @@ use twigo_kube::openapi::{self, Document};
 use twigo_netmon::Event;
 use twigo_panic::{Fatal, Reporter, Reports, Supervisor};
 use twigo_policy::friction::{covers, friction};
-use twigo_policy::{Audit, Change, Entry, PlannedChange, Policy, Protection, Why};
+use twigo_policy::{Audit, Change, Entry, On, PlannedChange, Policy, Protection, Why};
 use twigo_sessions::logs::Session;
 pub use twigo_sessions::shell::Frame as ShellFrame;
 
@@ -439,15 +439,16 @@ impl Core {
             PlanRequest::Unlock { context } => {
                 actions::protection(self, context, Change::Unlock).await?
             }
+            PlanRequest::StartOver => actions::start_over(self)?,
         };
-        self.authorize(
-            &planned.context,
-            planned.command,
-            &planned.target,
-            &planned.writes,
-        )?;
-        let access = self.policy.access(&planned.context);
-        self.bus.keep(ticket, planned, &access)
+        let access = match &planned.context {
+            Some(context) => {
+                self.authorize(context, planned.command, &planned.target, &planned.writes)?;
+                Some(self.policy.access(context))
+            }
+            None => None,
+        };
+        self.bus.keep(ticket, planned, access.as_ref())
     }
 
     /// Runs a plan once its friction is met, whose events go through `send`.
@@ -465,37 +466,13 @@ impl Core {
             friction: planned_friction,
             since,
         } = *waiting;
-        let context = planned.context.clone();
-        if self.policy.connection(&context) != planned.connection {
-            return Err(IpcError::new(
-                ErrorCode::ActionClusterChanged,
-                format!(
-                    "{context} names another cluster now than when Twigo asked, so it sent nothing"
-                ),
-            ));
-        }
-        let access = self.policy.access(&context);
-        let asked = friction(&planned.risk, &context, &access);
-        if !covers(&planned_friction, &asked) {
-            self.policy.audit().record(&Entry::Refused {
-                context: &context,
-                command: planned.command,
-                target: &planned.target,
-                mode: access.mode,
-                source: &access.source,
-                why: Why::Friction {
-                    planned: &planned_friction,
-                    now: &asked,
-                },
-            });
-            return Err(IpcError::new(
-                ErrorCode::ActionModeChanged,
-                format!(
-                    "{context} is {} now, which asks for more than you confirmed, so Twigo sent nothing",
-                    access.mode.name()
-                ),
-            ));
-        }
+        let on = match planned.context.clone() {
+            Some(context) => {
+                let access = self.stands(&context, &planned, &planned_friction)?;
+                Some((context, access))
+            }
+            None => None,
+        };
         match &planned_friction {
             Friction::Countdown { seconds }
                 if since.elapsed() < Duration::from_secs((*seconds).into()) =>
@@ -513,17 +490,23 @@ impl Core {
             }
             _ => {}
         }
-        self.authorize(&context, planned.command, &planned.target, &planned.writes)?;
-        let run = match planned.run {
-            Run::Sends(run) => run,
-            Run::Protects { change, done } => {
+        if let Some((context, _)) = &on {
+            self.authorize(context, planned.command, &planned.target, &planned.writes)?;
+        }
+        let (run, (context, access)) = match (planned.run, on) {
+            (Run::Sends(run), Some(on)) => (run, on),
+            (Run::Protects { change, done }, Some((context, _))) => {
                 self.protect(&context, &change, &planned_friction)?;
-                let mut send = send;
-                send(OperationEvent::Done {
-                    text: done,
-                    undo_until: None,
-                });
+                done_at_once(send, done);
                 return Ok(());
+            }
+            (Run::StartsOver { done }, None) => {
+                self.start_over(&planned_friction)?;
+                done_at_once(send, done);
+                return Ok(());
+            }
+            (Run::Sends(_) | Run::Protects { .. }, None) | (Run::StartsOver { .. }, Some(_)) => {
+                unreachable!("only starting over acts on no context")
             }
         };
 
@@ -586,6 +569,59 @@ impl Core {
             bus.ended(&window, request.plan);
         });
         Ok(())
+    }
+
+    /// What `context` lets through now, as a plan on it runs: refused where
+    /// it names another cluster than when `planned` was made, or asks for
+    /// more than `planned_friction` now, which the audit log records.
+    fn stands(
+        &self,
+        context: &str,
+        planned: &bus::Planned,
+        planned_friction: &Friction,
+    ) -> Result<twigo_ipc::ContextAccess, IpcError> {
+        if self.policy.connection(context) != planned.connection {
+            return Err(IpcError::new(
+                ErrorCode::ActionClusterChanged,
+                format!(
+                    "{context} names another cluster now than when Twigo asked, so it sent nothing"
+                ),
+            ));
+        }
+        let access = self.policy.access(context);
+        let asked = friction(&planned.risk, Some((context, &access)));
+        if !covers(planned_friction, &asked) {
+            self.policy.audit().record(&Entry::Refused {
+                on: Some(On {
+                    context,
+                    mode: access.mode,
+                    source: &access.source,
+                }),
+                command: planned.command,
+                target: &planned.target,
+                why: Why::Friction {
+                    planned: planned_friction,
+                    now: &asked,
+                },
+            });
+            return Err(IpcError::new(
+                ErrorCode::ActionModeChanged,
+                format!(
+                    "{context} is {} now, which asks for more than you confirmed, so Twigo sent nothing",
+                    access.mode.name()
+                ),
+            ));
+        }
+        Ok(access)
+    }
+
+    /// Starts over from the person's protection file as a person confirmed
+    /// through `friction`; the policy records it in the audit log, in place
+    /// of the bus's lines.
+    fn start_over(&self, friction: &Friction) -> Result<(), IpcError> {
+        self.policy
+            .start_over(friction)
+            .map_err(|error| actions::start_over_refused(self, &error))
     }
 
     /// Makes a change of protection a person confirmed through `friction`,
@@ -1347,6 +1383,15 @@ impl Failures {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
+}
+
+/// Tells a plan that ran at once, as a change of protection does, that it is
+/// done, as `text` says.
+fn done_at_once(mut send: impl FnMut(OperationEvent) -> bool, text: String) {
+    send(OperationEvent::Done {
+        text,
+        undo_until: None,
+    });
 }
 
 /// Why a read of the namespaces gave up: the last failure's cause when the

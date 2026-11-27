@@ -5,7 +5,7 @@
 
 use twigo_ipc::{ContextAccess, Environment, Friction, IpcError, LockSource, Mode, ModeSource};
 use twigo_policy::friction::{friction, keeps};
-use twigo_policy::{Change, Entry, Outlived, PlannedChange, Refused, UNLOCK, Why};
+use twigo_policy::{Change, Entry, On, Outlived, PlannedChange, Refused, UNLOCK, Why};
 
 use crate::bus::{self, Planned};
 use crate::{Core, errors};
@@ -45,7 +45,7 @@ pub(crate) async fn protection(
             change: Box::new(planned),
             done,
         },
-        context,
+        context: Some(context),
     })
 }
 
@@ -62,11 +62,13 @@ fn command(change: Change) -> &'static str {
 pub(crate) fn refused(core: &Core, context: &str, change: Change, error: &Refused) -> IpcError {
     let access = core.policy.access(context);
     core.policy.audit().record(&Entry::Refused {
-        context,
+        on: Some(On {
+            context,
+            mode: access.mode,
+            source: &access.source,
+        }),
         command: command(change),
         target: context,
-        mode: access.mode,
-        source: &access.source,
         why: Why::from(error),
     });
     errors::refused(error)
@@ -184,7 +186,7 @@ fn beneath(context: &str, planned: &PlannedChange) -> Option<String> {
     let now = &planned.after;
     let unmarked = |access: &ContextAccess| access.source == ModeSource::Unmarked;
     let typed = matches!(
-        friction(&planned.risk(), context, &planned.before),
+        friction(&planned.risk(), Some((context, &planned.before))),
         Friction::Typed { .. }
     );
     let hidden = typed && keeps(&planned.before, now);
@@ -655,7 +657,7 @@ mod tests {
                 let Ok(planned) = policy.plan("kind-a", change) else {
                     return;
                 };
-                let typed = friction(&planned.risk(), "kind-a", &planned.before);
+                let typed = friction(&planned.risk(), Some(("kind-a", &planned.before)));
                 if !matches!(typed, Friction::Typed { .. })
                     || !keeps(&planned.before, &planned.after)
                 {

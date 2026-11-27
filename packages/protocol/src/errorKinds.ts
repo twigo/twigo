@@ -44,6 +44,8 @@ export const ERROR_KINDS: Record<ErrorCode, ErrorKind> = {
   "policy.changed": "conflict",
   "protection.unreadable": "permissions",
   "protection.unsaved": "internal",
+  "protection.readable": "invalidInput",
+  "protection.unmoved": "internal",
   "answer.undecodable": "internal",
   "discovery.not-aggregated": "unavailable",
   "openapi.no-kind": "notFound",

@@ -107,7 +107,7 @@ pub(crate) async fn scale(
         command: "scale",
         target: named,
         writes: vec![attributes],
-        context,
+        context: Some(context),
         connection,
         space: Some(space.to_owned()),
         risk,

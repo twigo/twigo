@@ -80,7 +80,7 @@ pub(crate) async fn trigger(
         command: "trigger",
         target: named,
         writes: vec![create],
-        context,
+        context: Some(context),
         connection,
         space: Some(space.to_owned()),
         risk: Risk::Lasting,

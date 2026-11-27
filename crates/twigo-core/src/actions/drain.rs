@@ -205,7 +205,7 @@ pub(crate) async fn drain(core: &Core, space: &str, name: String) -> Result<Plan
         command: "drain",
         target: named,
         writes,
-        context,
+        context: Some(context),
         connection,
         space: Some(space.to_owned()),
         risk,

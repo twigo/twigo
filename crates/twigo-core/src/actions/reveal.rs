@@ -61,7 +61,7 @@ pub(crate) fn reveal(
         command: "reveal",
         target: format!("secrets/{name} in {namespace}, key {key}"),
         writes: Vec::new(),
-        context,
+        context: Some(context),
         connection,
         space: None,
         risk: Risk::Reveal,
@@ -154,7 +154,7 @@ pub(crate) fn reveal_helm(
             words.place
         ),
         writes: Vec::new(),
-        context,
+        context: Some(context),
         connection,
         space: None,
         risk: Risk::Reveal,

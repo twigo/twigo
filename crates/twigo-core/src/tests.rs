@@ -1183,7 +1183,7 @@ async fn clearing_a_choice_beneath_a_lock_asks_for_the_name_and_says_what_it_giv
         protect(&core, chosen).await.unwrap();
         let plan = core.command_plan("main", cleared).await.unwrap();
         let typed = Friction::Typed {
-            text: plan.context.clone(),
+            text: plan.context.clone().unwrap(),
         };
         assert_eq!(plan.friction, typed);
         assert_eq!(plan.consequences, said);

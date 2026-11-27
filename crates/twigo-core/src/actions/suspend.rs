@@ -107,7 +107,7 @@ pub(crate) async fn suspend(
         command,
         target: named,
         writes: vec![attributes],
-        context,
+        context: Some(context),
         connection,
         space: Some(space.to_owned()),
         risk,
