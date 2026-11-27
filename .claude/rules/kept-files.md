@@ -21,4 +21,5 @@ paths:
   - `protection.json`, whose loss would loosen protection, makes every context the policy file sets no mode for `read-only` and is never written before the next start, so every change of protection is refused until then;
   - `trust.json`, whose loss only tightens, trusts nothing and may start anew: it moves aside, the next trust writes a new file, and where the move failed that write replaces it, which costs only a plugin asking again.
 - `state.json` fails open: it moves aside and the app starts without it, and where the move failed the next save replaces it.
-- A choice holds only once its file holds it: write, then hold; after a write that fails, read the file back and refuse what it does not hold.
+- In `protection.json` a choice holds only once the file holds it: write, then hold; after a write that fails, read the file back and refuse what it does not hold.
+  A trust that fails to save is refused without a read-back, which costs only a plugin asking again.

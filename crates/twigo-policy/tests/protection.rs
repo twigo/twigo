@@ -45,7 +45,7 @@ fn unread(refused: Result<impl std::fmt::Debug, Refused>) -> bool {
 }
 
 #[test]
-fn a_protection_file_that_cannot_be_read_keeps_every_context_read_only_and_takes_no_change() {
+fn a_protection_file_that_cannot_be_read_locks_what_the_policy_file_leaves_and_takes_no_change() {
     let cases: [(&str, Option<&str>); 5] = [
         ("an I/O error", None),
         (

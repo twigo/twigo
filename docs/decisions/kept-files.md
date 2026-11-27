@@ -31,7 +31,7 @@ A lost key cost the person their locks: a context they had made `read-only` over
   `state.json` moves aside as `state.json.unreadable` in the same way, and the next save starts a new file, or replaces it where the move failed.
 - **A choice holds only once its file holds it.**
   The policy writes `protection.json` before it holds a change, and refuses one the file does not hold: a write that fails is read back, since its last step, the directory's fsync, comes after the new file is in place.
-  So no choice holds that the next start would not read, and none is refused that it would.
+  So a choice holds where the file holds it as written; the rare write whose read-back fails too is refused though it may be in place, and one held after a directory fsync that failed may not survive a crash.
 
 ## Why
 

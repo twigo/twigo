@@ -2010,7 +2010,7 @@ What a person needs when something goes wrong, and what a bug report holds, star
   The window follows it from the start, and raises one notification when a code joins the list, in Rust's words, which say what it means for the person, with Reveal Log File and Report… beside Dismiss (4.7).
   A code listed again with other words raises none, and a code that leaves the list takes its notification with it, so a problem that comes back is told again.
 - The policy file that cannot be read locks every context `read-only` (4.8) and says so in the access popover with its reason, which is where it does not parse (`it is not JSON at line 3, column 1`) or what failed to read it (`permission denied`), never a word of the file.
-  So does the person's `protection.json` that cannot be read, whose popover names the file with its reason and offers no change and no unlock, while a blocked toast, which offers no unlock either, and a refused change name the file alone, as the policy file's do.
+  The person's `protection.json` that cannot be read locks every context the policy file sets no mode for `read-only` and says so too: its popover names the file with its reason and offers no change and no unlock, while a blocked toast, which offers no unlock either, and a refused change name the file alone, as the policy file's do.
 
 #### Report a Problem
 
@@ -2752,7 +2752,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   - A production context is a mode with two cues (NN/g): a chip in the title bar after its name that says the type and the lock (`Production · read-only`), and the status bar tinted in it.
     Where the bar is too narrow the chip folds to its icon, its words in its tooltip, after the search and before the crumbs (4.1).
     The mockup's third, a 2 px line of its colour along the title bar's top, was dropped on 2026-11-07: the chip, the tint and the bar's left end in the context's colour already say it.
-    The chip opens what set the mode, in words, with the choices the person has, none while the person's protection file cannot be read.
+    The chip opens what set the mode, in words, with the choices the person has; while the person's protection file cannot be read it offers none for a context that file holds `read-only`, and a type it offers under an admin's policy file entry is refused when planned, with the protection file named.
     Where the person's choice sets a stricter lock aside, a kubeconfig's `twigo.readOnly`, a provider's or the type's default, the words say which: `You set this, over its kubeconfig's read-only.`
   - The person lowers protection only through the command bus (5.1): the chip's choices, Set Context Mode…, Set Environment Type… and the toast's Unlock for 15 minutes plan a `setMode`, `setEnvironment` or `unlock`, and the operations service draws the friction the plan names and runs it.
     A lasting change that leaves the context less strict under any set of the locks that can go taken away asks for its name typed, clearing a type counting as a change to `read-write`, an unlock asks in a dialog, and a change that no such set shows lowering, or that starts from a context nobody marked, runs at once, with a toast that says what it did; a plan with no kubectl command shows no such line.

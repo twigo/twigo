@@ -207,8 +207,8 @@ pub struct Policy {
 struct Held {
     choices: Choices,
     /// Why the person's protection file cannot be read, which holds every
-    /// context `read-only` and takes no change: read once, as the app
-    /// starts.
+    /// context the policy file sets no mode for `read-only` and takes no
+    /// change: read once, as the app starts.
     unreadable: Option<String>,
     /// By context. Never stored: a restart relocks.
     unlocks: HashMap<String, Unlock>,
