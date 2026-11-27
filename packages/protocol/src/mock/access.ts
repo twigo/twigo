@@ -202,7 +202,7 @@ export class MockAccess {
     this.refuseUnreadable();
   }
 
-  /** Refuses any change of protection while the person's protection file cannot be read, as `Protection::refuse` does, so nothing writes over it. */
+  /** Refuses any change of protection while the person's protection file cannot be read, as `Policy::refuse_unreadable` does, so nothing writes over it. */
   refuseUnreadable(): void {
     if (this.protectionUnreadable !== undefined) {
       throw new IpcError(
