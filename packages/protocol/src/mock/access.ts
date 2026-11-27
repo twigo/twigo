@@ -19,6 +19,8 @@ import {
 
 const UNLOCK_MS = 15 * 60 * 1000;
 const POLICY_FILE = "/Library/Application Support/Twigo/policy.json";
+const PROTECTION_FILE =
+  "/Users/you/Library/Application Support/io.twigo.ide/protection.json";
 const POLICY_PATTERN = "prod-*";
 
 const DEFAULT_MODE: Readonly<Record<Environment, Mode>> = {
@@ -56,10 +58,8 @@ export interface Kubeconfigs {
 /** What `twigo-policy` keeps for each context, over the fixtures' kubeconfig marks. */
 export class MockAccess {
   readonly #watchers = new Set<(catalog: Catalog) => void>();
-  readonly #modes = new Map<string, Mode>(Object.entries(CHOSEN));
-  readonly #environments = new Map<string, Environment | null>(
-    Object.entries(MARKED),
-  );
+  readonly #modes: Map<string, Mode>;
+  readonly #environments: Map<string, Environment | null>;
   readonly #unlocks = new Map<string, number>();
   /** How many times a choice or an unlock changed what a context lets through, as `Policy::changes_of` counts. */
   readonly #changed = new Map<string, number>();
@@ -75,7 +75,13 @@ export class MockAccess {
     private readonly listed: Catalog = { contexts: CONTEXTS, failures: [] },
     /** Why the admin's policy file cannot be read, which makes every context read-only. */
     private readonly unreadable?: string,
-  ) {}
+    /** Why the person's protection file cannot be read, which holds none of their choices, makes every context read-only below a policy file's entry and refuses every change. */
+    private readonly protectionUnreadable?: string,
+  ) {
+    const read = protectionUnreadable === undefined;
+    this.#modes = new Map(read ? Object.entries(CHOSEN) : []);
+    this.#environments = new Map(read ? Object.entries(MARKED) : []);
+  }
 
   watch(onMessage: (catalog: Catalog) => void): Catalog {
     this.#watchers.add(onMessage);
@@ -93,6 +99,7 @@ export class MockAccess {
 
   setEnvironment(name: string, environment: Environment | null): void {
     this.#fixture(name);
+    this.refuseUnreadable();
     this.#unlocks.delete(name);
     this.#environments.set(name, environment);
     this.#changes(name);
@@ -177,7 +184,7 @@ export class MockAccess {
     ];
   }
 
-  /** Refuses what a policy file holds, as the gate does a change of its contexts' mode. */
+  /** Refuses what a policy file holds, as the gate does a change of its contexts' mode, and every change while the person's protection file cannot be read. */
   refuse(name: string): void {
     this.#fixture(name);
     if (this.unreadable !== undefined) {
@@ -190,6 +197,17 @@ export class MockAccess {
       throw new IpcError(
         "policy.file-sets-mode",
         `${this.#pattern(name)} in ${POLICY_FILE} sets this context's mode, which Twigo cannot change`,
+      );
+    }
+    this.refuseUnreadable();
+  }
+
+  /** Refuses any change of protection while the person's protection file cannot be read, as `Policy::refuse_unreadable` does, so nothing writes over it. */
+  refuseUnreadable(): void {
+    if (this.protectionUnreadable !== undefined) {
+      throw new IpcError(
+        "protection.unreadable",
+        `${PROTECTION_FILE} cannot be read, so Twigo keeps read-only every context the policy file sets no mode for, and changes none`,
       );
     }
   }
@@ -271,7 +289,7 @@ export class MockAccess {
     };
   }
 
-  /** As ARCHITECTURE 6.4 orders them: the policy file, the person's choice over the strictest lock, the strictest lock, else unmarked. */
+  /** As ARCHITECTURE 6.4 orders them: the policy file, the person's protection file that cannot be read, the person's choice over the strictest lock, the strictest lock, else unmarked. */
   #resolve(
     name: string,
     environment: Environment | null,
@@ -298,6 +316,16 @@ export class MockAccess {
           kind: "policyFile",
           file: POLICY_FILE,
           pattern: this.#pattern(name),
+        },
+      };
+    }
+    if (this.protectionUnreadable !== undefined) {
+      return {
+        mode: "read-only",
+        source: {
+          kind: "protectionUnreadable",
+          file: PROTECTION_FILE,
+          reason: this.protectionUnreadable,
         },
       };
     }

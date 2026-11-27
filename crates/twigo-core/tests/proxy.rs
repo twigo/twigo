@@ -3295,9 +3295,11 @@ async fn a_write_on_a_context_nobody_marked_asks_what_it_is_and_goes_once_it_is_
     let access = core.policy.access("kind-a");
     assert_eq!(access.mode, Mode::ReadWrite);
     assert_eq!(access.environment, Some(Environment::Development));
+    let kept: Value =
+        serde_json::from_slice(&std::fs::read(dir.path().join("protection.json")).unwrap())
+            .unwrap();
     assert_eq!(
-        core.state.choices().environments.get("kind-a"),
-        Some(&Some(Environment::Development)),
+        kept["environments"]["kind-a"], "development",
         "kept with the person's choices"
     );
     let changes = audited(dir.path(), "protection");

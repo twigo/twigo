@@ -297,6 +297,17 @@ test.each<
     { running: true, startable: false, movable: false, web: false },
   ],
   [
+    "refused while the person's protection file cannot be read, which only a restart reads again",
+    {
+      state: REFUSED({
+        kind: "protectionUnreadable",
+        file: "protection.json",
+        reason: "it is not JSON at line 1, column 2",
+      }),
+    },
+    { running: true, startable: false, movable: false, web: false },
+  ],
+  [
     "refused for a context no source lists",
     { state: REFUSED({ kind: "unlisted" }) },
     { running: true, startable: false, movable: false, web: false },

@@ -292,6 +292,7 @@ fn why(source: &ModeSource) -> String {
             pattern: None,
             ..
         } => format!(" because {file} cannot be read"),
+        ModeSource::ProtectionUnreadable { file, .. } => format!(" because {file} cannot be read"),
         ModeSource::Unlisted | ModeSource::Moved => String::new(),
     }
 }
@@ -319,7 +320,7 @@ fn name(environment: Environment) -> &'static str {
 mod tests {
     use twigo_ipc::Lock;
     use twigo_policy::{
-        Audit, Beneath, Choices, Metadata, Policy, PolicyFile, ProviderLock, TypeLock,
+        Audit, Beneath, Choices, Metadata, Policy, PolicyFile, Protection, ProviderLock, TypeLock,
     };
 
     use super::*;
@@ -477,7 +478,7 @@ mod tests {
             let policy = Policy::new(
                 PolicyFile::default(),
                 move |_| Some(metadata),
-                Choices::default(),
+                Protection::default(),
                 Audit::off(),
             );
             policy.plan("kind-a", change).unwrap()
@@ -555,10 +556,10 @@ mod tests {
             let policy = Policy::new(
                 PolicyFile::default(),
                 move |_| Some(staging),
-                Choices {
+                Protection::holding(Choices {
                     modes: [("kind-a".to_owned(), mode)].into(),
                     ..Choices::default()
-                },
+                }),
                 Audit::off(),
             );
             let planned = policy.plan("kind-a", Change::Mode { mode: None });
@@ -639,45 +640,49 @@ mod tests {
         let lowers = |view: &&Beneath| !keeps(&view.before, &view.after);
         let rank = |view: &Beneath| (view.after.mode, !unmarked(&view.after), view.gone.len());
         let mut checked = 0;
-        let mut check = |file: &PolicyFile,
-                         metadata: Metadata,
-                         choices: Choices,
-                         unlock,
-                         change| {
-            let case = format!("{metadata:?} {choices:?} unlocked {unlock} {change:?}");
-            let policy = Policy::new(file.clone(), move |_| Some(metadata), choices, Audit::off());
-            if unlock && policy.unlock("kind-a").is_err() {
-                return;
-            }
-            let Ok(planned) = policy.plan("kind-a", change) else {
-                return;
-            };
-            let typed = friction(&planned.risk(), "kind-a", &planned.before);
-            if !matches!(typed, Friction::Typed { .. }) || !keeps(&planned.before, &planned.after) {
-                return;
-            }
-            checked += 1;
-            let said = consequences("kind-a", &planned);
-            let when = said
-                .iter()
-                .find(|said| said.starts_with("When "))
-                .unwrap_or_else(|| panic!("{case}: {said:?}"));
-            let alone = |view: &&Beneath| {
-                let mut one = planned.clone();
-                one.beneath = vec![(*view).clone()];
-                beneath("kind-a", &one).as_ref() == Some(when)
-            };
-            let named = planned.beneath.iter().find(alone).unwrap();
-            assert!(lowers(&named), "{case}: {when}");
-            assert!(
-                planned
-                    .beneath
+        let mut check =
+            |file: &PolicyFile, metadata: Metadata, choices: Choices, unlock, change| {
+                let case = format!("{metadata:?} {choices:?} unlocked {unlock} {change:?}");
+                let policy = Policy::new(
+                    file.clone(),
+                    move |_| Some(metadata),
+                    Protection::holding(choices),
+                    Audit::off(),
+                );
+                if unlock && policy.unlock("kind-a").is_err() {
+                    return;
+                }
+                let Ok(planned) = policy.plan("kind-a", change) else {
+                    return;
+                };
+                let typed = friction(&planned.risk(), "kind-a", &planned.before);
+                if !matches!(typed, Friction::Typed { .. })
+                    || !keeps(&planned.before, &planned.after)
+                {
+                    return;
+                }
+                checked += 1;
+                let said = consequences("kind-a", &planned);
+                let when = said
                     .iter()
-                    .filter(lowers)
-                    .all(|view| rank(view) >= rank(named)),
-                "{case}: {when}"
-            );
-        };
+                    .find(|said| said.starts_with("When "))
+                    .unwrap_or_else(|| panic!("{case}: {said:?}"));
+                let alone = |view: &&Beneath| {
+                    let mut one = planned.clone();
+                    one.beneath = vec![(*view).clone()];
+                    beneath("kind-a", &one).as_ref() == Some(when)
+                };
+                let named = planned.beneath.iter().find(alone).unwrap();
+                assert!(lowers(&named), "{case}: {when}");
+                assert!(
+                    planned
+                        .beneath
+                        .iter()
+                        .filter(lowers)
+                        .all(|view| rank(view) >= rank(named)),
+                    "{case}: {when}"
+                );
+            };
         for file in &files {
             for metadata in &metadata {
                 for mode in modes {

@@ -5,8 +5,8 @@ use jiff::SignedDuration;
 use twigo_ipc::{BlockReason, Environment, Friction, Lock, LockSource, Mode, ModeSource};
 use twigo_policy::friction::friction;
 use twigo_policy::{
-    Actor, Attributes, Audit, Change, Choices, Gate, Metadata, Policy, PolicyFile, ProviderLock,
-    Refused, TypeLock,
+    Actor, Attributes, Audit, Change, Choices, Gate, Metadata, Policy, PolicyFile, Protection,
+    ProviderLock, Refused, TypeLock,
 };
 
 const NOTHING: Metadata = Metadata {
@@ -19,11 +19,11 @@ const NOTHING: Metadata = Metadata {
 
 /// The person marked `c` Local, so it is `read-write` while nothing locks
 /// it.
-fn local() -> Choices {
-    Choices {
+fn local() -> Protection {
+    Protection::holding(Choices {
         environments: [("c".to_owned(), Some(Environment::Local))].into(),
         ..Choices::default()
-    }
+    })
 }
 
 fn file(text: &str) -> (tempfile::TempDir, PolicyFile) {
@@ -42,7 +42,7 @@ fn with_metadata(metadata: Metadata) -> Arc<Policy> {
     Policy::new(
         PolicyFile::default(),
         move |_| Some(metadata),
-        Choices::default(),
+        Protection::default(),
         Audit::off(),
     )
 }
@@ -167,7 +167,7 @@ fn the_policy_file_comes_before_the_person_s_choice_and_that_before_any_lock() {
     let policy = Policy::new(
         entries,
         move |_| Some(locked),
-        Choices::default(),
+        Protection::default(),
         Audit::off(),
     );
     let by_file = policy.access("prod-eu");
@@ -305,7 +305,12 @@ fn of_several_matching_entries_the_strictest_wins_and_globs_cross_slashes() {
             "arn:aws:eks:*:cluster/prod": "read-only"
         }}"#,
     );
-    let policy = Policy::new(entries, |_| Some(NOTHING), Choices::default(), Audit::off());
+    let policy = Policy::new(
+        entries,
+        |_| Some(NOTHING),
+        Protection::default(),
+        Audit::off(),
+    );
     assert_eq!(policy.access("dev").mode, Mode::ReadWrite);
     assert_eq!(policy.access("prod-us").mode, Mode::Guarded);
     assert_eq!(policy.access("prod-eu-1").mode, Mode::ReadOnly);
@@ -331,7 +336,7 @@ fn a_policy_file_that_cannot_be_read_locks_every_context_and_says_so() {
         let policy = Policy::new(
             unreadable,
             |_| Some(NOTHING),
-            Choices::default(),
+            Protection::default(),
             Audit::off(),
         );
         let access = policy.access("anything");
@@ -353,7 +358,7 @@ fn a_policy_file_that_cannot_be_read_locks_every_context_and_says_so() {
 }
 
 fn reason_of(file: PolicyFile) -> String {
-    let policy = Policy::new(file, |_| Some(NOTHING), Choices::default(), Audit::off());
+    let policy = Policy::new(file, |_| Some(NOTHING), Protection::default(), Audit::off());
     match policy.access("anything").source {
         ModeSource::PolicyFile {
             pattern: None,
@@ -389,7 +394,12 @@ fn a_policy_file_that_cannot_be_read_says_why_by_its_place_and_quotes_none_of_it
 #[test]
 fn the_policy_file_has_terminals_of_the_contexts_it_names_use_the_proxy() {
     let (_dir, proxied) = file(r#"{"terminal": {"usePolicyProxy": ["prod-*", "arn:aws:eks:*"]}}"#);
-    let policy = Policy::new(proxied, |_| Some(NOTHING), Choices::default(), Audit::off());
+    let policy = Policy::new(
+        proxied,
+        |_| Some(NOTHING),
+        Protection::default(),
+        Audit::off(),
+    );
     assert!(policy.uses_policy_proxy("prod-eu"));
     assert!(policy.uses_policy_proxy("arn:aws:eks:eu-west-1:1:cluster/a"));
     assert!(!policy.uses_policy_proxy("staging-eu"));
@@ -402,7 +412,7 @@ fn a_missing_policy_file_sets_nothing() {
     let policy = Policy::new(
         PolicyFile::read(&dir.path().join("absent.json")),
         |_| Some(NOTHING),
-        Choices::default(),
+        Protection::default(),
         Audit::off(),
     );
     assert_eq!(policy.access("c").source, ModeSource::Unmarked);
@@ -412,7 +422,12 @@ fn a_missing_policy_file_sets_nothing() {
 #[test]
 fn a_policy_file_entry_refuses_a_mode_and_an_unlock_and_holds_its_mode_under_a_type() {
     let (_dir, entries) = file(r#"{"contexts": {"prod-*": "read-only"}}"#);
-    let policy = Policy::new(entries, |_| Some(NOTHING), Choices::default(), Audit::off());
+    let policy = Policy::new(
+        entries,
+        |_| Some(NOTHING),
+        Protection::default(),
+        Audit::off(),
+    );
     let by_file = |refused: Refused| matches!(&refused, Refused::PolicyFile(pattern, _) if pattern == "prod-*");
     for change in [
         Change::Mode {
@@ -563,7 +578,7 @@ fn a_context_no_source_lists_lets_no_write_through_whatever_was_chosen() {
             Policy::new(
                 filed,
                 move |_| *listed.lock().unwrap(),
-                Choices::default(),
+                Protection::default(),
                 Audit::off(),
             )
         };
@@ -607,23 +622,6 @@ fn a_context_no_source_lists_lets_no_write_through_whatever_was_chosen() {
         );
         assert_eq!(policy.access("gone").mode, Mode::ReadOnly);
     }
-}
-
-#[test]
-fn a_choice_that_does_not_read_back_costs_that_choice_only() {
-    let text = r#"{
-        "modes": {"prod": "read-only", "typo": "readonly"},
-        "environments": {"prod": "production", "none": null, "typo": "moon"}
-    }"#;
-    let read: Choices = serde_json::from_str(text).unwrap();
-    assert_eq!(read.modes.get("prod"), Some(&Mode::ReadOnly));
-    assert!(!read.modes.contains_key("typo"));
-    assert_eq!(
-        read.environments.get("prod"),
-        Some(&Some(Environment::Production))
-    );
-    assert_eq!(read.environments.get("none"), Some(&None));
-    assert!(!read.environments.contains_key("typo"));
 }
 
 #[tokio::test]
@@ -744,24 +742,18 @@ fn the_blocked_error_names_the_rule() {
     );
 
     let (_dir, entries) = file(r#"{"contexts": {"prod-*": "read-only"}}"#);
-    let by_file = Policy::new(entries, |_| Some(NOTHING), Choices::default(), Audit::off());
+    let by_file = Policy::new(
+        entries,
+        |_| Some(NOTHING),
+        Protection::default(),
+        Audit::off(),
+    );
     let message = by_file
         .authorize("prod-eu", &exec, Actor::Ui)
         .unwrap_err()
         .to_string();
     assert!(message.contains("by prod-* in "), "{message}");
     assert!(message.contains("policy.json"), "{message}");
-}
-
-#[test]
-fn choices_round_trip_as_a_person_left_them() {
-    let policy = Policy::open();
-    let choices = policy.set_mode("a", Some(Mode::Guarded)).unwrap();
-    let text = serde_json::to_string(&choices).unwrap();
-    assert_eq!(text, r#"{"modes":{"a":"guarded"},"environments":{}}"#);
-    let back: Choices = serde_json::from_str(&text).unwrap();
-    let reopened = Policy::new(PolicyFile::default(), |_| Some(NOTHING), back, Audit::off());
-    assert_eq!(reopened.access("a").mode, Mode::Guarded);
 }
 
 #[test]
@@ -835,7 +827,7 @@ fn audited_policy(metadata: Metadata) -> (tempfile::TempDir, std::path::PathBuf,
     let policy = Policy::new(
         PolicyFile::default(),
         move |_| Some(metadata),
-        Choices::default(),
+        Protection::default(),
         Audit::open(&path),
     );
     (dir, path, policy)
@@ -870,8 +862,7 @@ fn a_planned_change_says_what_it_leaves_and_the_log_records_it_once_with_its_fri
     let typed = Friction::Typed {
         text: "c".to_owned(),
     };
-    let choices = policy.change("c", &planned, &typed).unwrap();
-    assert_eq!(choices.modes.get("c"), Some(&Mode::ReadWrite));
+    policy.change("c", &planned, &typed).unwrap();
     assert_eq!(policy.access("c"), planned.after);
     let lines = audited(&path);
     assert_eq!(lines.len(), 1, "{lines:?}");
@@ -930,7 +921,7 @@ fn a_lasting_change_asks_for_the_name_where_any_set_of_the_locks_that_can_go_sho
                 _ => NOTHING,
             })
         },
-        Choices::default(),
+        Protection::default(),
         Audit::off(),
     );
     policy.set_mode("production", Some(Mode::Guarded)).unwrap();
@@ -989,7 +980,7 @@ fn a_plan_holds_only_while_the_context_stands_as_it_was_planned() {
         Policy::new(
             PolicyFile::default(),
             move |_| Some(*metadata.lock().unwrap()),
-            Choices::default(),
+            Protection::default(),
             Audit::off(),
         )
     };
@@ -1139,7 +1130,7 @@ async fn the_log_records_each_unlock_s_end_and_why() {
         Policy::new(
             PolicyFile::default(),
             move |_| *metadata.lock().unwrap(),
-            Choices::default(),
+            Protection::default(),
             Audit::open(&path),
         )
     };
@@ -1227,7 +1218,7 @@ fn the_log_records_what_a_change_of_the_catalog_did_to_a_context_s_access_once()
     let policy = Policy::new(
         filed,
         move |_| Some(locked),
-        Choices::default(),
+        Protection::default(),
         Audit::open(&path),
     );
     let open = Metadata {

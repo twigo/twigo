@@ -116,6 +116,8 @@ export function setBy(source: ModeSource): string {
       return source.pattern === null
         ? ` because ${source.file} cannot be read`
         : ` by ${source.pattern} in ${source.file}`;
+    case "protectionUnreadable":
+      return ` because ${source.file} cannot be read`;
     case "user":
       return " by your choice";
     case "kubeconfig":
@@ -375,6 +377,7 @@ export interface BusHost {
     | "locks"
     | "changes"
     | "refuse"
+    | "refuseUnreadable"
     | "setMode"
     | "setEnvironment"
     | "unlock"
@@ -1744,8 +1747,9 @@ export class MockBus {
   /**
    * A change of a context's own protection (`actions::protection` in Rust):
    * refused where the admin's policy file sets the mode, a type excepted, as
-   * it only names and colours the context there, and where there is nothing
-   * to unlock. A lasting change is weighed as it is and under each set of the
+   * it only names and colours the context there, every change while the
+   * person's protection file cannot be read, and where there is nothing to
+   * unlock. A lasting change is weighed as it is and under each set of the
    * locks that hold the context taken away, and the plan runs only while what
    * the context lets through and the count of its changes are what they were
    * when planned.
@@ -1753,6 +1757,7 @@ export class MockBus {
   #protection(context: string, change: Change): Planned {
     const { protection } = this.host;
     if (!("environment" in change)) protection.refuse(context);
+    protection.refuseUnreadable();
     const {
       from: before,
       to: after,

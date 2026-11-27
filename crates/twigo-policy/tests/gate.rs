@@ -12,7 +12,7 @@ use jiff::{SignedDuration, Timestamp};
 use tower::{ServiceBuilder, ServiceExt};
 use twigo_ipc::{BlockReason, Mode, RequestClass};
 use twigo_policy::{
-    Actor, Approval, Attributes, Audit, Choices, Metadata, Policy, PolicyFile, Server,
+    Actor, Approval, Attributes, Audit, Metadata, Policy, PolicyFile, Protection, Server,
 };
 
 const PODS: &str = "/api/v1/namespaces/a/pods";
@@ -913,7 +913,7 @@ fn unmarked() -> std::sync::Arc<Policy> {
     Policy::new(
         PolicyFile::default(),
         |_| Some(Metadata::default()),
-        Choices::default(),
+        Protection::default(),
         Audit::off(),
     )
 }
@@ -964,7 +964,7 @@ fn a_read_only_context_lets_a_port_forward_through_unless_the_file_says_no() {
     let policy = Policy::new(
         PolicyFile::read(&file),
         |_| Some(Metadata::default()),
-        Choices::default(),
+        Protection::default(),
         Audit::off(),
     );
     let forward = Attributes::action("create", "pods", Some("portforward"), Some("a"), Some("p"));

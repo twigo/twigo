@@ -31,7 +31,7 @@ import {
   MODES,
   modeHelp,
   modeLabel,
-  setByPolicyFile,
+  unchangeable,
 } from "../spaces/modes";
 
 const NO_TYPE = "none";
@@ -167,7 +167,8 @@ function ModeDetails({
   access: ContextAccess;
 }) {
   const { commands, keys } = useWorkbench();
-  const locked = setByPolicyFile(access.source);
+  const locked = unchangeable(access.source);
+  const unread = access.source.kind === "protectionUnreadable";
   const run = (command: string, args: unknown) => {
     void commands.execute(command, keys.lookup(null), args);
   };
@@ -199,25 +200,33 @@ function ModeDetails({
         )}
       </Row>
       <Row label="Type">
-        <Segmented<TypeChoice>
-          label="Type"
-          items={[
-            { value: NO_TYPE, label: "None" },
-            ...ENVIRONMENTS.map((environment) => ({
-              value: environment,
-              label: environmentLabel(environment),
-            })),
-          ]}
-          value={access.environment ?? NO_TYPE}
-          onChange={(value) => {
-            if (value === (access.environment ?? NO_TYPE)) return;
-            const args: SetArgs<Environment> = {
-              context,
-              value: value === NO_TYPE ? null : value,
-            };
-            run(SET_CONTEXT_ENVIRONMENT, args);
-          }}
-        />
+        {unread ? (
+          <span className="font-medium">
+            {access.environment === null
+              ? "None"
+              : environmentLabel(access.environment)}
+          </span>
+        ) : (
+          <Segmented<TypeChoice>
+            label="Type"
+            items={[
+              { value: NO_TYPE, label: "None" },
+              ...ENVIRONMENTS.map((environment) => ({
+                value: environment,
+                label: environmentLabel(environment),
+              })),
+            ]}
+            value={access.environment ?? NO_TYPE}
+            onChange={(value) => {
+              if (value === (access.environment ?? NO_TYPE)) return;
+              const args: SetArgs<Environment> = {
+                context,
+                value: value === NO_TYPE ? null : value,
+              };
+              run(SET_CONTEXT_ENVIRONMENT, args);
+            }}
+          />
+        )}
       </Row>
       <div className="text-support">
         {describeAccess(access)}

@@ -196,6 +196,17 @@ fn a_context_s_access_says_where_its_mode_comes_from() {
         })
     );
     assert_eq!(
+        wire(&ModeSource::ProtectionUnreadable {
+            file: "/data/protection.json".to_owned(),
+            reason: "it is not JSON at line 1, column 2".to_owned(),
+        }),
+        json!({
+            "kind": "protectionUnreadable",
+            "file": "/data/protection.json",
+            "reason": "it is not JSON at line 1, column 2",
+        })
+    );
+    assert_eq!(
         wire(&ModeSource::Environment {
             environment: Environment::Staging
         }),

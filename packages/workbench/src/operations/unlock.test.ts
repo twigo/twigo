@@ -65,6 +65,14 @@ test.each<[ModeSource, boolean]>([
     { kind: "policyFile", file: "/etc/twigo/policy.json", pattern: null },
     false,
   ],
+  [
+    {
+      kind: "protectionUnreadable",
+      file: "protection.json",
+      reason: "it is not JSON at line 1, column 2",
+    },
+    false,
+  ],
   [{ kind: "unlisted" }, false],
 ])("a lock set by %o may be lifted: %s", (source, lifted) => {
   const { blocked } = refusal(source);

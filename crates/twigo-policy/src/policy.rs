@@ -1,13 +1,13 @@
 //! Each context's mode and where it comes from (ARCHITECTURE 6.4), read
 //! anew for every request, so a change reaches clients already built.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
+use std::io;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use jiff::{SignedDuration, Timestamp};
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::Serialize;
 use tokio::sync::watch;
 use twigo_ipc::{
     BlockReason, Blocked, ContextAccess, Environment, Friction, Lock, LockSource, Mode, ModeSource,
@@ -15,7 +15,10 @@ use twigo_ipc::{
 };
 
 use crate::friction::Risk;
-use crate::{Actor, Approval, Attributes, Audit, By, Entry, Gate, PolicyFile, Served};
+use crate::protection::Kept;
+use crate::{
+    Actor, Approval, Attributes, Audit, By, Choices, Entry, Gate, PolicyFile, Protection, Served,
+};
 
 /// How long an unlock lasts.
 pub const UNLOCK: SignedDuration = SignedDuration::from_mins(15);
@@ -85,31 +88,6 @@ pub struct Metadata {
     /// again, and never comes back to a value it had, so that what holds to
     /// it ends with a change that went back.
     pub revision: u64,
-}
-
-/// What the person chose, by context.
-/// @todo: move the mode and the type to settings.json once the settings files come in M3
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct Choices {
-    #[serde(default, deserialize_with = "each")]
-    pub modes: BTreeMap<String, Mode>,
-    /// None says it has no type, whatever its kubeconfig says.
-    #[serde(default, deserialize_with = "each")]
-    pub environments: BTreeMap<String, Option<Environment>>,
-}
-
-/// A value that does not read back costs that value only (ARCHITECTURE 4.8),
-/// and not the other contexts' locks.
-fn each<'de, D, T>(deserializer: D) -> Result<BTreeMap<String, T>, D::Error>
-where
-    D: Deserializer<'de>,
-    T: DeserializeOwned,
-{
-    let values = BTreeMap::<String, serde_json::Value>::deserialize(deserializer)?;
-    Ok(values
-        .into_iter()
-        .filter_map(|(context, value)| Some((context, serde_json::from_value(value).ok()?)))
-        .collect())
 }
 
 /// A change of a context's protection that a person asks for (ARCHITECTURE
@@ -194,6 +172,12 @@ pub enum Refused {
     PolicyFile(String, String),
     #[error("{0} cannot be read, so Twigo keeps every context read-only")]
     PolicyFileUnreadable(String),
+    #[error(
+        "{0} cannot be read, so Twigo keeps read-only every context the policy file sets no mode for, and changes none"
+    )]
+    ProtectionUnreadable(String),
+    #[error("Twigo could not save {0} ({1}), so it changed nothing")]
+    Unsaved(String, io::ErrorKind),
     #[error("{0} is {1}, so there is nothing to unlock")]
     NotLocked(String, &'static str),
     #[error("no source lists {0}, so Twigo changed nothing of it")]
@@ -207,6 +191,8 @@ type ReadMetadata = Box<dyn Fn(&str) -> Option<Metadata> + Send + Sync>;
 
 pub struct Policy {
     file: PolicyFile,
+    /// Where the person's choices are kept.
+    kept: Kept,
     metadata: ReadMetadata,
     /// The type of a context the person has not marked: Local in
     /// [`Policy::open`], none in the app's, where such a context asks.
@@ -220,6 +206,10 @@ pub struct Policy {
 #[derive(Clone)]
 struct Held {
     choices: Choices,
+    /// Why the person's protection file cannot be read, which holds every
+    /// context the policy file sets no mode for `read-only` and takes no
+    /// change: read once, as the app starts.
+    unreadable: Option<String>,
     /// By context. Never stored: a restart relocks.
     unlocks: HashMap<String, Unlock>,
     /// By context: how many times a choice, an unlock or its end changed
@@ -299,10 +289,10 @@ impl Policy {
     pub fn new(
         file: PolicyFile,
         metadata: impl Fn(&str) -> Option<Metadata> + Send + Sync + 'static,
-        choices: Choices,
+        protection: Protection,
         audit: Audit,
     ) -> Arc<Self> {
-        Self::assuming(file, metadata, choices, audit, None)
+        Self::assuming(file, metadata, protection, audit, None)
     }
 
     /// Where every context is a Local one, so `read-write`: for the tools
@@ -311,7 +301,7 @@ impl Policy {
         Self::assuming(
             PolicyFile::default(),
             |_| Some(Metadata::default()),
-            Choices::default(),
+            Protection::nowhere(),
             Audit::off(),
             Some(Environment::Local),
         )
@@ -320,16 +310,23 @@ impl Policy {
     fn assuming(
         file: PolicyFile,
         metadata: impl Fn(&str) -> Option<Metadata> + Send + Sync + 'static,
-        choices: Choices,
+        protection: Protection,
         audit: Audit,
         assumed: Option<Environment>,
     ) -> Arc<Self> {
+        let (kept, read) = protection.open();
+        let (choices, unreadable) = match read {
+            Ok(choices) => (choices, None),
+            Err(reason) => (Choices::default(), Some(reason)),
+        };
         Arc::new(Self {
             file,
+            kept,
             metadata: Box::new(metadata),
             assumed,
             held: Mutex::new(Held {
                 choices,
+                unreadable,
                 unlocks: HashMap::new(),
                 changed: HashMap::new(),
             }),
@@ -443,9 +440,12 @@ impl Policy {
             // it lets through: what its kubeconfig said of it is no longer
             // known, and the policy file speaks of a name that names nothing now.
             None => (Mode::ReadOnly, ModeSource::Unlisted),
-            Some(metadata) => {
-                file.unwrap_or_else(|| self.resolve(context, held, &metadata, environment))
-            }
+            Some(metadata) => file
+                .or_else(|| {
+                    let reason = held.unreadable.as_deref()?;
+                    Some(self.kept.unreadable(reason))
+                })
+                .unwrap_or_else(|| self.resolve(context, held, &metadata, environment)),
         };
         let unlocked = held
             .unlocks
@@ -602,13 +602,15 @@ impl Policy {
 
     /// What `change` would leave `context` with now: refused where no source
     /// lists it, a mode or an unlock where the admin's policy file sets its
-    /// mode, and an unlock where it is not `read-only`.
+    /// mode, any change while the person's protection file cannot be read,
+    /// and an unlock where it is not `read-only`.
     pub fn plan(&self, context: &str, change: Change) -> Result<PlannedChange, Refused> {
         let now = Timestamp::now();
         let metadata =
             (self.metadata)(context).ok_or_else(|| Refused::Unlisted(context.to_owned()))?;
         self.refuse_policy_file(context, change)?;
         let mut held = self.held();
+        self.refuse_unreadable(&held)?;
         let ended = held.end_moved(context, Some(metadata));
         let before = self.resolved(&held, context, Some(metadata), now);
         let mut changed = held.clone();
@@ -660,17 +662,16 @@ impl Policy {
         context: &str,
         planned: &PlannedChange,
         friction: &Friction,
-    ) -> Result<Choices, Refused> {
+    ) -> Result<(), Refused> {
         let change = planned.change;
-        let (before, after, choices) =
-            self.make(context, change, UNLOCK, |held, before, metadata| {
-                let stands = *before == planned.before
-                    && held.changes_of(context) == planned.changes
-                    && metadata.revision == planned.revision;
-                stands
-                    .then_some(())
-                    .ok_or_else(|| Refused::Changed(context.to_owned()))
-            })?;
+        let (before, after) = self.make(context, change, UNLOCK, |held, before, metadata| {
+            let stands = *before == planned.before
+                && held.changes_of(context) == planned.changes
+                && metadata.revision == planned.revision;
+            stands
+                .then_some(())
+                .ok_or_else(|| Refused::Changed(context.to_owned()))
+        })?;
         self.audit.record(&Entry::Protection {
             context,
             change: &change,
@@ -678,7 +679,7 @@ impl Policy {
             after: &after,
             by: By::Plan { friction },
         });
-        Ok(choices)
+        Ok(())
     }
 
     /// Marks an unmarked context as `environment`, the answer to the ask of
@@ -692,18 +693,17 @@ impl Policy {
         environment: Environment,
         actor: Actor,
         process: &str,
-    ) -> Result<Choices, Refused> {
+    ) -> Result<(), Refused> {
         let change = Change::Type {
             environment: Some(environment),
         };
-        let (before, after, choices) =
-            self.make(context, change, UNLOCK, |_, before, metadata| {
-                let unmarked =
-                    before.source == ModeSource::Unmarked && metadata.connection == connection;
-                unmarked
-                    .then_some(())
-                    .ok_or_else(|| Refused::Changed(context.to_owned()))
-            })?;
+        let (before, after) = self.make(context, change, UNLOCK, |_, before, metadata| {
+            let unmarked =
+                before.source == ModeSource::Unmarked && metadata.connection == connection;
+            unmarked
+                .then_some(())
+                .ok_or_else(|| Refused::Changed(context.to_owned()))
+        })?;
         self.audit.record(&Entry::Protection {
             context,
             change: &change,
@@ -714,37 +714,43 @@ impl Policy {
                 process,
             },
         });
-        Ok(choices)
+        Ok(())
     }
 
     /// Makes `change` once `check` lets it, given what the context is now,
-    /// under the lock every decision reads: says what it was and what it
-    /// is, and the person's choices to keep.
+    /// under the lock every decision reads, and once the person's
+    /// protection file holds the choices it leaves, so none holds that the
+    /// file does not: says what the context was and what it is.
     fn make(
         &self,
         context: &str,
         change: Change,
         unlock: SignedDuration,
         check: impl FnOnce(&Held, &ContextAccess, &Metadata) -> Result<(), Refused>,
-    ) -> Result<(ContextAccess, ContextAccess, Choices), Refused> {
+    ) -> Result<(ContextAccess, ContextAccess), Refused> {
         let now = Timestamp::now();
         let metadata =
             (self.metadata)(context).ok_or_else(|| Refused::Unlisted(context.to_owned()))?;
         self.refuse_policy_file(context, change)?;
         let mut held = self.held();
+        self.refuse_unreadable(&held)?;
         let ended = held.end_moved(context, Some(metadata));
         let before = self.resolved(&held, context, Some(metadata), now);
-        let checked = check(&held, &before, &metadata);
-        if checked.is_ok() {
-            held.make(context, change, &metadata, unlocked_until(now, unlock));
-        }
+        let made = check(&held, &before, &metadata).and_then(|()| {
+            let mut changed = held.clone();
+            changed.make(context, change, &metadata, unlocked_until(now, unlock));
+            if changed.choices != held.choices {
+                self.kept.keep(&changed.choices)?;
+            }
+            *held = changed;
+            Ok(())
+        });
         let after = self.resolved(&held, context, Some(metadata), now);
-        let choices = held.choices.clone();
         drop(held);
         self.relocked(context, ended);
-        checked?;
+        made?;
         self.changed();
-        Ok((before, after, choices))
+        Ok((before, after))
     }
 
     /// Ends an unlock now, which the audit log records.
@@ -886,6 +892,15 @@ impl Policy {
         }
     }
 
+    /// Refuses every change while the person's protection file cannot be
+    /// read, so nothing writes over it.
+    fn refuse_unreadable(&self, held: &Held) -> Result<(), Refused> {
+        match held.unreadable {
+            Some(_) => Err(self.kept.refused()),
+            None => Ok(()),
+        }
+    }
+
     fn changed(&self) {
         self.changes.send_modify(|count| *count += 1);
     }
@@ -899,9 +914,10 @@ impl Policy {
 impl Policy {
     /// The person's mode for `context`, or none for what its locks say,
     /// unplanned and unrecorded, for the tests that set a mode.
-    pub fn set_mode(&self, context: &str, mode: Option<Mode>) -> Result<Choices, Refused> {
+    pub fn set_mode(&self, context: &str, mode: Option<Mode>) -> Result<(), Refused> {
         let change = Change::Mode { mode };
-        Ok(self.make(context, change, UNLOCK, |_, _, _| Ok(()))?.2)
+        self.make(context, change, UNLOCK, |_, _, _| Ok(()))
+            .map(|_| ())
     }
 
     /// The person's type for `context`, none for no type, unplanned and
@@ -910,9 +926,10 @@ impl Policy {
         &self,
         context: &str,
         environment: Option<Environment>,
-    ) -> Result<Choices, Refused> {
+    ) -> Result<(), Refused> {
         let change = Change::Type { environment };
-        Ok(self.make(context, change, UNLOCK, |_, _, _| Ok(()))?.2)
+        self.make(context, change, UNLOCK, |_, _, _| Ok(()))
+            .map(|_| ())
     }
 
     /// Lets `read-only` through as `guarded` for [`UNLOCK`], unplanned and

@@ -231,7 +231,7 @@ twigo/
 │  ├─ twigo-cache/            watch hub (upstreams, row stores, query views, batching), the discovery it follows, the metrics poller
 │  ├─ twigo-describe/         describers by GroupKind: an object and its related facts → the Overview document (4.3)
 │  ├─ twigo-sessions/         logs, exec/attach, a port-forward's data path, pty terminal
-│  ├─ twigo-policy/           read-only modes, authorize(), what an approval covers, audit log, redaction
+│  ├─ twigo-policy/           read-only modes and the person's protection file, authorize(), what an approval covers, audit log, redaction
 │  ├─ twigo-quantity/         Kubernetes resource quantities: the describers and the metrics poller read them alike
 │  ├─ twigo-env/              login-shell environment resolution
 │  ├─ twigo-log/              the diagnostics log's subscriber, the rotating file the audit log shares, the panic hook, the facts of a run, the problems of Twigo's own files
@@ -1773,6 +1773,11 @@ A toast has one button beside Dismiss, and `more` after it where a message comes
   It locks values: for example "contexts matching `prod-*` are read-only", "extensions only from these registries", "MCP off".
   So far it sets modes by context glob, what `read-only` does with a port-forward, and by context glob the terminals that go through the policy proxy whatever their mode (4.6), `{"contexts": {"prod-*": "read-only"}, "readOnly": {"allowPortForward": false}, "terminal": {"usePolicyProxy": ["prod-*"]}}`, and it is read once, as the app starts.
   A key nothing reads would be a lock that does not hold, so an unknown key, like any file that cannot be read, locks every context `read-only` and says so (6.4), and has every terminal use the proxy.
+- **Protection** is the mode a person chose for each context and the type they marked it as, in `protection.json` in the app-data directory, mode 0600, with a version.
+  It is no setting and never goes to `settings.json`: only a confirmed plan of the command bus, or a type given in answer to a process's ask, changes it (6.4), while a settings file edited by hand would lower a context's protection with no friction and no audit line.
+  `twigo-policy` reads it once, as the app starts, and writes it atomically before the policy holds a choice, so no choice holds that the file does not: a write that fails refuses the change as `protection.unsaved`, unless the file reads back as written, since the save's last step, the directory's fsync, comes after the new file is in place.
+  It reads closed, as the policy file does: a file that cannot be read, is not JSON, has an unknown key, holds a value that does not read back or has a version this build does not know makes every context the policy file sets no mode for `read-only` (6.4) and takes no change until the next start, so it is never written over and a newer build's file outlives a downgrade; `problems_watch` lists it as `protection.unreadable` (4.10, [decision](decisions/kept-files.md)).
+  A missing file holds no choice, and the first choice writes it.
 - Settings are files the user can edit in the app (with a schema) or through the generated settings UI.
   Changes are picked up live.
   `keybindings.json` works the same way.
@@ -1795,9 +1800,9 @@ A toast has one button beside Dismiss, and `more` after it where a message comes
     Only those notings move that clock, so a context that is back by the first reading after a long break keeps its space.
     It goes as the app starts, before the webview reads any space; VS Code's per-workspace state grew without bound.
   - A file that cannot be read, or has another version, moves aside as `state.json.unreadable`, and the app starts with nothing remembered, which `problems_watch` lists as `state.set-aside` (4.10).
-    Before users exist there are no migrations.
+    Every file Twigo keeps for a person, this one, `protection.json` and `trust.json`, has a version and a fixture its test reads and writes back byte for byte, so a rename of a wire type that goes to disk fails it ([decision](decisions/kept-files.md)).
+    Before the first release a change of format changes the fixture with it, and there are no migrations; from the first release on a change keeps reading each released version through a migration and that version's fixture, and only then does a struct for disk split from the wire's.
   - Secrets never go into the state: they stay in Rust and the keychain (6.2).
-  - Until the settings files come in M3, the mode a person chooses for a context and the type they mark it as live here too, under a key `state_set` refuses, since only a confirmed plan of the command bus, or a type given in answer to a process's ask, changes them (6.4).
   - A space's port-forwards (4.6) live here under a key `state_set` refuses as well, with the id the last forward got in the app's scope, since only the manager changes them.
 - **What is skipped from VS Code, and why:**
   - Workspace and folder layers: spaces take their place.
@@ -1996,7 +2001,7 @@ What a person needs when something goes wrong, and what a bug report holds, star
 
 #### Twigo's own files that fail
 
-- `twigo_log::problems` lists, once per code for the run, what a file of Twigo's own could not do that leaves the person with less than they set up: `state.set-aside` (the modes and locks they set are gone), `state.unsaved` (until a save works), `trust.set-aside`, `audit.off` and `audit.unwritten` (nothing is recorded, or a line was lost), and `tokens.unsaved` (the next start asks to sign in again).
+- `twigo_log::problems` lists, once per code for the run, what a file of Twigo's own could not do that leaves the person with less than they set up: `state.set-aside` (their spaces and forwards are gone), `state.unsaved` (until a save works), `protection.unreadable` (every context the policy file sets no mode for is read-only until the file is restored or removed and Twigo restarts, 4.8), `trust.set-aside`, `audit.off` and `audit.unwritten` (nothing is recorded, or a line was lost), and `tokens.unsaved` (the next start asks to sign in again).
   Each is reported where it is logged, with Twigo's words and no path or value; a report of a code replaces its last.
   Each is logged at error where it fails, as are `kubeconfig.unwatched` (5.5) and `policy.file-unreadable` (4.8), while a kubeconfig file that does not parse is a warning, since the person's own file is what is wrong there.
   `audit.unwritten` is raised only by a write that failed, not by a log that could not move aside or open anew, which loses no line, and it goes with the next line that lands; `tokens.unsaved` stays while any user's refreshed tokens are in memory only, the registry holding those users by their oidc key, and goes when the last of them is written back by a later refresh, as `state.unsaved` goes with the next save that works.
@@ -2005,6 +2010,7 @@ What a person needs when something goes wrong, and what a bug report holds, star
   The window follows it from the start, and raises one notification when a code joins the list, in Rust's words, which say what it means for the person, with Reveal Log File and Report… beside Dismiss (4.7).
   A code listed again with other words raises none, and a code that leaves the list takes its notification with it, so a problem that comes back is told again.
 - The policy file that cannot be read locks every context `read-only` (4.8) and says so in the access popover with its reason, which is where it does not parse (`it is not JSON at line 3, column 1`) or what failed to read it (`permission denied`), never a word of the file.
+  The person's `protection.json` that cannot be read locks every context the policy file sets no mode for `read-only` and says so too: its popover names the file with its reason and offers no change and no unlock, while a blocked toast, which offers no unlock either, and a refused change name the file alone, as the policy file's do.
 
 #### Report a Problem
 
@@ -2018,7 +2024,7 @@ What a bug report holds, and how it leaves the machine, is Rust's to decide, sin
     A record counts for at most 8 KiB of the window, so four fit however long they are, and its text is cut at that size, at a line and a panic's backtrace before its message, with the bytes it left out said, so one long record never leaves the log empty.
     A line that is not a record, which a full disk or a kill leaves torn, shows as `<a line that is not a record>`, never as its text.
   - How many names, paths, tokens, addresses and quoted values the redaction hid, and how many lines it showed as a placeholder.
-  - Nothing else: never a kubeconfig, `state.json`, `trust.json`, the policy file or the audit log.
+  - Nothing else: never a kubeconfig, `state.json`, `protection.json`, `trust.json`, the policy file or the audit log.
 - **The redaction**, in Rust, so the webview never holds the log as written, in three layers:
   - A field of a fixed name (`context`, `space`, `cluster`, `server`, `user`, `namespace`, `object`) becomes an alias numbered by first appearance in the report, `<context-1>`, `<namespace-2>`, and a `url` or `path` field becomes `<url>` or `<path>`.
     A space is its context, so its alias is the context's.
@@ -2482,7 +2488,8 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   - An exec plugin is a command chosen by whoever wrote the kubeconfig.
   - On the first start, Twigo lists every exec plugin the kubeconfigs name, with the contexts that use each, and the person trusts them once.
   - A new or changed entry (a different digest of command, args and env) asks when its space activates, before it runs.
-  - The digests live in `trust.json` beside the state store, which only Rust writes; an unreadable file trusts nothing, and is listed as the problem `trust.set-aside` (4.10).
+  - The digests live in `trust.json` beside the state store, which only Rust writes.
+    It reads closed: a file that cannot be read, has another version or a key nothing reads moves aside as `trust.json.unreadable` and trusts nothing, so each plugin asks again, and is listed as the problem `trust.set-aside` (4.10, [decision](decisions/kept-files.md)).
 - **The deprecated `auth-provider: oidc`.**
   - Twigo refreshes it as client-go does: the id-token until 10 s before its `exp`, then discovery and a `refresh_token` grant, with the IdP's CA and the login shell's proxy.
   - It writes the new id-token and refresh-token back to the user's file, as kubectl does, since the file is the token store every client shares and Dex rotates the refresh token on every refresh (the owner's choice, 2026-11-01).
@@ -2664,12 +2671,13 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
 - **Where the mode comes from**, highest first:
   1. no source lists the context now: `read-only`, since clients built before it went may still run and nothing says what it lets through, not even a policy file entry, which speaks of the name;
   2. a policy file entry, which the UI cannot change or unlock; of several that match, the strictest;
-  3. the person's choice for the context, which wins both ways: where it is less strict than the strictest lock below, its source names that lock as set aside (`user` with `overrides`);
-  4. the strictest of the locks, each of which can only tighten, and of equal ones the first listed:
+  3. the person's `protection.json` (4.8, [decision](decisions/kept-files.md)) that cannot be read: `read-only`, source `protectionUnreadable` with the file and its reason, for every context until it is restored or removed and Twigo restarts; it ranks below an admin's entry, which still says what the context lets through, and above everything else, since the person's choices that would speak are what cannot be read;
+  4. the person's choice for the context, which wins both ways: where it is less strict than the strictest lock below, its source names that lock as set aside (`user` with `overrides`);
+  5. the strictest of the locks, each of which can only tighten, and of equal ones the first listed:
      - kubeconfig metadata, `twigo.readOnly` there and anything but `false`: `read-only`, while `false` says nothing;
      - the provider (Segla can mark production clusters), whose lock is `guarded` or `read-only`, never `read-write`;
      - the default of its environment type, the person's, else its kubeconfig's (`twigo.environment`) where that tightens: `read-only` for Production, `guarded` for Staging and `read-write` for Development and Local, which a kubeconfig cannot give, so Development or Local there is no lock and no mark;
-  5. nothing marks it: `guarded`, source `unmarked`, until someone says what it is.
+  6. nothing marks it: `guarded`, source `unmarked`, until someone says what it is.
 
   The mode is read for every request, so a change reaches clients already built.
   The person's "no type" holds whatever the kubeconfig says, and with no other lock leaves the context unmarked again.
@@ -2685,6 +2693,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
 - **Changes of protection** are plans of the command bus (5.1): the person's mode, the type they mark a context as, and an unlock.
   They send nothing to a cluster, so a plan has no writes and no kubectl command, and each is refused at plan time where no source lists the context.
   Where the policy file sets the context's mode, a mode and an unlock are refused at plan time, and a type plans.
+  While the person's protection file cannot be read, every change is refused at plan time and again as it runs, the type a process's ask gives included, so nothing writes over that file (4.8).
   The person's mode and type outlive every lock that can go: the policy file's entry, a kubeconfig's `readOnly`, a kubeconfig's type and a provider's lock, each of which an edit or the provider can take away on its own.
   So a lasting change is weighed under every set of those locks taken away, the person's choices kept and the empty set being the change as it is, a context unmarked under a set counting as `guarded` there.
   No lock then hides a lowering from the friction: neither a kubeconfig's type beneath its `readOnly` nor the person's mode cleared beneath a kubeconfig's type.
@@ -2701,7 +2710,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   A relock (`context_relock`) only tightens and runs at once, and a plugin's trust (`exec_trust`) has its review for confirmation; both stay commands of their own.
 
 - **Unlock for 15 minutes.**
-  A plan switches a `read-only` context to `guarded` for a limited time, and a command that such a lock refused offers it in the toast that says so; a policy file's lock, a context no source lists and clients of a cluster the context no longer names offer nothing, the last since an unlock never reaches them.
+  A plan switches a `read-only` context to `guarded` for a limited time, and a command that such a lock refused offers it in the toast that says so; a policy file's lock, the person's protection file that cannot be read, a context no source lists and clients of a cluster the context no longer names offer nothing, the last since an unlock never reaches them.
   A banner shows the countdown, and the context relocks by itself.
   The gate reads the wall clock, as timers stop while the machine sleeps, and nothing stores an unlock, so a restart relocks.
   An unlock holds only while the context's fingerprint stays, so one given on a cluster never reaches another its name moves to, and a new choice or type ends it.
@@ -2716,7 +2725,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
     A request the proxy lets on meets the gate, which notes it, and one it refuses for another reason, a token, a `Host`, a path or a body's size, is no request the policy stopped and has no line.
   - `confirmed` and `ended`: a command a person confirmed through the command bus, through which friction, and how it ended: `done` or `stopped` with Twigo's own sentence as `message`, `failed` with the `codes` of the error and no message, since the server's message for a failed request can quote a value the person typed; a `stopped` command that had failed requests carries their `codes` too, and the window is told their words after the sentence.
   - `refused`: a command of a person's that the policy refused before anything was sent, at `command_plan` or at `command_execute`, or a port-forward's start or resume: its context, the command and target as `confirmed` names them, the mode and source the policy read, and why.
-    That is the gate's reason for one of the command's writes, or the reason a change of protection was refused: the admin's policy file sets the mode, there is nothing to unlock, no source lists it, or it changed since the plan.
+    That is the gate's reason for one of the command's writes, or the reason a change of protection was refused: the admin's policy file sets the mode, the person's protection file cannot be read or could not be written, there is nothing to unlock, no source lists it, or it changed since the plan.
     A plan whose context asks for more friction now than the person went through is refused too, and its line carries both frictions, the plan's and the context's now.
     A port-forward's start or resume that the gate refuses, as `readOnly.allowPortForward: false` does, is the command `forward` on the target the person chose, with the gate's reason; a forward that the mode ends while it runs is no command refused, and has no line.
     One line per command, not per write.
@@ -2743,7 +2752,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   - A production context is a mode with two cues (NN/g): a chip in the title bar after its name that says the type and the lock (`Production · read-only`), and the status bar tinted in it.
     Where the bar is too narrow the chip folds to its icon, its words in its tooltip, after the search and before the crumbs (4.1).
     The mockup's third, a 2 px line of its colour along the title bar's top, was dropped on 2026-11-07: the chip, the tint and the bar's left end in the context's colour already say it.
-    The chip opens what set the mode, in words, with the choices the person has.
+    The chip opens what set the mode, in words, with the choices the person has; while the person's protection file cannot be read it offers none for a context that file holds `read-only`, and a type it offers under an admin's policy file entry is refused when planned, with the protection file named.
     Where the person's choice sets a stricter lock aside, a kubeconfig's `twigo.readOnly`, a provider's or the type's default, the words say which: `You set this, over its kubeconfig's read-only.`
   - The person lowers protection only through the command bus (5.1): the chip's choices, Set Context Mode…, Set Environment Type… and the toast's Unlock for 15 minutes plan a `setMode`, `setEnvironment` or `unlock`, and the operations service draws the friction the plan names and runs it.
     A lasting change that leaves the context less strict under any set of the locks that can go taken away asks for its name typed, clearing a type counting as a change to `read-write`, an unlock asks in a dialog, and a change that no such set shows lowering, or that starts from a context nobody marked, runs at once, with a toast that says what it did; a plan with no kubectl command shows no such line.

@@ -161,7 +161,9 @@ type ListScenario = "live" | ViewState["state"] | CauseScenario;
  * environment timed out, `policyFile`: live lists with an admin's policy
  * file over `prod-*` that also sends `dev`'s terminal through the proxy,
  * `policyFileUnreadable`: live lists while that file cannot be read, so every
- * context is read-only and says why,
+ * context is read-only and says why, `protectionUnreadable`: live lists while
+ * the person's protection file cannot be read, so every context is read-only,
+ * says why, takes no change and is listed in the problems,
  * `viewer`: live lists for a person who may only read, `protection`: live
  * lists with `qa`, which nobody marked, and `analytics`, whose kubeconfig says
  * read-only and which the person made read-write, open on the rail,
@@ -203,6 +205,7 @@ export type MockScenario =
   | "shellTimeout"
   | "policyFile"
   | "policyFileUnreadable"
+  | "protectionUnreadable"
   | "viewer"
   | "rbacNamespaces"
   | "rbacTypedNamespaces"
@@ -227,6 +230,7 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "shellTimeout",
   "policyFile",
   "policyFileUnreadable",
+  "protectionUnreadable",
   "viewer",
   "rbacNamespaces",
   "rbacTypedNamespaces",
@@ -285,9 +289,17 @@ const AUDIT_OFF = wire(
 const PROBLEMS = [
   wire(
     "state.set-aside",
-    "Twigo could not read its saved state, so it started without it: the modes and locks you set, your spaces and your forwards are gone",
+    "Twigo could not read its saved state, so it started without it: your spaces and your forwards are gone",
   ),
   AUDIT_OFF,
+];
+
+/** What Rust lists when the person's protection file cannot be read, in its words. */
+const PROTECTION_UNREADABLE = [
+  wire(
+    "protection.unreadable",
+    "Twigo could not read protection.json, which holds the modes and types you set, so every context an admin's policy file sets no mode for is read-only until you restore or remove that file and restart Twigo",
+  ),
 ];
 
 /** What `problemsCleared` lists while the state cannot be saved, and how long until a save works, and until it fails again. */
@@ -334,6 +346,7 @@ export function createMockBackend(
     scenario === "shellTimeout" ||
     scenario === "policyFile" ||
     scenario === "policyFileUnreadable" ||
+    scenario === "protectionUnreadable" ||
     scenario === "viewer" ||
     scenario === "rbacNamespaces" ||
     scenario === "rbacTypedNamespaces" ||
@@ -364,6 +377,9 @@ export function createMockBackend(
     catalogOf(scenario),
     scenario === "policyFileUnreadable"
       ? "it is not JSON at line 3, column 1"
+      : undefined,
+    scenario === "protectionUnreadable"
+      ? "it says something Twigo's protection file does not at line 4, column 13"
       : undefined,
   );
   const approvals = new MockApprovals(
@@ -1150,6 +1166,7 @@ export function createMockBackend(
         }, 2 * SAVE_WORKS_MS);
         return UNSAVED;
       }
+      if (scenario === "protectionUnreadable") return PROTECTION_UNREADABLE;
       return scenario === "problems" ? PROBLEMS : [];
     },
     resources_watch: (id, onMessage) => {

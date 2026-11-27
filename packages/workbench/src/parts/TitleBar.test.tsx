@@ -297,6 +297,23 @@ test("under a policy file the popover names the rule and offers no way around it
   expect(screen.queryByRole("button", { name: /Unlock/ })).toBeNull();
 });
 
+test("while the person's protection file cannot be read the popover says why and offers no change", async () => {
+  const workbench = await testWorkbench(
+    undefined,
+    createMockBackend("protectionUnreadable"),
+  );
+  render(<TitleBar />, { wrapper: inWorkbench(workbench) });
+  await settled();
+  fireEvent.click(screen.getByRole("button", { name: /^Mode of prod-eu/ }));
+  expect(
+    screen.getByText(/protection\.json, which holds the modes and types/),
+  ).toBeTruthy();
+  for (const offered of ["Read-write", "Guarded", "Staging", "None"]) {
+    expect(screen.queryByRole("button", { name: offered })).toBeNull();
+  }
+  expect(screen.queryByRole("button", { name: /Unlock/ })).toBeNull();
+});
+
 test("a context nobody marked has a quiet chip that opens the choices of any other, where the variant shows it", async () => {
   const { workbench } = await mounted();
   await act(() => workbench.spaces.open("qa"));

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "modes": {
+    "kind-dev": "read-write",
+    "kind-prod": "read-only",
+    "kind-stage": "guarded"
+  },
+  "environments": {
+    "kind-cleared": null,
+    "kind-dev": "development",
+    "kind-local": "local",
+    "kind-prod": "production",
+    "kind-stage": "staging"
+  }
+}

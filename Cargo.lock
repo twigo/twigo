@@ -6264,6 +6264,7 @@ dependencies = [
 name = "twigo-policy"
 version = "0.1.0"
 dependencies = [
+ "atomic-write-file",
  "base64 0.23.1",
  "form_urlencoded",
  "glob",

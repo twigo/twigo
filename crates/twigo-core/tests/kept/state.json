@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "saw": "2026-11-20T10:00:00Z",
+  "app": {
+    "forwards/last": 7,
+    "parts/sizes": {"sidebar":300},
+    "window/zoom": 1.1
+  },
+  "spaces": [
+    {
+      "id": "kind-a",
+      "contexts": [
+        "kind-a"
+      ],
+      "state": {
+        "forwards": {"forwards":[{"id":3,"target":{"space":"kind-a","gvr":{"group":"apps","version":"v1","resource":"deployments"},"namespace":"shop","name":"api"},"kind":"Deployment","port":8080,"port_name":"http","app_protocol":null,"local":8080,"detour":false,"runs":true}],"ports":[{"target":{"space":"kind-a","gvr":{"group":"","version":"v1","resource":"services"},"namespace":"shop","name":"web"},"port":80,"local":8081}]},
+        "namespaces": ["shop"]
+      }
+    },
+    {
+      "id": "kind-b",
+      "contexts": [
+        "kind-b"
+      ],
+      "missing_since": "2026-11-01T08:00:00Z",
+      "state": {
+        "recent": [{"uri":"k8s://kind-b/apps/v1/deployments/shop/api","title":"api"}]
+      }
+    }
+  ]
+}

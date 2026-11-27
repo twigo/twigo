@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use twigo_ipc::{ForwardId, ForwardTarget};
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Saved {
     #[serde(default)]
     pub forwards: Vec<SavedForward>,
@@ -13,7 +13,7 @@ pub(crate) struct Saved {
     pub ports: Vec<Remembered>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct SavedForward {
     pub id: ForwardId,
     pub target: ForwardTarget,
@@ -27,7 +27,7 @@ pub(crate) struct SavedForward {
     pub runs: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Remembered {
     pub target: ForwardTarget,
     pub port: u16,

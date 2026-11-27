@@ -304,6 +304,8 @@ function why(source: ModeSource): string {
       return source.pattern === null
         ? ` because ${source.file} cannot be read`
         : ` by ${source.pattern} in ${source.file}`;
+    case "protectionUnreadable":
+      return ` because ${source.file} cannot be read`;
     case "unlisted":
     case "moved":
       return "";

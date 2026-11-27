@@ -1,6 +1,6 @@
 import {
   accessOfSpace,
-  setByPolicyFile,
+  unchangeable,
   type ContextValue,
   type Lookup,
   type Workbench,
@@ -36,7 +36,7 @@ export function createEdits(workbench: Workbench): EditServices {
         (candidate) => candidate.id === id,
       );
       const access = space && accessOfSpace(workbench.catalog, space);
-      return access?.mode === "read-only" && setByPolicyFile(access.source);
+      return access?.mode === "read-only" && unchangeable(access.source);
     },
   };
 }
