@@ -2010,7 +2010,7 @@ What a person needs when something goes wrong, and what a bug report holds, star
   The window follows it from the start, and raises one notification when a code joins the list, in Rust's words, which say what it means for the person, with Reveal Log File and Report… beside Dismiss (4.7).
   A code listed again with other words raises none, and a code that leaves the list takes its notification with it, so a problem that comes back is told again.
 - The policy file that cannot be read locks every context `read-only` (4.8) and says so in the access popover with its reason, which is where it does not parse (`it is not JSON at line 3, column 1`) or what failed to read it (`permission denied`), never a word of the file.
-  So does the person's `protection.json` that cannot be read, whose popover and blocked toasts name the file with its reason and offer no change and no unlock.
+  So does the person's `protection.json` that cannot be read, whose popover names the file with its reason and offers no change and no unlock, while a blocked toast, which offers no unlock either, and a refused change name the file alone, as the policy file's do.
 
 #### Report a Problem
 
