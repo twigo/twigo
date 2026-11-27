@@ -1,5 +1,6 @@
 pnpm-lock.yaml
 crates/*/tests/fixtures
+crates/*/tests/kept
 packages/protocol/src/generated.ts
 packages/protocol/src/mock/objects.json
 packages/protocol/src/mock/helm.json

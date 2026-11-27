@@ -227,3 +227,86 @@ fn a_choice_that_cannot_be_saved_is_refused_and_not_held() {
     assert_eq!(policy.access("kind-a"), before);
     assert!(policy.authorize("kind-a", &write(), Actor::Ui).is_err());
 }
+
+const KEPT: &str = include_str!("kept/protection.json");
+
+fn kept(path: &Path) -> Arc<Policy> {
+    Policy::new(
+        PolicyFile::default(),
+        |context| {
+            Some(Metadata {
+                environment: (context == "kind-cleared").then_some(TypeLock::Production),
+                ..Metadata::default()
+            })
+        },
+        Protection::read(path),
+        Audit::off(),
+    )
+}
+
+#[test]
+fn the_kept_protection_reads_to_its_choices_and_writes_back_to_its_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let read = dir.path().join("read.json");
+    std::fs::write(&read, KEPT).unwrap();
+    let policy = kept(&read);
+    let chosen = ModeSource::User { overrides: None };
+    let local = ModeSource::Environment {
+        environment: Environment::Local,
+    };
+    let cases = [
+        (
+            "kind-dev",
+            Mode::ReadWrite,
+            &chosen,
+            Some(Environment::Development),
+        ),
+        (
+            "kind-prod",
+            Mode::ReadOnly,
+            &chosen,
+            Some(Environment::Production),
+        ),
+        (
+            "kind-stage",
+            Mode::Guarded,
+            &chosen,
+            Some(Environment::Staging),
+        ),
+        (
+            "kind-local",
+            Mode::ReadWrite,
+            &local,
+            Some(Environment::Local),
+        ),
+        ("kind-cleared", Mode::Guarded, &ModeSource::Unmarked, None),
+    ];
+    for (context, mode, source, environment) in cases {
+        let access = policy.access(context);
+        assert_eq!(
+            (access.mode, &access.source, access.environment),
+            (mode, source, environment),
+            "{context}"
+        );
+    }
+
+    let written = dir.path().join("written.json");
+    let policy = kept(&written);
+    for (context, mode) in [
+        ("kind-dev", Mode::ReadWrite),
+        ("kind-prod", Mode::ReadOnly),
+        ("kind-stage", Mode::Guarded),
+    ] {
+        policy.set_mode(context, Some(mode)).unwrap();
+    }
+    for (context, environment) in [
+        ("kind-cleared", None),
+        ("kind-dev", Some(Environment::Development)),
+        ("kind-local", Some(Environment::Local)),
+        ("kind-prod", Some(Environment::Production)),
+        ("kind-stage", Some(Environment::Staging)),
+    ] {
+        policy.set_environment(context, environment).unwrap();
+    }
+    assert_eq!(std::fs::read_to_string(&written).unwrap(), KEPT);
+}

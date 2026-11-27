@@ -1776,7 +1776,7 @@ A toast has one button beside Dismiss, and `more` after it where a message comes
 - **Protection** is the mode a person chose for each context and the type they marked it as, in `protection.json` in the app-data directory, mode 0600, with a version.
   It is no setting and never goes to `settings.json`: only a confirmed plan of the command bus, or a type given in answer to a process's ask, changes it (6.4), while a settings file edited by hand would lower a context's protection with no friction and no audit line.
   `twigo-policy` reads it once, as the app starts, and writes it atomically before the policy holds a choice, so no choice holds that the file does not: a write that fails refuses the change as `protection.unsaved`.
-  It reads closed, as the policy file does: a file that cannot be read, is not JSON, has an unknown key, holds a value that does not read back or has a version this build does not know makes every context `read-only` (6.4) and takes no change until the next start, so it is never written over and a newer build's file outlives a downgrade; `problems_watch` lists it as `protection.unreadable` (4.10).
+  It reads closed, as the policy file does: a file that cannot be read, is not JSON, has an unknown key, holds a value that does not read back or has a version this build does not know makes every context `read-only` (6.4) and takes no change until the next start, so it is never written over and a newer build's file outlives a downgrade; `problems_watch` lists it as `protection.unreadable` (4.10, [decision](decisions/kept-files.md)).
   A missing file holds no choice, and the first choice writes it.
 - Settings are files the user can edit in the app (with a schema) or through the generated settings UI.
   Changes are picked up live.
@@ -1800,7 +1800,8 @@ A toast has one button beside Dismiss, and `more` after it where a message comes
     Only those notings move that clock, so a context that is back by the first reading after a long break keeps its space.
     It goes as the app starts, before the webview reads any space; VS Code's per-workspace state grew without bound.
   - A file that cannot be read, or has another version, moves aside as `state.json.unreadable`, and the app starts with nothing remembered, which `problems_watch` lists as `state.set-aside` (4.10).
-    Before users exist there are no migrations.
+    Every file Twigo keeps for a person, this one, `protection.json` and `trust.json`, has a version and a fixture its test reads and writes back byte for byte, so a rename of a wire type that goes to disk fails it ([decision](decisions/kept-files.md)).
+    Before the first release a change of format changes the fixture with it, and there are no migrations; from the first release on a change keeps reading each released version through a migration and that version's fixture, and only then does a struct for disk split from the wire's.
   - Secrets never go into the state: they stay in Rust and the keychain (6.2).
   - A space's port-forwards (4.6) live here under a key `state_set` refuses as well, with the id the last forward got in the app's scope, since only the manager changes them.
 - **What is skipped from VS Code, and why:**
@@ -2488,7 +2489,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   - On the first start, Twigo lists every exec plugin the kubeconfigs name, with the contexts that use each, and the person trusts them once.
   - A new or changed entry (a different digest of command, args and env) asks when its space activates, before it runs.
   - The digests live in `trust.json` beside the state store, which only Rust writes.
-    It reads closed: a file that cannot be read, has another version or a key nothing reads moves aside as `trust.json.unreadable` and trusts nothing, so each plugin asks again, and is listed as the problem `trust.set-aside` (4.10).
+    It reads closed: a file that cannot be read, has another version or a key nothing reads moves aside as `trust.json.unreadable` and trusts nothing, so each plugin asks again, and is listed as the problem `trust.set-aside` (4.10, [decision](decisions/kept-files.md)).
 - **The deprecated `auth-provider: oidc`.**
   - Twigo refreshes it as client-go does: the id-token until 10 s before its `exp`, then discovery and a `refresh_token` grant, with the IdP's CA and the login shell's proxy.
   - It writes the new id-token and refresh-token back to the user's file, as kubectl does, since the file is the token store every client shares and Dex rotates the refresh token on every refresh (the owner's choice, 2026-11-01).
@@ -2670,7 +2671,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
 - **Where the mode comes from**, highest first:
   1. no source lists the context now: `read-only`, since clients built before it went may still run and nothing says what it lets through, not even a policy file entry, which speaks of the name;
   2. a policy file entry, which the UI cannot change or unlock; of several that match, the strictest;
-  3. the person's `protection.json` (4.8) that cannot be read: `read-only`, source `protectionUnreadable` with the file and its reason, for every context until it is restored or removed and Twigo restarts; it ranks below an admin's entry, which still says what the context lets through, and above everything else, since the person's choices that would speak are what cannot be read;
+  3. the person's `protection.json` (4.8, [decision](decisions/kept-files.md)) that cannot be read: `read-only`, source `protectionUnreadable` with the file and its reason, for every context until it is restored or removed and Twigo restarts; it ranks below an admin's entry, which still says what the context lets through, and above everything else, since the person's choices that would speak are what cannot be read;
   4. the person's choice for the context, which wins both ways: where it is less strict than the strictest lock below, its source names that lock as set aside (`user` with `overrides`);
   5. the strictest of the locks, each of which can only tighten, and of equal ones the first listed:
      - kubeconfig metadata, `twigo.readOnly` there and anything but `false`: `read-only`, while `false` says nothing;

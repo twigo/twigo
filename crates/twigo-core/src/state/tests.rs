@@ -258,3 +258,86 @@ fn a_forward_id_is_never_given_twice_across_restarts() {
     let reopened = State::open_with(path, Duration::from_secs(3600));
     assert_eq!(reopened.next_forward_id(0), twigo_ipc::ForwardId(11));
 }
+
+const KEPT: &str = include_str!("../../tests/kept/state.json");
+
+fn target(resource: &str, group: &str, name: &str) -> twigo_ipc::ForwardTarget {
+    twigo_ipc::ForwardTarget {
+        space: "kind-a".to_owned(),
+        gvr: twigo_ipc::Gvr {
+            group: group.to_owned(),
+            version: "v1".to_owned(),
+            resource: resource.to_owned(),
+        },
+        namespace: "shop".to_owned(),
+        name: name.to_owned(),
+    }
+}
+
+fn kept_forwards() -> crate::forward::Saved {
+    crate::forward::Saved {
+        forwards: vec![crate::forward::SavedForward {
+            id: twigo_ipc::ForwardId(3),
+            target: target("deployments", "apps", "api"),
+            kind: "Deployment".to_owned(),
+            port: 8080,
+            port_name: Some("http".to_owned()),
+            app_protocol: None,
+            local: 8080,
+            detour: false,
+            runs: true,
+        }],
+        ports: vec![crate::forward::Remembered {
+            target: target("services", "", "web"),
+            port: 80,
+            local: 8081,
+        }],
+    }
+}
+
+const RECENT_API: &str = r#"[{"uri":"k8s://kind-b/apps/v1/deployments/shop/api","title":"api"}]"#;
+
+#[test]
+fn the_kept_state_reads_to_its_values_and_writes_back_to_its_bytes() {
+    let saw: Timestamp = "2026-11-20T10:00:00Z".parse().unwrap();
+    let since: Timestamp = "2026-11-01T08:00:00Z".parse().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("read.json");
+    std::fs::write(&path, KEPT).unwrap();
+    let read = State::open_with(path, Duration::from_secs(3600));
+    let snapshot = read.snapshot();
+    assert_eq!(snapshot.app["parts/sizes"], r#"{"sidebar":300}"#);
+    assert_eq!(snapshot.app["window/zoom"], "1.1");
+    assert_eq!(snapshot.spaces["kind-a"]["namespaces"], r#"["shop"]"#);
+    assert_eq!(snapshot.spaces["kind-b"]["recent"], RECENT_API);
+    let ids: Vec<String> = read.spaces().into_iter().map(|s| s.id).collect();
+    assert_eq!(ids, ["kind-a", "kind-b"]);
+    {
+        let data = read.inner.lock();
+        assert_eq!(data.file.saw, Some(saw));
+        let missing: Vec<_> = data.file.spaces.iter().map(|s| s.missing_since).collect();
+        assert_eq!(missing, [None, Some(since)]);
+    }
+    assert_eq!(read.forwards("kind-a"), kept_forwards());
+    assert_eq!(read.next_forward_id(0), twigo_ipc::ForwardId(8));
+
+    let path = dir.path().join("written.json");
+    let written = State::open_with(path.clone(), Duration::from_secs(3600));
+    written.open_space("kind-a");
+    written.open_space("kind-b");
+    written
+        .set(vec![
+            entry(None, "parts/sizes", r#"{"sidebar":300}"#),
+            entry(None, "window/zoom", "1.1"),
+            entry(Some("kind-a"), "namespaces", r#"["shop"]"#),
+            entry(Some("kind-b"), "recent", RECENT_API),
+        ])
+        .unwrap();
+    written.set_forwards("kind-a", &kept_forwards()).unwrap();
+    assert_eq!(written.next_forward_id(6), twigo_ipc::ForwardId(7));
+    let listed: HashSet<String> = HashSet::from(["kind-a".to_owned()]);
+    written.saw(&listed, since);
+    written.saw(&listed, saw);
+    written.flush().unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), KEPT);
+}

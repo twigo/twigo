@@ -163,6 +163,32 @@ mod tests {
         }
     }
 
+    const KEPT: &str = include_str!("../tests/kept/trust.json");
+
+    const DIGESTS: [&str; 2] = [
+        "9f8109ff86213f313cd48b3b3bfdd74da91893dfa0f553ad3eb6e2f7428b19d1",
+        "7fe74f6852d6c6661a67aa3e93d85e29c9ca86a70f6cfde961be2c9b4b360c47",
+    ];
+
+    #[test]
+    fn the_kept_list_reads_to_its_digests_and_writes_back_to_its_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("read.json");
+        std::fs::write(&path, KEPT).unwrap();
+        let read = Trust::open(path).current();
+        assert!(read.reviewed);
+        for digest in DIGESTS {
+            assert!(read.trusts(digest), "{digest}");
+        }
+        assert!(!read.trusts("any"));
+
+        let path = dir.path().join("written.json");
+        Trust::open(path.clone())
+            .trust(DIGESTS.map(str::to_owned))
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), KEPT);
+    }
+
     #[test]
     fn a_list_that_cannot_be_saved_says_so_in_the_log() {
         let dir = tempfile::tempdir().unwrap();

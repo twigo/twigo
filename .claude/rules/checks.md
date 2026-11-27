@@ -123,6 +123,7 @@
 - metrics-server leaves out a pod whose container reports zero CPU or zero memory (`decode.go` at v0.9.1), so a kwok pod annotated `kwok.x-k8s.io/usage-cpu: "0"` has no sample; a pod needs two scrapes, 20 to 45 s on kind 1.37 (2026-11-13), before it has one.
 - `bench/pods.sh` annotates every pod it scales with its own usage, one `kubectl annotate` each, 16 at a time: 200 pods took 1.5 s (2026-11-13), the time at 5,000 is not measured.
 - Files under `crates/*/tests/fixtures` are recorded server responses: never reformat or edit them by hand.
+- Files under `crates/*/tests/kept` are the bytes Twigo writes for a file it keeps for a person, written by hand to match its writer, which their tests hold byte for byte: change one with its format, never reformat it ([kept files](kept-files.md)).
 - `packages/kube/test/k8s-yaml/read.json` and `written.json` are recorded by `node record.mjs` beside them, and `refused.json` by the test that reads them: never edit them by hand.
 - `packages/protocol/src/mock/resources.json` is recorded by the `record_discovery` example from a cluster of `bench/cluster.sh up <name> 1.37`, which installs kwok's CRDs and metrics-server: never edit it by hand.
 - `packages/protocol/src/mock/schemas.json` is recorded by the `record_openapi` example from a cluster of `bench/cluster.sh up <name> 1.37`: never edit it by hand.
