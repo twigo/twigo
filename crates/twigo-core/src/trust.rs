@@ -36,7 +36,10 @@ impl Trusted {
     }
 }
 
+/// A key nothing reads would be trust nobody gave or took back as it
+/// meant, so an unknown one sets the file aside, as another version does.
 #[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct File {
     version: u32,
     digests: BTreeSet<String>,
@@ -130,25 +133,34 @@ mod tests {
 
     #[test]
     fn a_list_set_aside_is_a_problem_for_the_window() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("trust.json");
-        std::fs::write(&path, "{ not json").unwrap();
-        problems::clear(ErrorCode::TrustSetAside);
-        let log = twigo_log::capture();
-        let trust = Trust::open(path);
-        assert!(!trust.current().trusts("any"));
-        assert!(
-            problems::watch()
-                .borrow()
-                .iter()
-                .any(|problem| problem.code == ErrorCode::TrustSetAside)
-        );
-        let levels: Vec<_> = log
-            .lines()
-            .into_iter()
-            .map(|line| line["level"].clone())
-            .collect();
-        assert_eq!(levels, ["ERROR"]);
+        for text in [
+            "{ not json",
+            r#"{"version": 1, "digests": ["any"], "revoked": []}"#,
+            r#"{"version": 2, "digests": ["any"]}"#,
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("trust.json");
+            std::fs::write(&path, text).unwrap();
+            problems::clear(ErrorCode::TrustSetAside);
+            let log = twigo_log::capture();
+            let trust = Trust::open(path);
+            assert!(!trust.current().trusts("any"), "{text}");
+            assert!(!trust.current().reviewed, "{text}");
+            assert!(
+                problems::watch()
+                    .borrow()
+                    .iter()
+                    .any(|problem| problem.code == ErrorCode::TrustSetAside)
+            );
+            let levels: Vec<_> = log
+                .lines()
+                .into_iter()
+                .map(|line| line["level"].clone())
+                .collect();
+            assert_eq!(levels, ["ERROR"], "{text}");
+            let aside = dir.path().join("trust.json.unreadable");
+            assert_eq!(std::fs::read_to_string(aside).unwrap(), text);
+        }
     }
 
     #[test]

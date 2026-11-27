@@ -2487,7 +2487,8 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   - An exec plugin is a command chosen by whoever wrote the kubeconfig.
   - On the first start, Twigo lists every exec plugin the kubeconfigs name, with the contexts that use each, and the person trusts them once.
   - A new or changed entry (a different digest of command, args and env) asks when its space activates, before it runs.
-  - The digests live in `trust.json` beside the state store, which only Rust writes; an unreadable file trusts nothing, and is listed as the problem `trust.set-aside` (4.10).
+  - The digests live in `trust.json` beside the state store, which only Rust writes.
+    It reads closed: a file that cannot be read, has another version or a key nothing reads moves aside as `trust.json.unreadable` and trusts nothing, so each plugin asks again, and is listed as the problem `trust.set-aside` (4.10).
 - **The deprecated `auth-provider: oidc`.**
   - Twigo refreshes it as client-go does: the id-token until 10 s before its `exp`, then discovery and a `refresh_token` grant, with the IdP's CA and the login shell's proxy.
   - It writes the new id-token and refresh-token back to the user's file, as kubectl does, since the file is the token store every client shares and Dex rotates the refresh token on every refresh (the owner's choice, 2026-11-01).
