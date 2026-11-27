@@ -172,7 +172,9 @@ pub enum Refused {
     PolicyFile(String, String),
     #[error("{0} cannot be read, so Twigo keeps every context read-only")]
     PolicyFileUnreadable(String),
-    #[error("{0} cannot be read, so Twigo keeps every context read-only and changes none")]
+    #[error(
+        "{0} cannot be read, so Twigo keeps read-only every context the policy file sets no mode for, and changes none"
+    )]
     ProtectionUnreadable(String),
     #[error("Twigo could not save {0} ({1}), so it changed nothing")]
     Unsaved(String, io::ErrorKind),

@@ -36,13 +36,13 @@ A lost key cost the person their locks: a context they had made `read-only` over
 
 - A fixture pins the bytes the reader takes and the writer gives, which is what a released file depends on, with no second type to keep in step until a format has shipped.
 - A protective file read open loses protection silently: an unknown key skipped is a lock the writer meant that does not hold, and a value dropped is a context back at a looser default.
-  Read closed, the same mistake shows as every context `read-only`, which the person sees in the popover, the blocked toasts and the problems, and gets out of by restoring or removing the file.
+  Read closed, the same mistake shows as every context the policy file sets no mode for `read-only`, which the person sees in the popover, the blocked toasts and the problems, and gets out of by restoring or removing the file.
 - A file rewritten after it could not be read would replace what a newer build wrote with what an older one knows, so a downgrade and an upgrade back would lose the person's choices.
 - A choice held before it is written lasts for the run only, and the person believes a lock holds that the next start does not have.
 
 ## Consequences
 
-- A person whose `protection.json` cannot be read has every context `read-only` until they restore or remove the file and restart Twigo: no command starts it over yet.
+- A person whose `protection.json` cannot be read has every context the policy file sets no mode for `read-only` until they restore or remove the file and restart Twigo: no command starts it over yet.
 - A change of `Mode`, `Environment`, `ForwardTarget`, `ForwardId` or of a kept file's own structs fails a fixture test, and whoever makes it decides there whether the disk format changes.
 - A `trust.json` or a `state.json` whose move aside fails says so in the log, and the next write replaces it.
 - The modes and types that `state.json` kept under `policy/choices` before this change are not read: before users exist there is no import.

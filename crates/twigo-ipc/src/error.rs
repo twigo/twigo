@@ -191,8 +191,9 @@ error_codes! {
     PolicyFileSetsMode = "policy.file-sets-mode", Permissions;
     PolicyNotLocked = "policy.not-locked", InvalidInput;
     PolicyChanged = "policy.changed", Conflict;
-    /// The person's protection file cannot be read, so every context is
-    /// read-only and no change of protection is made.
+    /// The person's protection file cannot be read, so every context the
+    /// policy file sets no mode for is read-only and no change of
+    /// protection is made.
     ProtectionUnreadable = "protection.unreadable", Permissions;
     /// A change of protection could not be saved, so it was not made.
     ProtectionUnsaved = "protection.unsaved", Internal;

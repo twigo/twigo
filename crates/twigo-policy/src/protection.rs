@@ -5,9 +5,10 @@
 //! process's ask changes it.
 //!
 //! It reads closed, as the admin's policy file does, and is read once, as
-//! the app starts: a file that cannot be read keeps every context
-//! `read-only` and takes no change until the next start, so it is never
-//! written over and a newer build's file outlives a downgrade.
+//! the app starts: a file that cannot be read keeps `read-only` every
+//! context the admin's policy file sets no mode for, and takes no change
+//! until the next start, so it is never written over and a newer build's
+//! file outlives a downgrade.
 //!
 //! ```json
 //! {
@@ -74,10 +75,10 @@ impl Protection {
             Err(error) => Err(error.kind().to_string()),
         };
         if let Err(reason) = &read {
-            tracing::error!(path = %path.display(), %reason, "could not read the person's protection, so every context is read-only");
+            tracing::error!(path = %path.display(), %reason, "could not read the person's protection, so every context the policy file sets no mode for is read-only");
             problems::report(IpcError::new(
                 ErrorCode::ProtectionUnreadable,
-                "Twigo could not read protection.json, which holds the modes and types you set, so every context is read-only until you restore or remove that file and restart Twigo",
+                "Twigo could not read protection.json, which holds the modes and types you set, so every context an admin's policy file sets no mode for is read-only until you restore or remove that file and restart Twigo",
             ));
         }
         Self {
@@ -108,7 +109,8 @@ pub(crate) struct Kept {
 }
 
 impl Kept {
-    /// What every context is while the file cannot be read for `reason`.
+    /// What a context the admin's policy file sets no mode for is while
+    /// the file cannot be read for `reason`.
     pub(crate) fn unreadable(&self, reason: &str) -> (Mode, ModeSource) {
         (
             Mode::ReadOnly,

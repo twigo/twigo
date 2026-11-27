@@ -298,7 +298,7 @@ const PROBLEMS = [
 const PROTECTION_UNREADABLE = [
   wire(
     "protection.unreadable",
-    "Twigo could not read protection.json, which holds the modes and types you set, so every context is read-only until you restore or remove that file and restart Twigo",
+    "Twigo could not read protection.json, which holds the modes and types you set, so every context an admin's policy file sets no mode for is read-only until you restore or remove that file and restart Twigo",
   ),
 ];
 

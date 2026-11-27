@@ -205,7 +205,7 @@ export class MockAccess {
     if (this.protectionUnreadable !== undefined) {
       throw new IpcError(
         "protection.unreadable",
-        `${PROTECTION_FILE} cannot be read, so Twigo keeps every context read-only and changes none`,
+        `${PROTECTION_FILE} cannot be read, so Twigo keeps read-only every context the policy file sets no mode for, and changes none`,
       );
     }
   }

@@ -61,9 +61,10 @@ pub enum ModeSource {
         reason: Option<String>,
     },
     /// The person's own protection file, which holds their modes and types,
-    /// cannot be read, so every context is `read-only` until it is restored
-    /// or removed and Twigo starts again. `reason` says why as the policy
-    /// file's does, quoting nothing of it.
+    /// cannot be read, so every context the admin's policy file sets no mode
+    /// for is `read-only` until it is restored or removed and Twigo starts
+    /// again. `reason` says why as the policy file's does, quoting nothing
+    /// of it.
     ProtectionUnreadable { file: String, reason: String },
     /// The person's choice for this context, through a confirmed command.
     /// `overrides` is the lock it sets aside: what the kubeconfig, the
